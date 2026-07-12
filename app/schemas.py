@@ -91,11 +91,52 @@ class BarcodeScanResult(BaseModel):
     `barcode` and let the user fill in the rest. If `barcode` itself is
     None, neither decoder could find anything in the image -- the client
     should fall back to manual barcode entry.
+
+    IMPORTANT: real-world testing found decoders can return a WRONG
+    barcode value that still looks structurally valid. `checksum_valid`
+    being True is NOT proof of correctness (a garbled read can still pass
+    its own checksum) -- the client MUST always display `barcode` to the
+    user for visual confirmation against the physical package before
+    using it to match or create an item. Never auto-proceed silently.
     """
 
     barcode: Optional[str] = None
     decoder_used: Optional[str] = None
+    checksum_valid: Optional[bool] = None
     item: Optional[ItemOut] = None
+
+
+class UsdaMacros(BaseModel):
+    """
+    Best-effort normalized macros from a USDA FoodData Central entry.
+    Fields are omitted (not zero) when FDC didn't report them -- the
+    client should treat an absent field as "unknown," pre-filling that
+    part of the Add Item form blank rather than with a misleading 0.
+    """
+
+    kcal_100g: Optional[Decimal] = None
+    protein_100g: Optional[Decimal] = None
+    carbs_100g: Optional[Decimal] = None
+    fat_100g: Optional[Decimal] = None
+    fiber_100g: Optional[Decimal] = None
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
+
+
+class UsdaFoodSummaryOut(BaseModel):
+    fdc_id: int
+    description: str
+    data_type: str
+    brand_owner: Optional[str] = None
+    macros: UsdaMacros
+
+
+class UsdaFoodDetailOut(BaseModel):
+    fdc_id: int
+    description: str
+    data_type: str
+    macros: UsdaMacros
 
 
 RecipeType = Literal["recipe", "meal"]

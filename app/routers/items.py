@@ -57,13 +57,14 @@ async def scan_barcode(image: UploadFile = File(...), db: Session = Depends(get_
 
     result = decode_barcode_from_image_bytes(image_bytes)
     if result is None:
-        return BarcodeScanResult(barcode=None, decoder_used=None, item=None)
+        return BarcodeScanResult(barcode=None, decoder_used=None, checksum_valid=None, item=None)
 
     item = db.query(Item).filter(Item.barcode == result.barcode).first()
 
     return BarcodeScanResult(
         barcode=result.barcode,
         decoder_used=result.decoder_used,
+        checksum_valid=result.checksum_valid,
         item=item,
     )
 

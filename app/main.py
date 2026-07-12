@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import goals, items, logs, meal_plans, recipes, user_profile
+from app.routers import goals, items, logs, meal_plans, recipes, usda, user_profile
 
 app = FastAPI(
     title="Meal Tracker API",
@@ -14,6 +14,7 @@ app.include_router(logs.router)
 app.include_router(meal_plans.router)
 app.include_router(goals.router)
 app.include_router(user_profile.router)
+app.include_router(usda.router)
 
 
 @app.get("/health", tags=["meta"])

@@ -219,20 +219,96 @@ So trying both, in that order, covers more real-world photo conditions
   that barcode exists yet; client pre-fills the Add Item form with the
   decoded barcode
 - `barcode` and `item` both set → matched an existing item directly
+- `checksum_valid` → see the critical finding below before trusting this
 
 **Docker note**: `pyzbar` is a Python wrapper around the `libzbar` C
 library, which must be present at the OS level — the `Dockerfile`
 installs `libzbar0` via `apt-get` before the Poetry install step.
 
-**Tested against synthetic barcodes generated in this environment**
-(couldn't test against real product photos here — that needs actual
-phone photos of real packaging, lighting, and camera quality, which is
-the next thing to try against this endpoint once it's deployed). Verified
-end-to-end via real HTTP requests: scan with no matching item → `item:
-null`; create the item; scan the same image again → matched item
-returned correctly; scan the noisy image → correctly used the `zxing-cpp`
-fallback; scan a genuinely unreadable image → correctly returned all
-nulls; auth enforced on the new endpoint.
+### Critical finding from testing against 6 real product photos
+
+Synthetic-barcode testing (above) was a useful first pass, but testing
+against real photos of actual packaging (chocolate, popcorn, pasta,
+bread, a Lidl jar, a supplement bag) revealed something synthetic tests
+didn't: **2 of 6 photos decoded to a WRONG barcode value with no
+indication anything was off** — not a failure, a confidently wrong
+answer. (The other 4: 2 decoded correctly, 2 failed safely by returning
+null.)
+
+Worse: one of the two wrong values **passed its own EAN-13 checksum**.
+Verified this directly — computed the checksum for the misdecoded
+chocolate-bar barcode and confirmed it validates as structurally correct
+despite being the wrong code entirely. This means **`checksum_valid:
+true` is not proof of correctness** — a garbled read can still land on a
+valid-looking checksum. EAN-13/UPC-A checksum validation is implemented
+in `app/barcode.py` and does filter out *some* garbled reads (definite
+checksum failures are rejected outright, forcing fallback to the other
+decoder or ultimately `null`), but it is a cheap first filter, not a
+guarantee.
+
+**Consequence for the client (Android/web) that will call this
+endpoint**: it must always display the decoded `barcode` number
+prominently and let the user visually confirm it against the number
+printed on the physical package before proceeding to match or create an
+item. Never auto-proceed silently just because a barcode was decoded or
+even because `checksum_valid` is `true` — real-world testing showed
+that's not sufficient. This is now documented directly in
+`app/barcode.py` and `BarcodeScanResult`'s docstring so it isn't
+forgotten when the client is built.
+
+**Tested end-to-end**: both with synthetic images (rotation/blur/noise
+sweeps to justify the fallback ordering) and with 6 real photos of actual
+home products via real HTTP requests to the running endpoint — auth
+enforced, checksum validation confirmed to filter some-but-not-all bad
+reads, and the client-must-confirm requirement identified as a hard
+requirement rather than a suggestion.
+
+## USDA FoodData Central integration
+
+`GET /usda/search?query=...` and `GET /usda/food/{fdc_id}` proxy USDA's
+FoodData Central API for the raw-ingredient search/import flow (see
+design doc). Nothing here writes to our DB directly — results are for
+the client to display, and creating an actual item happens via the
+normal `POST /items` call with the user reviewing/editing the pre-filled
+macros first, same pattern as barcode scanning and OCR.
+
+**Setup**: get a free API key at https://fdc.nal.usda.gov/api-key-signup
+and set `USDA_API_KEY` in `.env`. The public `DEMO_KEY` works for initial
+testing but is heavily rate-limited (30/hour, 50/day) and appears to get
+blocked outright once its shared usage across everyone testing USDA's
+docs exceeds that.
+
+**A real bug caught during testing, not just synthetic edge cases**:
+FDC often lists multiple related nutrient entries for the same macro at
+once — e.g. `Fiber, soluble` / `Fiber, insoluble` / `Fiber, total
+dietary` all present together, or `Sugars, added` alongside `Sugars,
+total including NLEA`. An initial naive "does the name contain 'fiber'"
+substring match silently grabbed the wrong sub-type (soluble fiber
+instead of total, `0` added-sugar instead of the real total sugar value)
+— this would have quietly corrupted every imported item that had these
+sub-breakdowns present, which is common in Foundation Foods entries.
+Fixed with a priority-ordered matcher (`_MATCH_PRIORITIES` in
+`app/usda.py`) that always tries "total"-phrased patterns first, across
+*all* nutrient entries, before ever falling back to a looser match.
+Verified against realistic fixture data modeling both of FDC's two
+different nutrient JSON shapes (the search endpoint and detail endpoint
+use different field names — `nutrientName`/`value` vs
+`nutrient.name`/`amount` — both normalize to identical output).
+
+**Honesty about what's actually been tested here**: this environment's
+network egress doesn't include USDA's API domain, so genuine live
+end-to-end testing against FDC's real API could not happen in this
+sandbox — every attempt (via direct curl and via the running app's own
+`httpx` calls) hit the same local network block, not USDA's real
+servers. What IS verified: the nutrient-matching logic itself (including
+the sub-type bug above) against realistic sample payloads matching
+USDA's documented format exactly, and that the API layer (auth,
+error-handling on failure, response schema) behaves correctly — a failed
+upstream call returns a clean `502` with a clear message rather than
+crashing, regardless of why it failed. **The first real test against
+USDA's live API needs to happen on the Pi**, which has normal internet
+access — try `GET /usda/search?query=banana` once deployed there and let
+me know what comes back.
 
 ## Every core router is now built
 
