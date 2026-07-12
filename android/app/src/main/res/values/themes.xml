@@ -1,7 +1,7 @@
 <resources>
     <!-- Compose does almost all of our actual theming (see ui/theme/Theme.kt).
          This XML theme just needs to exist because the manifest references
-         it -- it controls things like the system splash background before
+         it: it controls things like the system splash background before
          Compose takes over. -->
     <style name="Theme.MealTracker" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

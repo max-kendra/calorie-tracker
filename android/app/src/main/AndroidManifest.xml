@@ -10,6 +10,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="Meal Tracker"
         android:theme="@style/Theme.MealTracker"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
 
         <activity

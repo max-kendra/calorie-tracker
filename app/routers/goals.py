@@ -25,10 +25,10 @@ router = APIRouter(
 )
 
 DEFAULT_SPLIT_PCT = {
-    "breakfast": Decimal("25"),
-    "lunch": Decimal("25"),
-    "dinner": Decimal("25"),
-    "snack": Decimal("25"),
+    "breakfast": Decimal("30"),
+    "lunch": Decimal("30"),
+    "dinner": Decimal("30"),
+    "snack": Decimal("10"),
 }
 
 

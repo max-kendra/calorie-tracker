@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android blocks plain HTTP (cleartext) traffic by default since
+     Android 9 (API 28+). Our backend runs over plain HTTP on the Pi:
+     Tailscale itself already encrypts everything at the network layer
+     (WireGuard), so this is scoped narrowly to just the Pi's address
+     rather than disabling the protection app-wide.
+
+     IMPORTANT: if your Pi's Tailscale IP ever changes, or you switch to
+     a MagicDNS hostname, update the domain entry below to match,
+     otherwise you'll hit this same cleartext-blocked error again. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.74.254.69</domain>
+    </domain-config>
+</network-security-config>

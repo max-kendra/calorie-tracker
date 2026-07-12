@@ -1,5 +1,6 @@
 package com.mealtracker.android.ui.navigation
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
@@ -21,6 +22,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.JournalScreen
+import com.mealtracker.android.ui.screens.MacronutrientsScreen
+import com.mealtracker.android.ui.screens.MealCalorieGoalScreen
 import com.mealtracker.android.ui.screens.MealPlanScreen
 import com.mealtracker.android.ui.screens.ProfileScreen
 
@@ -84,7 +87,18 @@ fun AppNavHost() {
             composable(Destination.Home.route) { HomeScreen() }
             composable(Destination.Journal.route) { JournalScreen() }
             composable(Destination.MealPlan.route) { MealPlanScreen() }
-            composable(Destination.Profile.route) { ProfileScreen() }
+            composable(Destination.Profile.route) {
+                ProfileScreen(
+                    onNavigateToMacronutrients = { navController.navigate("macronutrients") },
+                    onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") }
+                )
+            }
+            composable("macronutrients") { MacronutrientsScreen() }
+            composable("meal_calorie_goal") {
+                MealCalorieGoalScreen(
+                    onNavigateToSetGoal = { navController.navigate("macronutrients") }
+                )
+            }
         }
     }
 }
