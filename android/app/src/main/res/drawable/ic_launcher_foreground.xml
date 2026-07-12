@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple placeholder (a plate-like circle) so the app has SOME icon
+     out of the box. Replace this properly via Android Studio's
+     Image Asset Studio (right-click res/ -> New -> Image Asset) whenever
+     you want a real app icon -- this is just enough to make the project
+     build without needing binary image files. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 A34,34 0 1,1 53.9,20 Z" />
+    <path
+        android:fillColor="#6650A4"
+        android:pathData="M54,32 A22,22 0 1,1 53.9,32 Z" />
+</vector>

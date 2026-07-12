@@ -1,0 +1,21 @@
+# Contains your real API key and BASE_URL -- see local.properties.example
+local.properties
+
+# Build outputs
+/build/
+/app/build/
+*.apk
+*.aab
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.gradle/
+captures/
+.cxx/
+local.properties
+
+# Gradle wrapper jar is normally committed in most Android projects, but
+# since Android Studio needs to regenerate the wrapper on first open
+# here anyway (see README), no wrapper-specific excludes needed beyond
+# the standard ones above.

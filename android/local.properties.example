@@ -1,0 +1,12 @@
+# Copy this file to local.properties (in the SAME directory as this file,
+# i.e. android/local.properties) and fill in your real values.
+# local.properties is gitignored -- android/build.gradle.kts reads these
+# two values from it at build time, so your real API key never gets
+# committed to git.
+
+MEAL_TRACKER_BASE_URL=http://100.74.254.69:8000/
+MEAL_TRACKER_API_KEY=your-real-api-key-here
+
+# Note: local.properties also holds sdk.dir (Android Studio adds this
+# automatically, pointing at your local Android SDK install) -- that's
+# fine to have in the same file alongside these two values.

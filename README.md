@@ -370,6 +370,76 @@ themselves, since we don't have serving-size-aware recalculation yet.
 is installed via `apt-get` in the `Dockerfile`, since `pytesseract` is
 just a Python wrapper around the binary.
 
+## Physiological guidelines seeded
+
+`alembic/versions/824c17bcbba4_seed_physiological_guidelines.py` seeds 7
+population-level reference ranges into `physiological_guidelines`, one
+per tracked macro that has an established public-health guideline (kcal
+itself is excluded — that's individually calculated via TDEE, not a
+fixed reference range). Sourced from current guidance, checked via
+search rather than recalled from training data alone:
+
+- **Protein**: 0.8 g/kg/day (US RDA minimum) to 2.2 g/kg/day (upper end
+  for very active individuals), 1.4 g/kg/day as a midpoint recommended
+  value — reflecting the 2025-2030 Dietary Guidelines for Americans'
+  1.2-1.6 g/kg/day range for general adults
+- **Fat**: 20-35% of daily calories (AMDR, US/Canadian DRIs)
+- **Saturated fat**: under 10% of daily calories (2025-2030 DGA, WHO)
+- **Carbohydrate**: 45-65% of daily calories (AMDR)
+- **Fiber**: 14g per 1000 kcal (Institute of Medicine adequate-intake
+  benchmark)
+- **Added sugar**: under 10% of daily calories (2025-2030 DGA), with 5%
+  as a stricter "recommended" target per WHO's conditional guidance
+- **Sodium**: 2300mg/day upper limit (US DGA), 2000mg/day as the
+  stricter "recommended" target (WHO)
+
+Full basis/sourcing text is stored per-row in the `basis` column for
+traceability. A unique constraint on `name` was added in the same
+migration (verified it actually rejects a duplicate insert) so this
+table can only ever have one row per guideline.
+
+**Tested against the real Postgres instance**: migration applies
+cleanly, seeds exactly 7 rows with correct values (including NULLs
+landing correctly where a guideline has no floor or no
+recommended-value midpoint), the unique constraint genuinely rejects a
+duplicate `name`, and the downgrade path cleanly removes everything and
+drops the constraint.
+
+**Not yet built**: the actual warning system that compares an active
+goal against these ranges (see design doc — compares the goal, not the
+daily log, to avoid false warnings on days someone simply ate less than
+their target). The reference data is ready; the comparison/warning
+logic is a future feature.
+
+## Carbs guideline corrected for fiber double-counting
+
+Follow-up migration `7dec710dc7d5` fixes a real modeling inconsistency
+caught by inspecting the actual Macronutrients screen: the standard AMDR
+carbohydrate range (45-65% of calories) refers to **total** carbohydrate,
+and fiber is nutritionally a *subset* of carbohydrate, not a separate
+macro. But this app's goal-setting model treats Carbs and Fiber as
+**independent slices that both count toward the same 100%** (see the
+Fat/Protein/Carbs/Fiber split in the Macronutrients screen — they sum to
+100% as four separate slices). That means this app's "Carbs" value
+actually represents carbohydrate *excluding* fiber, and using the raw
+AMDR figure as-is would effectively double-count fiber's calories once
+under Carbs and again under Fiber.
+
+Fixed by subtracting fiber's typical caloric share (~2.8% of calories,
+derived from the `fiber_per_1000kcal` guideline at 2 kcal/g — the
+standard nutrition-labeling convention for fiber, and consistent with
+the ~3% fiber shows in the app's own UI) from each AMDR bound:
+`carbs_pct_of_kcal` is now **42/52/62** (min/recommended/max), down from
+the raw AMDR's 45/55/65. This is a deliberate modeling adjustment to
+match how the app actually splits these two macros, not a correction of
+the underlying AMDR source figures (those remain accurate for *total*
+carbohydrate).
+
+**Tested against the real Postgres instance**: migration applies
+cleanly, values update correctly (verified: 42/52/62), downgrade cleanly
+reverts to the original 45/55/65, all other 6 guideline rows confirmed
+untouched.
+
 ## Every core router is now built
 
 items, recipes, logs, meal_plans, goals, and user_profile are all
