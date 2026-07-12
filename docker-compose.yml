@@ -1,29 +1,19 @@
 services:
-  postgres:
-    image: postgres:16
+  api:
+    build: .
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: mealtracker
-      POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: mealtracker
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    # Listens on all interfaces inside the container by default. For
-    # pgAdmin access over Tailscale, the Pi's Tailscale IP just needs to
-    # reach this exposed port — no extra config needed here since Docker
-    # already binds 0.0.0.0:5432 on the host via the ports mapping above.
+    # Host networking -- simplest option for a single-Pi setup where
+    # Postgres is already installed natively (not containerized) and
+    # listening on localhost:5432. This lets the container reach it via
+    # `localhost` exactly like `poetry run uvicorn` did, no bridge
+    # networking or port-mapping juggling needed.
+    network_mode: host
+    env_file: .env
+    # No `ports:` needed under host networking -- the container shares
+    # the Pi's network stack directly, so port 8000 is already exposed
+    # on the Pi itself once the container is running.
 
-  # api:
-  #   build: .
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - postgres
-  #   env_file: .env
-  #   ports:
-  #     - "8000:8000"
-  #   # Uncomment once the FastAPI app itself is scaffolded (next step).
-
-volumes:
-  pgdata:
+# Note: if you ever containerize Postgres too, you'd switch back to
+# bridge networking with an explicit `ports: ["8000:8000"]` mapping and
+# a `depends_on: [postgres]`, and change DATABASE_URL in .env from
+# `localhost` to the Postgres service's container name.
