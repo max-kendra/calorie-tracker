@@ -9,7 +9,7 @@ from app.auth import require_api_key
 from app.database import get_db
 from app.models import Item, Log, Recipe, ServingSize
 from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals_for_quantity, RawTotals
-from app.schemas import DailySummary, LogCreate, LogOut, MealType, NutritionTotals
+from app.schemas import DailySummary, ExtendedNutritionTotals, LogCreate, LogOut, MealType, NutritionTotals
 
 router = APIRouter(
     prefix="/logs",
@@ -108,6 +108,9 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         carbs_g_logged=totals.carbs_g,
         fat_g_logged=totals.fat_g,
         fiber_g_logged=totals.fiber_g,
+        sugar_g_logged=totals.sugar_g,
+        saturated_fat_g_logged=totals.saturated_fat_g,
+        sodium_mg_logged=totals.sodium_mg,
     )
     db.add(log)
     db.commit()
@@ -187,23 +190,39 @@ def daily_summary(
     by_date: dict[date_type, dict[str, Decimal]] = {}
     for l in logs:
         d = by_date.setdefault(
-            l.date, {"kcal": zero, "protein_g": zero, "carbs_g": zero, "fat_g": zero, "fiber_g": zero}
+            l.date,
+            {
+                "kcal": zero,
+                "protein_g": zero,
+                "carbs_g": zero,
+                "fat_g": zero,
+                "fiber_g": zero,
+                "sugar_g": zero,
+                "saturated_fat_g": zero,
+                "sodium_mg": zero,
+            },
         )
         d["kcal"] += l.kcal_logged
         d["protein_g"] += l.protein_g_logged
         d["carbs_g"] += l.carbs_g_logged
         d["fat_g"] += l.fat_g_logged
         d["fiber_g"] += l.fiber_g_logged
+        d["sugar_g"] += l.sugar_g_logged
+        d["saturated_fat_g"] += l.saturated_fat_g_logged
+        d["sodium_mg"] += l.sodium_mg_logged
 
     return [
         DailySummary(
             date=d,
-            totals=NutritionTotals(
+            totals=ExtendedNutritionTotals(
                 kcal=ceil_int(totals["kcal"]),
                 protein_g=ceil_int(totals["protein_g"]),
                 carbs_g=ceil_int(totals["carbs_g"]),
                 fat_g=ceil_int(totals["fat_g"]),
                 fiber_g=ceil_int(totals["fiber_g"]),
+                sugar_g=ceil_int(totals["sugar_g"]),
+                saturated_fat_g=ceil_int(totals["saturated_fat_g"]),
+                sodium_mg=ceil_int(totals["sodium_mg"]),
             ),
         )
         for d, totals in sorted(by_date.items())

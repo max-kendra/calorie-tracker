@@ -2,7 +2,7 @@
 name = "meal-tracker"
 version = "0.1.0"
 description = "Self-hosted meal tracker, recipe manager, and meal planner"
-authors = ["Max"]
+authors = ["you"]
 package-mode = false
 
 [tool.poetry.dependencies]

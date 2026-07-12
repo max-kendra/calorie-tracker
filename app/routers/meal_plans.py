@@ -157,6 +157,9 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
             carbs_g_logged=totals.carbs_g,
             fat_g_logged=totals.fat_g,
             fiber_g_logged=totals.fiber_g,
+            sugar_g_logged=totals.sugar_g,
+            saturated_fat_g_logged=totals.saturated_fat_g,
+            sodium_mg_logged=totals.sodium_mg,
         )
         db.add(log)
         db.flush()

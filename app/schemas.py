@@ -35,6 +35,11 @@ class ItemBase(BaseModel):
     carbs_100g: Optional[Decimal] = None
     fat_100g: Optional[Decimal] = None
     fiber_100g: Optional[Decimal] = None
+    # Tracked for daily/weekly summaries only -- not surfaced in the
+    # compact per-item/recipe/log nutrition displays.
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
 
     type: ItemType = "product"
     origin: ItemOrigin = "manual"
@@ -62,6 +67,9 @@ class ItemUpdate(BaseModel):
     carbs_100g: Optional[Decimal] = None
     fat_100g: Optional[Decimal] = None
     fiber_100g: Optional[Decimal] = None
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
 
     type: Optional[ItemType] = None
 
@@ -97,6 +105,10 @@ class NutritionTotals(BaseModel):
     app/nutrition.py for the rounding policy — internal math stays in
     precise Decimal via RawTotals, only converted to this shape right
     before a response is built).
+
+    Deliberately compact — used on items/recipes/logs/meal_plans. Does
+    NOT include sugar/saturated_fat, to keep those displays uncluttered;
+    see ExtendedNutritionTotals for where those surface instead.
     """
 
     kcal: int
@@ -104,6 +116,20 @@ class NutritionTotals(BaseModel):
     carbs_g: int
     fat_g: int
     fiber_g: int
+
+
+class ExtendedNutritionTotals(NutritionTotals):
+    """
+    Same as NutritionTotals plus sugar_g/saturated_fat_g. Used ONLY by the
+    daily/weekly summary endpoint — deliberately kept out of the compact
+    per-item/recipe/log displays so the main tracker UI doesn't get
+    crowded with numbers most people don't need to see every time they
+    log something, while still being trackable in aggregate.
+    """
+
+    sugar_g: int
+    saturated_fat_g: int
+    sodium_mg: int
 
 
 class RecipeBase(BaseModel):
@@ -189,7 +215,7 @@ class LogOut(LoggableEntryBase):
 
 class DailySummary(BaseModel):
     date: date
-    totals: NutritionTotals
+    totals: ExtendedNutritionTotals
 
 
 class MealPlanCreate(LoggableEntryBase):
