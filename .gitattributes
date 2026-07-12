@@ -1,0 +1,24 @@
+# Normalize line endings to LF for all text files, regardless of OS.
+# This project runs on Linux (the Pi) but is developed partly on Windows,
+# so without this, Windows git clients can silently convert LF -> CRLF on
+# checkout, causing every line of a file to show as "changed" in diffs
+# even when the actual content is identical.
+
+* text=auto eol=lf
+
+# Be explicit for the file types that matter most here.
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.cfg text eol=lf
+.env.example text eol=lf
+.gitignore text eol=lf
+
+# Binary files should never be touched by line-ending conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
