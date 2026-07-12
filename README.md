@@ -310,6 +310,66 @@ USDA's live API needs to happen on the Pi**, which has normal internet
 access — try `GET /usda/search?query=banana` once deployed there and let
 me know what comes back.
 
+## OCR nutrition label scanning
+
+`POST /items/scan-label` accepts an uploaded photo of a nutrition label,
+runs it through Tesseract across all 9 supported languages combined
+(Danish, German, English, Swedish, Finnish, Norwegian, Spanish, Slovak,
+Czech), picks the best-matching language by counting keyword hits per
+language's dictionary against the recognized text, then parses per-100g
+macros using that language's keyword patterns. Like barcode scanning and
+USDA import, this **never writes to our DB** — the result is a draft for
+the client to pre-fill the Add Item review form, corrected by the user
+before anything is saved.
+
+**Tested against real Tesseract OCR** (not just designed on paper) —
+generated realistic synthetic label images in Danish, German, and
+English and ran them through the actual installed `tesseract` binary.
+Two genuine bugs were found and fixed this way, not by code review:
+
+1. **German ß misread as B**: Tesseract's `deu` model read "Eiweiß"
+   (protein) as "EiweiB", silently causing zero fields to match for
+   protein specifically. Fixed by making the German protein keyword
+   pattern tolerant of `eiweiß`/`eiweiss`/`eiweib`/`eiweis`.
+2. **Blurred "g" misread as "9", corrupting numbers**: on a rotated +
+   blurred test image, Tesseract read "12,5 g" fine (space preserved
+   the number) but merged "25,0 g" into "25,09" and "10,3 g" into
+   "10,39" — the unit letter got misread as a digit and glued onto the
+   value with no separating space, silently inflating every affected
+   number. Fixed by restricting the number-extraction regex to at most
+   one decimal digit, matching the fact that EU nutrition labels always
+   report to 1 decimal place — the corrupted extra digit is now
+   correctly left uncaptured. Verified this fix resolves the degraded
+   case with zero regression on the clean cases.
+
+**Salt→sodium conversion** (see `app/nutrition.py`) is applied
+automatically during parsing for EU-language labels that report salt in
+grams rather than sodium directly — verified end-to-end via real HTTP
+requests to the running endpoint (1.2g salt correctly became 480mg
+sodium in the returned draft).
+
+**Honesty about language coverage**: Danish, German, and English keyword
+dictionaries are verified against real OCR output as described above.
+Swedish, Finnish, Norwegian, Spanish, Slovak, and Czech dictionaries use
+standard EU nutrition-label vocabulary (consistent under EU FIC labeling
+regulation) but have **not** been run through real OCR here — treat them
+as a reasonable starting point, not verified, until tested against real
+labels in those languages. If you pick up products in any of those
+languages, send photos and we can validate/fix the same way we did for
+the first three.
+
+**Known limitation, not yet solved**: `per_100g_confirmed` only checks
+whether a "per 100g" marker phrase was found in the recognized text — if
+a label reports values per-serving instead (and doesn't clearly say so
+in a way our marker check catches), we do NOT attempt to convert to
+per-100g. The client should surface `per_100g_confirmed: false` as a
+visible warning prompting the user to double-check serving size
+themselves, since we don't have serving-size-aware recalculation yet.
+
+**Docker note**: Tesseract itself (`tesseract-ocr` + 8 language packs)
+is installed via `apt-get` in the `Dockerfile`, since `pytesseract` is
+just a Python wrapper around the binary.
+
 ## Every core router is now built
 
 items, recipes, logs, meal_plans, goals, and user_profile are all

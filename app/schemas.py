@@ -139,6 +139,45 @@ class UsdaFoodDetailOut(BaseModel):
     macros: UsdaMacros
 
 
+class OcrMacros(BaseModel):
+    """Same shape as UsdaMacros -- fields absent (not zero) when OCR
+    didn't confidently extract them. Client pre-fills the Add Item form
+    with whatever was found and leaves the rest blank for manual entry."""
+
+    kcal_100g: Optional[Decimal] = None
+    protein_100g: Optional[Decimal] = None
+    carbs_100g: Optional[Decimal] = None
+    fat_100g: Optional[Decimal] = None
+    fiber_100g: Optional[Decimal] = None
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
+
+
+class OcrScanResult(BaseModel):
+    """
+    Result of OCR-scanning a nutrition label photo. NEVER written to our
+    DB directly -- same review-before-save pattern as barcode scanning
+    and USDA import. The client pre-fills the Add Item form with `macros`
+    and lets the user correct anything before it's actually saved via the
+    normal POST /items call.
+
+    `per_100g_confirmed` being False means we couldn't confirm the label
+    values are per-100g (vs. per-serving) -- the user should double check
+    this specifically, since we don't currently attempt per-serving-to-
+    per-100g conversion.
+
+    `detected_language` being null means we couldn't confidently identify
+    which language's label format this is -- macros will be empty and
+    the user needs to enter everything manually.
+    """
+
+    raw_text: str
+    detected_language: Optional[str] = None
+    per_100g_confirmed: bool = False
+    macros: OcrMacros
+
+
 RecipeType = Literal["recipe", "meal"]
 
 

@@ -8,7 +8,8 @@ from app.auth import require_api_key
 from app.barcode import decode_barcode_from_image_bytes
 from app.database import get_db
 from app.models import Item, ServingSize
-from app.schemas import BarcodeScanResult, ItemCreate, ItemOut, ItemUpdate, ItemType
+from app.ocr import extract_label_from_image
+from app.schemas import BarcodeScanResult, ItemCreate, ItemOut, ItemUpdate, ItemType, OcrMacros, OcrScanResult
 
 router = APIRouter(
     prefix="/items",
@@ -66,6 +67,29 @@ async def scan_barcode(image: UploadFile = File(...), db: Session = Depends(get_
         decoder_used=result.decoder_used,
         checksum_valid=result.checksum_valid,
         item=item,
+    )
+
+
+@router.post("/scan-label", response_model=OcrScanResult)
+async def scan_label(image: UploadFile = File(...)):
+    """
+    Upload a photo of a nutrition label -- OCR extracts serving size +
+    macros, best-effort, in whichever of our 9 supported languages it
+    detects. NEVER writes to our DB -- returns a draft for the client to
+    pre-fill the Add Item form, which the user reviews/corrects before
+    actually saving via POST /items. See app/ocr.py for what's been
+    tested and what hasn't (Danish/German/English verified against real
+    Tesseract OCR; other languages use standard EU label vocabulary but
+    aren't yet verified against real OCR output).
+    """
+    image_bytes = await image.read()
+    result = extract_label_from_image(image_bytes)
+
+    return OcrScanResult(
+        raw_text=result.raw_text,
+        detected_language=result.detected_language,
+        per_100g_confirmed=result.per_100g_confirmed,
+        macros=OcrMacros(**result.macros),
     )
 
 

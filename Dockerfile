@@ -4,7 +4,31 @@ WORKDIR /app
 
 # pyzbar is a Python wrapper around libzbar -- the actual barcode-decoding
 # C library needs to be present at the OS level, not just pip-installed.
-RUN apt-get update && apt-get install -y --no-install-recommends libzbar0 \
+# tesseract-ocr + language packs: same story for OCR (pytesseract wraps
+# the tesseract binary, doesn't include it). Language packs cover the
+# 9 languages we support (see app/ocr.py) -- eng is included by default
+# with tesseract-ocr itself.
+# build-essential + cmake: zxing-cpp has no prebuilt wheel for ARM64
+# (the Pi's architecture), so pip has to compile it from source, which
+# needs a C/C++ compiler and cmake. Not needed on x86_64 where a
+# prebuilt wheel exists, but harmless to always include for consistency
+# across architectures. This does make the image noticeably larger and
+# the build slower -- acceptable tradeoff for now, revisit with a
+# multi-stage build (build tools in a builder stage, not the final
+# image) if image size becomes a real problem.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libzbar0 \
+    tesseract-ocr \
+    tesseract-ocr-dan \
+    tesseract-ocr-deu \
+    tesseract-ocr-swe \
+    tesseract-ocr-fin \
+    tesseract-ocr-nor \
+    tesseract-ocr-spa \
+    tesseract-ocr-slk \
+    tesseract-ocr-ces \
+    build-essential \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
