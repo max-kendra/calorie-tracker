@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "meal-tracker"
+version = "0.1.0"
+description = "Self-hosted meal tracker, recipe manager, and meal planner"
+authors = ["Max"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = { extras = ["standard"], version = "^0.32.0" }
+sqlalchemy = "^2.0.35"
+alembic = "^1.13.3"
+psycopg2-binary = "^2.9.9"
+pydantic = "^2.9.2"
+pydantic-settings = "^2.5.2"
+python-dotenv = "^1.0.1"
+
+# Uncomment these as we build the relevant features:
+# pyzbar = "^0.1.9"           # server-side barcode decoding
+# pytesseract = "^0.3.13"     # OCR for nutrition labels
+# langdetect = "^1.0.9"       # OCR language detection
+# httpx = "^0.27.2"           # USDA FoodData Central API calls
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+httpx = "^0.27.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

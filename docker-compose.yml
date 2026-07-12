@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mealtracker
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: mealtracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Listens on all interfaces inside the container by default. For
+    # pgAdmin access over Tailscale, the Pi's Tailscale IP just needs to
+    # reach this exposed port — no extra config needed here since Docker
+    # already binds 0.0.0.0:5432 on the host via the ports mapping above.
+
+  # api:
+  #   build: .
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - postgres
+  #   env_file: .env
+  #   ports:
+  #     - "8000:8000"
+  #   # Uncomment once the FastAPI app itself is scaffolded (next step).
+
+volumes:
+  pgdata:

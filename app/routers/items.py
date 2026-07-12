@@ -1,0 +1,182 @@
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.auth import require_api_key
+from app.database import get_db
+from app.models import Item, ServingSize
+from app.schemas import ItemCreate, ItemOut, ItemUpdate, ItemType
+
+router = APIRouter(
+    prefix="/items",
+    tags=["items"],
+    dependencies=[Depends(require_api_key)],
+)
+
+
+@router.post("", response_model=ItemOut, status_code=status.HTTP_201_CREATED)
+def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
+    if payload.barcode:
+        existing = db.query(Item).filter(Item.barcode == payload.barcode).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An item with barcode {payload.barcode} already exists (item_id={existing.item_id})",
+            )
+
+    item = Item(**payload.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/{item_id}", response_model=ItemOut)
+def get_item(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.item_id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return item
+
+
+@router.get("/barcode/{barcode}", response_model=ItemOut)
+def get_item_by_barcode(barcode: str, db: Session = Depends(get_db)):
+    """Used by the barcode-scan add flow — look up an existing item before
+    falling through to 'not found, create a new one'."""
+    item = db.query(Item).filter(Item.barcode == barcode).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No item with that barcode")
+    return item
+
+
+@router.get("", response_model=list[ItemOut])
+def list_items(
+    q: Optional[str] = Query(None, description="Search by name or brand"),
+    type: Optional[ItemType] = Query(None, description="Filter by 'product' or 'ingredient'"),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0),
+    db: Session = Depends(get_db),
+):
+    """Backs the My Foods search/list — filterable by type, matches the
+    Product/Ingredient tabs in the design doc."""
+    query = db.query(Item)
+
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(Item.name.ilike(like), Item.brand.ilike(like)))
+
+    if type:
+        query = query.filter(Item.type == type)
+
+    return query.order_by(Item.updated_at.desc()).offset(offset).limit(limit).all()
+
+
+@router.patch("/{item_id}", response_model=ItemOut)
+def update_item(item_id: int, payload: ItemUpdate, db: Session = Depends(get_db)):
+    """
+    Partial update — e.g. correcting kcal_100g after a typo. Any recipe
+    referencing this item picks up the change automatically next time its
+    totals are computed (recipe_ingredients stores item_id + quantity, never
+    a copy of the macros). Past `logs` are unaffected — they snapshot
+    macros at log time and stay frozen (see design doc).
+    """
+    item = db.query(Item).filter(Item.item_id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "barcode" in updates and updates["barcode"]:
+        existing = (
+            db.query(Item)
+            .filter(Item.barcode == updates["barcode"], Item.item_id != item_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Barcode already used by item_id={existing.item_id}",
+            )
+
+    for field, value in updates.items():
+        setattr(item, field, value)
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_item(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.item_id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+    # Note: FK constraints (no ON DELETE CASCADE configured on
+    # recipe_ingredients/logs/meal_plans -> items) will reject this if the
+    # item is still referenced anywhere — that's deliberate for now, so we
+    # don't silently orphan historical logs. Revisit if this becomes
+    # annoying in practice.
+    db.delete(item)
+    db.commit()
+    return None
+
+
+@router.post("/{item_id}/serving-sizes", response_model=ItemOut, status_code=status.HTTP_201_CREATED)
+def add_serving_size(item_id: int, name: str, weight_g: float, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.item_id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+    serving = ServingSize(item_id=item_id, name=name, weight_g=weight_g)
+    db.add(serving)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.patch("/{item_id}/serving-sizes/{serving_id}", response_model=ItemOut)
+def update_serving_size(
+    item_id: int,
+    serving_id: int,
+    name: Optional[str] = None,
+    weight_g: Optional[float] = None,
+    db: Session = Depends(get_db),
+):
+    """E.g. correcting a serving size after realizing it was measured wrong,
+    or refining an OCR-derived 'label serving'."""
+    serving = (
+        db.query(ServingSize)
+        .filter(ServingSize.id == serving_id, ServingSize.item_id == item_id)
+        .first()
+    )
+    if not serving:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Serving size not found")
+
+    if name is not None:
+        serving.name = name
+    if weight_g is not None:
+        serving.weight_g = weight_g
+
+    db.commit()
+    item = db.query(Item).filter(Item.item_id == item_id).first()
+    return item
+
+
+@router.delete("/{item_id}/serving-sizes/{serving_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_serving_size(item_id: int, serving_id: int, db: Session = Depends(get_db)):
+    serving = (
+        db.query(ServingSize)
+        .filter(ServingSize.id == serving_id, ServingSize.item_id == item_id)
+        .first()
+    )
+    if not serving:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Serving size not found")
+
+    # Note: logs/meal_plans referencing this serving_size_id will block the
+    # delete via FK constraint — same deliberate protection as item deletes.
+    db.delete(serving)
+    db.commit()
+    return None
