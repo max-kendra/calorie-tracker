@@ -1,13 +1,14 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
+from app.barcode import decode_barcode_from_image_bytes
 from app.database import get_db
 from app.models import Item, ServingSize
-from app.schemas import ItemCreate, ItemOut, ItemUpdate, ItemType
+from app.schemas import BarcodeScanResult, ItemCreate, ItemOut, ItemUpdate, ItemType
 
 router = APIRouter(
     prefix="/items",
@@ -39,6 +40,32 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     return item
+
+
+@router.post("/scan-barcode", response_model=BarcodeScanResult)
+async def scan_barcode(image: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    Upload a photo of a barcode -- tries pyzbar first, falls back to
+    zxing-cpp if that finds nothing (see app/barcode.py for why both).
+    If the decoded barcode matches an existing item, that item is
+    returned. If the barcode decodes but doesn't match anything, `item`
+    is null and the client should pre-fill the Add Item form with the
+    decoded barcode. If nothing could be decoded at all, both `barcode`
+    and `item` are null -- client should offer manual barcode entry.
+    """
+    image_bytes = await image.read()
+
+    result = decode_barcode_from_image_bytes(image_bytes)
+    if result is None:
+        return BarcodeScanResult(barcode=None, decoder_used=None, item=None)
+
+    item = db.query(Item).filter(Item.barcode == result.barcode).first()
+
+    return BarcodeScanResult(
+        barcode=result.barcode,
+        decoder_used=result.decoder_used,
+        item=item,
+    )
 
 
 @router.get("/barcode/{barcode}", response_model=ItemOut)

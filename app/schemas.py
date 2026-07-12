@@ -83,6 +83,21 @@ class ItemOut(ItemBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class BarcodeScanResult(BaseModel):
+    """
+    Result of scanning an uploaded image for a barcode. If `item` is None,
+    the barcode was decoded successfully but no matching item exists yet
+    in our DB -- the client should pre-fill the Add Item form with
+    `barcode` and let the user fill in the rest. If `barcode` itself is
+    None, neither decoder could find anything in the image -- the client
+    should fall back to manual barcode entry.
+    """
+
+    barcode: Optional[str] = None
+    decoder_used: Optional[str] = None
+    item: Optional[ItemOut] = None
+
+
 RecipeType = Literal["recipe", "meal"]
 
 

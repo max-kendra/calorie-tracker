@@ -195,6 +195,45 @@ ItemCreate/ItemUpdate payload — the DB only ever stores sodium, never a
 raw salt number.** This is the one field where the label's unit and our
 stored unit genuinely differ; every other macro maps straight across.
 
+## Barcode scanning
+
+`POST /items/scan-barcode` accepts an uploaded image and decodes a
+barcode from it, then checks whether a matching item already exists.
+
+**Decoder fallback chain — empirically justified, not arbitrary:**
+tries `pyzbar` first, falls back to `zxing-cpp` if that finds nothing.
+Testing with synthetic barcodes (rotated, blurred, low-contrast+noisy)
+showed neither library is strictly better:
+- `pyzbar` correctly decoded rotations up to ~40°, where `zxing-cpp`
+  started failing past ~25-30°
+- `zxing-cpp` correctly decoded a low-contrast/noisy image that `pyzbar`
+  completely missed
+
+So trying both, in that order, covers more real-world photo conditions
+(bad lighting vs. an off-angle shot) than either alone would.
+
+**Response shape** (`BarcodeScanResult`):
+- `barcode`/`decoder_used` both `null` → neither decoder found anything;
+  client should fall back to manual barcode entry
+- `barcode` set, `item` `null` → decoded successfully, but no item with
+  that barcode exists yet; client pre-fills the Add Item form with the
+  decoded barcode
+- `barcode` and `item` both set → matched an existing item directly
+
+**Docker note**: `pyzbar` is a Python wrapper around the `libzbar` C
+library, which must be present at the OS level — the `Dockerfile`
+installs `libzbar0` via `apt-get` before the Poetry install step.
+
+**Tested against synthetic barcodes generated in this environment**
+(couldn't test against real product photos here — that needs actual
+phone photos of real packaging, lighting, and camera quality, which is
+the next thing to try against this endpoint once it's deployed). Verified
+end-to-end via real HTTP requests: scan with no matching item → `item:
+null`; create the item; scan the same image again → matched item
+returned correctly; scan the noisy image → correctly used the `zxing-cpp`
+fallback; scan a genuinely unreadable image → correctly returned all
+nulls; auth enforced on the new endpoint.
+
 ## Every core router is now built
 
 items, recipes, logs, meal_plans, goals, and user_profile are all

@@ -2,6 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# pyzbar is a Python wrapper around libzbar -- the actual barcode-decoding
+# C library needs to be present at the OS level, not just pip-installed.
+RUN apt-get update && apt-get install -y --no-install-recommends libzbar0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Poetry
 RUN pip install --no-cache-dir poetry==1.8.3
 
