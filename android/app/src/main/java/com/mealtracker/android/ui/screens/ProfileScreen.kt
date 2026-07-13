@@ -44,8 +44,7 @@ private val GOAL_TYPES = listOf(
 
 private val HORMONES = listOf(
     "testosterone" to "Testosterone",
-    "estrogen" to "Estrogen",
-    "other" to "Other"
+    "estrogen" to "Estrogen"
 )
 
 @Composable

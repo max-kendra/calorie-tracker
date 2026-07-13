@@ -14,7 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 
 enum class AddItemPhase {
-    SCAN_CHOICE, SCANNING, BARCODE_RESULT, ITEM_FORM, SAVING, SAVED
+    SCAN_CHOICE, SCANNING_LIVE_BARCODE, SCANNING, BARCODE_RESULT, ITEM_FORM, SAVING, SAVED
 }
 
 /**
@@ -64,6 +64,56 @@ class AddItemViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(AddItemUiState())
     val uiState: StateFlow<AddItemUiState> = _uiState
 
+    fun startLiveBarcodeScan() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING_LIVE_BARCODE, scanError = null)
+    }
+
+    /**
+     * Called when the on-device live scanner (see LiveBarcodeScannerView --
+     * requires several consecutive matching frames before calling this)
+     * settles on a value. We already have the decoded string here, so
+     * this does a direct barcode lookup rather than uploading anything.
+     *
+     * IMPORTANT: still surfaces the raw decoded value for the user to
+     * visually confirm against the package -- multi-frame consensus
+     * reduces misreads but doesn't eliminate the need for confirmation
+     * (see LiveBarcodeScannerView's doc comment).
+     */
+    fun onLiveBarcodeDetected(barcode: String) {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING)
+        viewModelScope.launch {
+            val matched = try {
+                ApiClient.service.getItemByBarcode(barcode)
+            } catch (e: HttpException) {
+                if (e.code() == 404) null else {
+                    _uiState.value = _uiState.value.copy(
+                        phase = AddItemPhase.SCAN_CHOICE,
+                        scanError = "Lookup failed: ${e.message() ?: "server error"}"
+                    )
+                    return@launch
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.SCAN_CHOICE,
+                    scanError = e.message ?: "Lookup failed"
+                )
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                phase = AddItemPhase.BARCODE_RESULT,
+                scannedBarcode = barcode,
+                decoderUsed = "ML Kit (on-device)",
+                checksumValid = null, // not computed client-side
+                matchedItem = matched
+            )
+        }
+    }
+
+    fun cancelLiveBarcodeScan() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCAN_CHOICE)
+    }
+
     fun resetToScanChoice() {
         _uiState.value = AddItemUiState()
     }
@@ -73,26 +123,11 @@ class AddItemViewModel : ViewModel() {
         return MultipartBody.Part.createFormData("image", "photo.jpg", requestBody)
     }
 
-    fun scanBarcode(imageBytes: ByteArray) {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING, scanError = null)
-        viewModelScope.launch {
-            try {
-                val result = ApiClient.service.scanBarcode(imageBytesToPart(imageBytes))
-                _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.BARCODE_RESULT,
-                    scannedBarcode = result.barcode,
-                    decoderUsed = result.decoderUsed,
-                    checksumValid = result.checksumValid,
-                    matchedItem = result.item
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.SCAN_CHOICE,
-                    scanError = e.message ?: "Barcode scan failed"
-                )
-            }
-        }
-    }
+    // Note: the backend's POST /items/scan-barcode endpoint (photo upload
+    // + server-side decode) is still available in ApiService for
+    // potential future use (e.g. scanning from a gallery photo), but the
+    // primary flow is now live/on-device scanning -- see
+    // onLiveBarcodeDetected() below and LiveBarcodeScannerView.
 
     fun scanLabel(imageBytes: ByteArray) {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING, scanError = null)

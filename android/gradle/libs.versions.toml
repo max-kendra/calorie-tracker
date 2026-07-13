@@ -1,5 +1,5 @@
 [versions]
-agp = "8.13.2"
+agp = "8.7.2"
 kotlin = "2.1.0"
 coreKtx = "1.15.0"
 lifecycleRuntimeKtx = "2.8.7"
@@ -13,6 +13,8 @@ retrofitKotlinxSerializationConverter = "1.0.0"
 coroutines = "1.9.0"
 viewmodelCompose = "2.8.7"
 lifecycleViewmodelKtx = "2.8.7"
+camerax = "1.4.1"
+mlkitBarcodeScanning = "17.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -27,6 +29,17 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "viewmodelCompose" }
 androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycleViewmodelKtx" }
+
+# Live barcode scanning: CameraX for the camera preview + frame analysis
+# pipeline, ML Kit for on-device barcode decoding from those frames.
+# Deliberately on-device/continuous rather than capture-one-photo-and-
+# upload-to-backend -- faster (no network round trip per frame) and more
+# reliable (multi-frame consensus catches misreads a single still can't).
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
 
 # Networking -- Retrofit for the HTTP client, OkHttp as its underlying
 # engine (also lets us add the X-API-Key header via an interceptor),

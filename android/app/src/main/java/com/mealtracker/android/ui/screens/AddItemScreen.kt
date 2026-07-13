@@ -39,9 +39,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mealtracker.android.ui.components.LiveBarcodeScannerView
 import java.io.ByteArrayOutputStream
 
-private enum class PendingScan { NONE, BARCODE, LABEL }
+// Barcode scanning is now live/on-device (see LiveBarcodeScannerView) --
+// only label OCR still needs an actual photo captured and uploaded,
+// since that has to go to the backend's Tesseract pipeline.
+private enum class PendingScan { NONE, LIVE_BARCODE, LABEL_PHOTO }
 
 @Composable
 fun AddItemScreen(
@@ -64,12 +68,7 @@ fun AddItemScreen(
         ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            val bytes = bitmapToJpegBytes(bitmap)
-            when (pendingScan) {
-                PendingScan.BARCODE -> viewModel.scanBarcode(bytes)
-                PendingScan.LABEL -> viewModel.scanLabel(bytes)
-                PendingScan.NONE -> {}
-            }
+            viewModel.scanLabel(bitmapToJpegBytes(bitmap))
         }
         pendingScan = PendingScan.NONE
     }
@@ -78,21 +77,37 @@ fun AddItemScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            cameraLauncher.launch(null)
+            when (pendingScan) {
+                PendingScan.LIVE_BARCODE -> {
+                    viewModel.startLiveBarcodeScan()
+                    pendingScan = PendingScan.NONE
+                }
+                PendingScan.LABEL_PHOTO -> cameraLauncher.launch(null)
+                PendingScan.NONE -> {}
+            }
         } else {
             pendingScan = PendingScan.NONE
         }
     }
 
-    fun startScan(target: PendingScan) {
-        pendingScan = target
-        val hasPermission = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
+    fun hasCameraPermission(): Boolean = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.CAMERA
+    ) == PackageManager.PERMISSION_GRANTED
 
-        if (hasPermission) {
+    fun startBarcodeScan() {
+        if (hasCameraPermission()) {
+            viewModel.startLiveBarcodeScan()
+        } else {
+            pendingScan = PendingScan.LIVE_BARCODE
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun startLabelScan() {
+        if (hasCameraPermission()) {
             cameraLauncher.launch(null)
         } else {
+            pendingScan = PendingScan.LABEL_PHOTO
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
@@ -113,9 +128,13 @@ fun AddItemScreen(
         when (state.phase) {
             AddItemPhase.SCAN_CHOICE -> ScanChoiceContent(
                 scanError = state.scanError,
-                onScanBarcode = { startScan(PendingScan.BARCODE) },
-                onScanLabel = { startScan(PendingScan.LABEL) },
+                onScanBarcode = { startBarcodeScan() },
+                onScanLabel = { startLabelScan() },
                 onManualEntry = { viewModel.proceedToManualEntry() }
+            )
+            AddItemPhase.SCANNING_LIVE_BARCODE -> LiveBarcodeScanContent(
+                onBarcodeDetected = { viewModel.onLiveBarcodeDetected(it) },
+                onCancel = { viewModel.cancelLiveBarcodeScan() }
             )
             AddItemPhase.SCANNING -> Box(
                 modifier = Modifier.fillMaxSize(),
@@ -140,6 +159,35 @@ fun AddItemScreen(
                 itemName = state.createdItem?.name ?: "",
                 onDone = onDone
             )
+        }
+    }
+}
+
+@Composable
+private fun LiveBarcodeScanContent(
+    onBarcodeDetected: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LiveBarcodeScannerView(
+            onBarcodeDetected = onBarcodeDetected,
+            modifier = Modifier.fillMaxSize()
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Point the camera at a barcode",
+                style = MaterialTheme.typography.bodyLarge,
+                color = androidx.compose.ui.graphics.Color.White
+            )
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+            Button(onClick = onCancel) {
+                Text("Cancel")
+            }
         }
     }
 }
