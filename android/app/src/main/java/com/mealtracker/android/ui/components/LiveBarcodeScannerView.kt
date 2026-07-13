@@ -3,6 +3,7 @@ package com.mealtracker.android.ui.components
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -43,6 +44,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 @Composable
 fun LiveBarcodeScannerView(
     onBarcodeDetected: (String) -> Unit,
+    onCameraReady: (Camera) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -73,12 +75,13 @@ fun LiveBarcodeScannerView(
 
                 try {
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
+                    val camera = cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         CameraSelector.DEFAULT_BACK_CAMERA,
                         preview,
                         imageAnalysis
                     )
+                    onCameraReady(camera)
                 } catch (e: Exception) {
                     // Camera unavailable/binding failed -- nothing more we
                     // can do here; the preview just won't show. The

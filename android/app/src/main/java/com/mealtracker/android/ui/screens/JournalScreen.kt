@@ -39,6 +39,17 @@ fun JournalScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // Bottom-nav tab switches preserve ViewModel state by design (see
+    // AppNavHost's saveState/restoreState config) -- but Journal should
+    // ALWAYS show today when you tap the tab, never "wherever you last
+    // left off" once date navigation exists. Re-running this on every
+    // entry into the screen (not just first composition) overrides that
+    // preservation specifically for the date, without needing to opt the
+    // whole ViewModel out of state-saving.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.loadJournal(java.time.LocalDate.now())
+    }
+
     when (val state = uiState) {
         is JournalUiState.Loading -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

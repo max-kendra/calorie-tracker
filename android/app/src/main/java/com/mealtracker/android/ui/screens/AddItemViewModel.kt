@@ -58,6 +58,12 @@ data class AddItemUiState(
     val ocrPer100gConfirmed: Boolean = true,
     val ocrWasUsed: Boolean = false,
 
+    // Shown when OCR genuinely couldn't extract anything useful from the
+    // label photo (not just a network/upload error, which uses scanError
+    // instead) -- offers retake or skip-to-manual-entry rather than
+    // silently handing the user an empty form with no explanation.
+    val showOcrFailedDialog: Boolean = false,
+
     // Item form fields -- all Strings for TextField editing, parsed on save
     val name: String = "",
     val brand: String = "",
@@ -202,19 +208,37 @@ class AddItemViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val result = ApiClient.service.scanLabel(imageBytesToPart(imageBytes))
+                val macros = result.macros
+                val extractedNothing = result.detectedLanguage == null &&
+                    macros.kcal100g == null && macros.protein100g == null &&
+                    macros.carbs100g == null && macros.fat100g == null &&
+                    macros.fiber100g == null && macros.sugar100g == null &&
+                    macros.saturatedFat100g == null && macros.sodiumMg100g == null
+
+                if (extractedNothing) {
+                    // A genuine "couldn't read this label" case -- offer
+                    // retake or skip-to-manual rather than silently
+                    // handing over an empty form.
+                    _uiState.value = _uiState.value.copy(
+                        phase = AddItemPhase.CAPTURE_LABEL,
+                        showOcrFailedDialog = true
+                    )
+                    return@launch
+                }
+
                 _uiState.value = _uiState.value.copy(
                     phase = AddItemPhase.ITEM_FORM,
                     ocrDetectedLanguage = result.detectedLanguage,
                     ocrPer100gConfirmed = result.per100gConfirmed,
                     ocrWasUsed = true,
-                    kcal100g = result.macros.kcal100g ?: "",
-                    protein100g = result.macros.protein100g ?: "",
-                    carbs100g = result.macros.carbs100g ?: "",
-                    fat100g = result.macros.fat100g ?: "",
-                    fiber100g = result.macros.fiber100g ?: "",
-                    sugar100g = result.macros.sugar100g ?: "",
-                    saturatedFat100g = result.macros.saturatedFat100g ?: "",
-                    sodiumMg100g = result.macros.sodiumMg100g ?: ""
+                    kcal100g = macros.kcal100g ?: "",
+                    protein100g = macros.protein100g ?: "",
+                    carbs100g = macros.carbs100g ?: "",
+                    fat100g = macros.fat100g ?: "",
+                    fiber100g = macros.fiber100g ?: "",
+                    sugar100g = macros.sugar100g ?: "",
+                    saturatedFat100g = macros.saturatedFat100g ?: "",
+                    sodiumMg100g = macros.sodiumMg100g ?: ""
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -223,6 +247,20 @@ class AddItemViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    fun dismissOcrFailedDialog() {
+        _uiState.value = _uiState.value.copy(showOcrFailedDialog = false)
+    }
+
+    /** User chose to skip OCR entirely and fill in macros by hand --
+     * barcode carries over, everything else starts blank. */
+    fun proceedToManualFormFromOcrFailure() {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.ITEM_FORM,
+            showOcrFailedDialog = false,
+            ocrWasUsed = false
+        )
     }
 
     // ----- Item form -----

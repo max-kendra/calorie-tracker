@@ -1,5 +1,6 @@
 package com.mealtracker.android.ui.components
 
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
@@ -29,6 +30,7 @@ import androidx.core.content.ContextCompat
 @Composable
 fun LiveLabelCaptureView(
     onImageCaptureReady: (ImageCapture) -> Unit,
+    onCameraReady: (Camera) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -51,13 +53,14 @@ fun LiveLabelCaptureView(
 
                 try {
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
+                    val camera = cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         CameraSelector.DEFAULT_BACK_CAMERA,
                         preview,
                         imageCapture
                     )
                     onImageCaptureReady(imageCapture)
+                    onCameraReady(camera)
                 } catch (e: Exception) {
                     // Camera unavailable/binding failed -- the preview
                     // just won't show; permission is already checked

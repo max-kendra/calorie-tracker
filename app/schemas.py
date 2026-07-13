@@ -420,7 +420,7 @@ ActivityLevel = Literal["sedentary", "light", "moderate", "active", "very_active
 class UserProfileBase(BaseModel):
     name: Optional[str] = None
     profile_pic_path: Optional[str] = None
-    height_cm: Optional[Decimal] = None
+    height_cm: Optional[int] = None
     age: Optional[int] = None
     # Manual stopgap until Health Connect integration exists on Android --
     # see UserProfile model docstring.
@@ -434,7 +434,7 @@ class UserProfileBase(BaseModel):
 class UserProfileUpdate(BaseModel):
     name: Optional[str] = None
     profile_pic_path: Optional[str] = None
-    height_cm: Optional[Decimal] = None
+    height_cm: Optional[int] = None
     age: Optional[int] = None
     weight_kg: Optional[Decimal] = None
     primary_hormone: Optional[PrimaryHormone] = None

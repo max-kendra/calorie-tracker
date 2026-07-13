@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.network.models.RecipeCreateRequest
+import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,7 +33,13 @@ data class MealDetailUiState(
     val goalCarbs: Int = 0,
     val eatenFiber: Int = 0,
     val goalFiber: Int = 0,
-    val error: String? = null
+    val error: String? = null,
+    // "Save this meal" (star icon) state
+    val showSaveMealDialog: Boolean = false,
+    val mealNameInput: String = "",
+    val isSavingMeal: Boolean = false,
+    val saveMealError: String? = null,
+    val saveMealSuccess: Boolean = false
 )
 
 /**
@@ -75,6 +83,67 @@ class MealDetailViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = e.message ?: "Unknown error"
+                )
+            }
+        }
+    }
+
+    fun openSaveMealDialog() {
+        _uiState.value = _uiState.value.copy(showSaveMealDialog = true, mealNameInput = "")
+    }
+
+    fun dismissSaveMealDialog() {
+        _uiState.value = _uiState.value.copy(showSaveMealDialog = false)
+    }
+
+    fun updateMealNameInput(value: String) {
+        _uiState.value = _uiState.value.copy(mealNameInput = value)
+    }
+
+    /**
+     * Snapshots the currently-logged items into a new Recipe with
+     * recipe_type="meal" (see backend design doc: a saved Meal is just a
+     * recipe with servings=1, editable afterward like any recipe).
+     *
+     * LIMITATION: only logs that reference a real item AND were logged
+     * directly in grams (no serving_size_id) are included -- converting
+     * a serving-size-based quantity to grams needs an extra lookup
+     * (the ServingSize's weight_g) that isn't fetched here. Recipe-based
+     * logs are also skipped, since recipe_ingredients can only reference
+     * items, not other recipes. Both are real gaps, not silent bugs --
+     * worth fixing if this turns out to matter in practice once logging
+     * itself is built (this screen currently has no way to create logs
+     * yet, so `logs` will typically be empty regardless).
+     */
+    fun saveAsMeal() {
+        val state = _uiState.value
+        val name = state.mealNameInput.trim()
+        if (name.isEmpty()) return
+
+        val ingredients = state.logs
+            .filter { it.itemId != null && it.servingSizeId == null }
+            .mapNotNull { log ->
+                val itemId = log.itemId ?: return@mapNotNull null
+                val grams = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
+                RecipeIngredientCreateRequest(itemId = itemId, quantityG = grams)
+            }
+
+        _uiState.value = state.copy(isSavingMeal = true, saveMealError = null)
+
+        viewModelScope.launch {
+            try {
+                ApiClient.service.createRecipe(
+                    RecipeCreateRequest(name = name, recipeType = "meal", servings = 1.0, ingredients = ingredients)
+                )
+                _uiState.value = _uiState.value.copy(
+                    isSavingMeal = false,
+                    saveMealSuccess = true,
+                    showSaveMealDialog = false
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isSavingMeal = false,
+                    saveMealError = e.message ?: "Failed to save meal"
                 )
             }
         }

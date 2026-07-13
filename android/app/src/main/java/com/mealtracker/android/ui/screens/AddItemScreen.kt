@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -21,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -52,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.ui.components.LiveBarcodeScannerView
 import com.mealtracker.android.ui.components.LiveLabelCaptureView
 import com.mealtracker.android.ui.components.decodeBarcodeFromUri
+import com.yalantis.ucrop.UCrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -89,6 +93,43 @@ fun AddItemScreen(
         }
     }
 
+    // Nutrition-label photos (captured OR gallery-picked) go through a
+    // crop step before OCR -- tightly cropping out ingredient lists/
+    // marketing text/other noise should meaningfully help Tesseract's
+    // accuracy on real package photos. No fixed aspect ratio (freestyle
+    // crop), since labels vary a lot in shape.
+    val ucropLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            val croppedUri = UCrop.getOutput(result.data!!)
+            if (croppedUri != null) {
+                context.contentResolver.openInputStream(croppedUri)?.use { stream ->
+                    viewModel.scanLabel(stream.readBytes())
+                }
+            }
+        }
+        // Cancelled or errored -- user just stays on CAPTURE_LABEL and
+        // can retake/repick; nothing else to do here.
+    }
+
+    fun startCrop(sourceUri: Uri) {
+        val destFile = java.io.File(context.cacheDir, "cropped_${System.currentTimeMillis()}.jpg")
+        val destUri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", destFile
+        )
+        val intent = UCrop.of(sourceUri, destUri).getIntent(context)
+        ucropLauncher.launch(intent)
+    }
+
+    fun writeBytesToCacheAndGetUri(bytes: ByteArray): Uri {
+        val file = java.io.File(context.cacheDir, "captured_${System.currentTimeMillis()}.jpg")
+        file.writeBytes(bytes)
+        return androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+    }
+
     // Gallery pickers -- modern Android Photo Picker, no storage
     // permission needed at all. One shared launcher per step, since each
     // needs a different follow-up action.
@@ -106,10 +147,10 @@ fun AddItemScreen(
     val galleryPickerForLabel = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
+        // Content Uris from the picker can be used directly as UCrop's
+        // source, no need to copy to cache first.
         if (uri != null) {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                viewModel.scanLabel(stream.readBytes())
-            }
+            startCrop(uri)
         }
     }
 
@@ -139,6 +180,24 @@ fun AddItemScreen(
                 dismissButton = {
                     TextButton(onClick = { viewModel.dismissManualEntryPrompt() }) {
                         Text("Keep Scanning")
+                    }
+                }
+            )
+        }
+
+        if (state.showOcrFailedDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissOcrFailedDialog() },
+                title = { Text("Couldn't read that label") },
+                text = { Text("Would you like to take a new picture, or enter the nutrition info yourself?") },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.dismissOcrFailedDialog() }) {
+                        Text("Take New Picture")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.proceedToManualFormFromOcrFailure() }) {
+                        Text("Enter Manually")
                     }
                 }
             )
@@ -193,7 +252,7 @@ fun AddItemScreen(
             )
             AddItemPhase.CAPTURE_LABEL -> CaptureLabelContent(
                 scanError = state.scanError,
-                onImageCaptured = { bytes -> viewModel.scanLabel(bytes) },
+                onImageCaptured = { bytes -> startCrop(writeBytesToCacheAndGetUri(bytes)) },
                 onPickFromGallery = {
                     galleryPickerForLabel.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -227,9 +286,13 @@ private fun BarcodeScanContent(
     onBarcodeDetected: (String) -> Unit,
     onPickFromGallery: () -> Unit
 ) {
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var isFlashOn by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LiveBarcodeScannerView(
             onBarcodeDetected = onBarcodeDetected,
+            onCameraReady = { camera = it },
             modifier = Modifier.fillMaxSize()
         )
         Column(
@@ -244,6 +307,19 @@ private fun BarcodeScanContent(
             if (scanError != null) {
                 Text(scanError, color = MaterialTheme.colorScheme.error)
             }
+        }
+        IconButton(
+            onClick = {
+                isFlashOn = !isFlashOn
+                camera?.cameraControl?.enableTorch(isFlashOn)
+            },
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+        ) {
+            Icon(
+                if (isFlashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                contentDescription = "Toggle flash",
+                tint = Color.White
+            )
         }
         IconButton(
             onClick = onPickFromGallery,
@@ -358,10 +434,13 @@ private fun CaptureLabelContent(
 ) {
     val context = LocalContext.current
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var isFlashOn by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LiveLabelCaptureView(
             onImageCaptureReady = { imageCapture = it },
+            onCameraReady = { camera = it },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -377,6 +456,20 @@ private fun CaptureLabelContent(
             if (scanError != null) {
                 Text(scanError, color = MaterialTheme.colorScheme.error)
             }
+        }
+
+        IconButton(
+            onClick = {
+                isFlashOn = !isFlashOn
+                camera?.cameraControl?.enableTorch(isFlashOn)
+            },
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+        ) {
+            Icon(
+                if (isFlashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                contentDescription = "Toggle flash",
+                tint = Color.White
+            )
         }
 
         Row(

@@ -330,7 +330,7 @@ class UserProfile(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)
     profile_pic_path = Column(String, nullable=True)
-    height_cm = Column(Numeric, nullable=True)
+    height_cm = Column(Integer, nullable=True)
     age = Column(Integer, nullable=True)
     # Manual stopgap -- see class docstring. Nullable since not every
     # user will have entered it yet, especially before this existed.

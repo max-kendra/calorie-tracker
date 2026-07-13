@@ -26,6 +26,29 @@
             </intent-filter>
         </activity>
 
+        <!-- UCrop's activity needs an AppCompat theme (its own UI is
+             built with legacy Views, not Compose): this theme comes
+             from AppCompat, which UCrop pulls in as a transitive
+             dependency, not something we add ourselves. -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
+        <!-- Exposes our private cache-file images (captured photos
+             awaiting crop) as content:// URIs, required since raw
+             file:// URIs to another app's (UCrop's) activity are blocked
+             by FileUriExposedException on modern Android. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

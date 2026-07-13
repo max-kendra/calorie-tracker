@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Captured/cropped label photos are written to the app's cache
+         dir (getCacheDir()), never external storage. -->
+    <cache-path name="crop_cache" path="." />
+</paths>

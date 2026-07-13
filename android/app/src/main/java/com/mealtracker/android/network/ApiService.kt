@@ -11,6 +11,8 @@ import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
 import com.mealtracker.android.network.models.OcrScanResult
+import com.mealtracker.android.network.models.Recipe
+import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.UserProfile
 import com.mealtracker.android.network.models.UserProfileUpdateRequest
 import okhttp3.MultipartBody
@@ -116,4 +118,9 @@ interface ApiService {
     // check if a barcode already has a matching item (404 if not).
     @GET("items/barcode/{barcode}")
     suspend fun getItemByBarcode(@Path("barcode") barcode: String): Item
+
+    // Used by the "star icon: save this meal" feature -- a saved Meal is
+    // just a Recipe with recipe_type="meal" and servings=1.
+    @POST("recipes")
+    suspend fun createRecipe(@Body request: RecipeCreateRequest): Recipe
 }

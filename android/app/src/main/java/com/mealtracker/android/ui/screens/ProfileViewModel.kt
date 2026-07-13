@@ -70,7 +70,7 @@ data class ProfileUiState(
      * back to an averaged constant if it's unset (see design doc).
      */
     val isProfileComplete: Boolean
-        get() = heightCm.toDoubleOrNull() != null &&
+        get() = heightCm.toIntOrNull() != null &&
             age.toIntOrNull() != null &&
             weightKg.toDoubleOrNull() != null &&
             activityLevel != null &&
@@ -115,7 +115,7 @@ class ProfileViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     name = profile.name ?: "",
-                    heightCm = profile.heightCm ?: "",
+                    heightCm = profile.heightCm?.toString() ?: "",
                     age = profile.age?.toString() ?: "",
                     weightKg = profile.weightKg ?: "",
                     primaryHormone = profile.primaryHormone,
@@ -169,7 +169,7 @@ class ProfileViewModel : ViewModel() {
                 ApiClient.service.updateProfile(
                     UserProfileUpdateRequest(
                         name = state.name.ifBlank { null },
-                        heightCm = state.heightCm.toDoubleOrNull(),
+                        heightCm = state.heightCm.toIntOrNull(),
                         age = state.age.toIntOrNull(),
                         weightKg = state.weightKg.toDoubleOrNull(),
                         primaryHormone = state.primaryHormone,

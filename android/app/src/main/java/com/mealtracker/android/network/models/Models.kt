@@ -170,6 +170,33 @@ data class MealGoalSplitsUpdateRequest(
 )
 
 /**
+ * Request body for POST /recipes -- used for the "star icon: save this
+ * meal" feature. A saved Meal is just a Recipe with recipeType="meal"
+ * and servings=1 (see backend design doc).
+ */
+@Serializable
+data class RecipeIngredientCreateRequest(
+    @SerialName("item_id") val itemId: Int,
+    @SerialName("quantity_g") val quantityG: Double
+)
+
+@Serializable
+data class RecipeCreateRequest(
+    val name: String,
+    @SerialName("recipe_type") val recipeType: String = "meal",
+    val servings: Double = 1.0,
+    val ingredients: List<RecipeIngredientCreateRequest> = emptyList()
+)
+
+/** Minimal response model -- we only need to confirm success, extra
+ * fields in the real response are ignored (ignoreUnknownKeys=true). */
+@Serializable
+data class Recipe(
+    @SerialName("recipe_id") val recipeId: Int,
+    val name: String
+)
+
+/**
  * Mirrors UserProfileOut from app/schemas.py. All fields nullable/optional
  * since a fresh profile starts empty (auto-created on first GET /profile).
  */
@@ -178,7 +205,7 @@ data class UserProfile(
     val id: Int,
     val name: String? = null,
     @SerialName("profile_pic_path") val profilePicPath: String? = null,
-    @SerialName("height_cm") val heightCm: String? = null,
+    @SerialName("height_cm") val heightCm: Int? = null,
     val age: Int? = null,
     @SerialName("weight_kg") val weightKg: String? = null,
     @SerialName("primary_hormone") val primaryHormone: String? = null,
@@ -195,7 +222,7 @@ data class UserProfile(
 @Serializable
 data class UserProfileUpdateRequest(
     val name: String? = null,
-    @SerialName("height_cm") val heightCm: Double? = null,
+    @SerialName("height_cm") val heightCm: Int? = null,
     val age: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
     @SerialName("primary_hormone") val primaryHormone: String? = null,
