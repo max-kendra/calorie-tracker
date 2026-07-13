@@ -25,6 +25,7 @@ import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
 import com.mealtracker.android.ui.screens.MealCalorieGoalScreen
+import com.mealtracker.android.ui.screens.MealDetailScreen
 import com.mealtracker.android.ui.screens.MealPlanScreen
 import com.mealtracker.android.ui.screens.ProfileScreen
 
@@ -87,7 +88,21 @@ fun AppNavHost() {
         ) {
             composable(Destination.Home.route) { HomeScreen() }
             composable(Destination.Journal.route) {
-                JournalScreen(onNavigateToAddItem = { navController.navigate("add_item") })
+                JournalScreen(
+                    onNavigateToMealDetail = { mealType ->
+                        navController.navigate("meal_detail/${java.time.LocalDate.now()}/$mealType")
+                    }
+                )
+            }
+            composable("meal_detail/{date}/{mealType}") { backStackEntry ->
+                val dateArg = backStackEntry.arguments?.getString("date") ?: java.time.LocalDate.now().toString()
+                val mealTypeArg = backStackEntry.arguments?.getString("mealType") ?: "breakfast"
+                MealDetailScreen(
+                    date = java.time.LocalDate.parse(dateArg),
+                    mealType = mealTypeArg,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToAddItem = { navController.navigate("add_item") }
+                )
             }
             composable("add_item") {
                 AddItemScreen(

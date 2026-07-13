@@ -12,22 +12,50 @@ import java.time.format.DateTimeFormatter
 
 /**
  * One meal's worth of data for the Journal screen -- the logged items
- * for that meal_type, how many kcal that adds up to (summed from the
- * FROZEN kcal_logged values, not live-recomputed -- see design doc on
- * why logs snapshot at write time), and the goal for that meal (derived
- * from the active Goal's meal_splits, already computed server-side).
+ * for that meal_type, and both kcal AND per-macro eaten/goal figures
+ * (goal figures come from the active Goal's meal_splits[].computed_totals,
+ * which the backend already derives as overall-goal-macros x this
+ * meal's percentage -- see design doc).
  */
 data class MealBucket(
     val mealType: String,
     val displayName: String,
     val logs: List<Log>,
     val eatenKcal: Int,
-    val goalKcal: Int
+    val goalKcal: Int,
+    val eatenFat: Int,
+    val goalFat: Int,
+    val eatenProtein: Int,
+    val goalProtein: Int,
+    val eatenCarbs: Int,
+    val goalCarbs: Int,
+    val eatenFiber: Int,
+    val goalFiber: Int
+)
+
+/** Whole-day totals -- sum of all meals' eaten values, compared against
+ * the active Goal's own top-level targets (not derived from meal_splits,
+ * since those are just a slice of the same overall targets). */
+data class DailyTotals(
+    val eatenKcal: Int,
+    val goalKcal: Int,
+    val eatenFat: Int,
+    val goalFat: Int,
+    val eatenProtein: Int,
+    val goalProtein: Int,
+    val eatenCarbs: Int,
+    val goalCarbs: Int,
+    val eatenFiber: Int,
+    val goalFiber: Int
 )
 
 sealed class JournalUiState {
     object Loading : JournalUiState()
-    data class Success(val date: LocalDate, val buckets: List<MealBucket>) : JournalUiState()
+    data class Success(
+        val date: LocalDate,
+        val dailyTotals: DailyTotals,
+        val buckets: List<MealBucket>
+    ) : JournalUiState()
     data class Error(val message: String) : JournalUiState()
 }
 
@@ -60,22 +88,40 @@ class JournalViewModel : ViewModel() {
 
                 val buckets = MEAL_TYPES.map { (mealType, displayName) ->
                     val mealLogs = logsByMealType[mealType] ?: emptyList()
-                    val eatenKcal = mealLogs.sumOf { it.kcalLogged }
-                    val goalKcal = goal.mealSplits
-                        .find { it.mealType == mealType }
-                        ?.computedTotals
-                        ?.kcal ?: 0
+                    val split = goal.mealSplits.find { it.mealType == mealType }
+                    val goalTotals = split?.computedTotals
 
                     MealBucket(
                         mealType = mealType,
                         displayName = displayName,
                         logs = mealLogs,
-                        eatenKcal = eatenKcal,
-                        goalKcal = goalKcal
+                        eatenKcal = mealLogs.sumOf { it.kcalLogged },
+                        goalKcal = goalTotals?.kcal ?: 0,
+                        eatenFat = mealLogs.sumOf { it.fatGLogged },
+                        goalFat = goalTotals?.fatG ?: 0,
+                        eatenProtein = mealLogs.sumOf { it.proteinGLogged },
+                        goalProtein = goalTotals?.proteinG ?: 0,
+                        eatenCarbs = mealLogs.sumOf { it.carbsGLogged },
+                        goalCarbs = goalTotals?.carbsG ?: 0,
+                        eatenFiber = mealLogs.sumOf { it.fiberGLogged },
+                        goalFiber = goalTotals?.fiberG ?: 0
                     )
                 }
 
-                _uiState.value = JournalUiState.Success(date, buckets)
+                val dailyTotals = DailyTotals(
+                    eatenKcal = logs.sumOf { it.kcalLogged },
+                    goalKcal = goal.kcalTarget.toDoubleOrNull()?.toInt() ?: 0,
+                    eatenFat = logs.sumOf { it.fatGLogged },
+                    goalFat = goal.fatGTarget.toDoubleOrNull()?.toInt() ?: 0,
+                    eatenProtein = logs.sumOf { it.proteinGLogged },
+                    goalProtein = goal.proteinGTarget.toDoubleOrNull()?.toInt() ?: 0,
+                    eatenCarbs = logs.sumOf { it.carbsGLogged },
+                    goalCarbs = goal.carbsGTarget.toDoubleOrNull()?.toInt() ?: 0,
+                    eatenFiber = logs.sumOf { it.fiberGLogged },
+                    goalFiber = goal.fiberGTarget.toDoubleOrNull()?.toInt() ?: 0
+                )
+
+                _uiState.value = JournalUiState.Success(date, dailyTotals, buckets)
             } catch (e: Exception) {
                 // Common causes: no active goal set yet on the backend
                 // (GET /goals/active returns 404 if none exists), or the

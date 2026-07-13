@@ -13,27 +13,44 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 
+/**
+ * Barcode is now the mandatory first step -- there's no independent
+ * "Scan Label" or "Enter Manually" entry point, since without a barcode
+ * match there'd be nothing to check against and every new item needs
+ * SOME identifying step first (see design doc discussion). Flow:
+ *
+ *   SCAN_BARCODE (live, on-device, ~8s timeout)
+ *     -> BARCODE_LOOKUP -> BARCODE_RESULT
+ *         -> matched existing item: done
+ *         -> no match: one confirmation tap -> CAPTURE_LABEL
+ *   (or, if the timeout fires with nothing detected: a prompt offers
+ *    MANUAL_BARCODE_ENTRY, which feeds into the same lookup)
+ *
+ *   CAPTURE_LABEL (live, in-app camera OR gallery pick)
+ *     -> PROCESSING_LABEL -> ITEM_FORM (pre-filled, barcode carried over)
+ *         -> SAVING -> SAVED
+ *
+ * Editing an EXISTING item is a separate, not-yet-built feature (reached
+ * from a future My Foods browse screen, not this flow).
+ */
 enum class AddItemPhase {
-    SCAN_CHOICE, SCANNING_LIVE_BARCODE, SCANNING, BARCODE_RESULT, ITEM_FORM, SAVING, SAVED
+    SCAN_BARCODE, BARCODE_LOOKUP, BARCODE_RESULT, MANUAL_BARCODE_ENTRY,
+    CAPTURE_LABEL, PROCESSING_LABEL, ITEM_FORM, SAVING, SAVED
 }
 
-/**
- * Single screen, multiple internal phases (rather than separate nav
- * destinations passing scan results between them) -- keeps the
- * scan->review->form->save flow cohesive and avoids needing to pass
- * structured scan data (OCR macros, barcode results) through navigation
- * arguments, which only support simple types cleanly.
- */
 data class AddItemUiState(
-    val phase: AddItemPhase = AddItemPhase.SCAN_CHOICE,
+    val phase: AddItemPhase = AddItemPhase.SCAN_BARCODE,
     val scanError: String? = null,
 
-    // Barcode scan result -- see BarcodeScanResult's doc comment
-    // (Models.kt) for why checksumValid is NOT proof of correctness and
-    // the barcode must always be shown for user confirmation.
+    // Shown when the live barcode scan times out with nothing detected.
+    val showManualEntryPrompt: Boolean = false,
+    val manualBarcodeInput: String = "",
+
+    // Barcode result -- see LiveBarcodeScannerView's doc comment for why
+    // the barcode must always be shown for user confirmation, regardless
+    // of decoder/source.
     val scannedBarcode: String? = null,
     val decoderUsed: String? = null,
-    val checksumValid: Boolean? = null,
     val matchedItem: Item? = null,
 
     // OCR context, shown as info/warnings in the item form
@@ -64,56 +81,6 @@ class AddItemViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(AddItemUiState())
     val uiState: StateFlow<AddItemUiState> = _uiState
 
-    fun startLiveBarcodeScan() {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING_LIVE_BARCODE, scanError = null)
-    }
-
-    /**
-     * Called when the on-device live scanner (see LiveBarcodeScannerView --
-     * requires several consecutive matching frames before calling this)
-     * settles on a value. We already have the decoded string here, so
-     * this does a direct barcode lookup rather than uploading anything.
-     *
-     * IMPORTANT: still surfaces the raw decoded value for the user to
-     * visually confirm against the package -- multi-frame consensus
-     * reduces misreads but doesn't eliminate the need for confirmation
-     * (see LiveBarcodeScannerView's doc comment).
-     */
-    fun onLiveBarcodeDetected(barcode: String) {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING)
-        viewModelScope.launch {
-            val matched = try {
-                ApiClient.service.getItemByBarcode(barcode)
-            } catch (e: HttpException) {
-                if (e.code() == 404) null else {
-                    _uiState.value = _uiState.value.copy(
-                        phase = AddItemPhase.SCAN_CHOICE,
-                        scanError = "Lookup failed: ${e.message() ?: "server error"}"
-                    )
-                    return@launch
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.SCAN_CHOICE,
-                    scanError = e.message ?: "Lookup failed"
-                )
-                return@launch
-            }
-
-            _uiState.value = _uiState.value.copy(
-                phase = AddItemPhase.BARCODE_RESULT,
-                scannedBarcode = barcode,
-                decoderUsed = "ML Kit (on-device)",
-                checksumValid = null, // not computed client-side
-                matchedItem = matched
-            )
-        }
-    }
-
-    fun cancelLiveBarcodeScan() {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCAN_CHOICE)
-    }
-
     fun resetToScanChoice() {
         _uiState.value = AddItemUiState()
     }
@@ -123,14 +90,115 @@ class AddItemViewModel : ViewModel() {
         return MultipartBody.Part.createFormData("image", "photo.jpg", requestBody)
     }
 
-    // Note: the backend's POST /items/scan-barcode endpoint (photo upload
-    // + server-side decode) is still available in ApiService for
-    // potential future use (e.g. scanning from a gallery photo), but the
-    // primary flow is now live/on-device scanning -- see
-    // onLiveBarcodeDetected() below and LiveBarcodeScannerView.
+    // ----- Barcode step -----
+
+    /** Called by the Composable's timeout timer if SCAN_BARCODE has been
+     * showing for ~8s with nothing detected. */
+    fun onBarcodeTimeout() {
+        if (_uiState.value.phase == AddItemPhase.SCAN_BARCODE) {
+            _uiState.value = _uiState.value.copy(showManualEntryPrompt = true)
+        }
+    }
+
+    fun dismissManualEntryPrompt() {
+        _uiState.value = _uiState.value.copy(showManualEntryPrompt = false)
+    }
+
+    fun proceedToManualBarcodeEntry() {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.MANUAL_BARCODE_ENTRY,
+            showManualEntryPrompt = false
+        )
+    }
+
+    fun updateManualBarcodeInput(value: String) {
+        _uiState.value = _uiState.value.copy(manualBarcodeInput = value)
+    }
+
+    fun submitManualBarcode() {
+        val barcode = _uiState.value.manualBarcodeInput.trim()
+        if (barcode.isEmpty()) return
+        lookUpBarcode(barcode, decoderUsed = "Manual entry")
+    }
+
+    /** Called when the live scanner (multi-frame consensus, see
+     * LiveBarcodeScannerView) settles on a value. */
+    fun onLiveBarcodeDetected(barcode: String) {
+        lookUpBarcode(barcode, decoderUsed = "ML Kit (on-device)")
+    }
+
+    /** Called after a gallery-picked image was run through
+     * decodeBarcodeFromUri() in the Composable (needs Context, so the
+     * actual decode call happens there, not here). */
+    fun onGalleryBarcodeResult(barcode: String?) {
+        if (barcode == null) {
+            _uiState.value = _uiState.value.copy(
+                scanError = "Couldn't find a barcode in that photo"
+            )
+            return
+        }
+        lookUpBarcode(barcode, decoderUsed = "ML Kit (from photo)")
+    }
+
+    private fun lookUpBarcode(barcode: String, decoderUsed: String) {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.BARCODE_LOOKUP,
+            showManualEntryPrompt = false,
+            scanError = null
+        )
+        viewModelScope.launch {
+            val matched = try {
+                ApiClient.service.getItemByBarcode(barcode)
+            } catch (e: HttpException) {
+                if (e.code() == 404) {
+                    null
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        phase = AddItemPhase.SCAN_BARCODE,
+                        scanError = "Lookup failed: ${e.message() ?: "server error"}"
+                    )
+                    return@launch
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.SCAN_BARCODE,
+                    scanError = e.message ?: "Lookup failed"
+                )
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                phase = AddItemPhase.BARCODE_RESULT,
+                scannedBarcode = barcode,
+                decoderUsed = decoderUsed,
+                matchedItem = matched
+            )
+        }
+    }
+
+    /** User confirmed no existing item matches and wants to continue --
+     * moves into the (mandatory, since we now have a barcode to attach)
+     * label capture step. */
+    fun proceedToCaptureLabel() {
+        val state = _uiState.value
+        _uiState.value = state.copy(
+            phase = AddItemPhase.CAPTURE_LABEL,
+            barcode = state.scannedBarcode ?: ""
+        )
+    }
+
+    fun retryBarcodeScan() {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.SCAN_BARCODE,
+            scanError = null,
+            showManualEntryPrompt = false
+        )
+    }
+
+    // ----- Label step -----
 
     fun scanLabel(imageBytes: ByteArray) {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SCANNING, scanError = null)
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_LABEL, scanError = null)
         viewModelScope.launch {
             try {
                 val result = ApiClient.service.scanLabel(imageBytesToPart(imageBytes))
@@ -150,28 +218,14 @@ class AddItemViewModel : ViewModel() {
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.SCAN_CHOICE,
+                    phase = AddItemPhase.CAPTURE_LABEL,
                     scanError = e.message ?: "Label scan failed"
                 )
             }
         }
     }
 
-    /** User confirmed the scanned barcode is correct and no item exists
-     * yet -- proceed to the form with the barcode pre-filled. */
-    fun proceedToCreateFromBarcode() {
-        val state = _uiState.value
-        _uiState.value = state.copy(
-            phase = AddItemPhase.ITEM_FORM,
-            barcode = state.scannedBarcode ?: ""
-        )
-    }
-
-    /** Scan failed or was rejected by the user -- fall back to a blank
-     * form with manual barcode entry. */
-    fun proceedToManualEntry() {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.ITEM_FORM)
-    }
+    // ----- Item form -----
 
     fun updateName(value: String) { _uiState.value = _uiState.value.copy(name = value) }
     fun updateBrand(value: String) { _uiState.value = _uiState.value.copy(brand = value) }

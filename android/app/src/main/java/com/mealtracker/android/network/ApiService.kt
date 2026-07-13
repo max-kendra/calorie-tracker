@@ -45,8 +45,13 @@ interface ApiService {
 
     // Backs the Journal screen -- a single `date` gives one day's log
     // (matches the backend's GET /logs?date=... single-day mode).
+    // Optional mealType narrows to just that meal (used by the Meal
+    // Detail screen, which doesn't need the whole day's logs).
     @GET("logs")
-    suspend fun getLogs(@Query("date") date: String): List<Log>
+    suspend fun getLogs(
+        @Query("date") date: String,
+        @Query("meal_type") mealType: String? = null
+    ): List<Log>
 
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --

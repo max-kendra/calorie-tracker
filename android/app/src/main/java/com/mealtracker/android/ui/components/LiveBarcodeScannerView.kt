@@ -1,6 +1,8 @@
 package com.mealtracker.android.ui.components
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.net.Uri
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -16,6 +18,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * Live, continuous, on-device barcode scanning -- deliberately NOT a
@@ -149,3 +152,27 @@ private class BarcodeAnalyzer(
             }
     }
 }
+
+/**
+ * Decodes a barcode from a static image (used for the "pick from
+ * gallery instead" path -- e.g. photos taken at the store to review
+ * later, see design doc). Same ML Kit client as the live scanner, just
+ * fed a single static image instead of a continuous frame stream, so no
+ * multi-frame consensus is possible here -- a single decode attempt.
+ */
+suspend fun decodeBarcodeFromUri(context: Context, uri: Uri): String? =
+    suspendCancellableCoroutine { continuation ->
+        try {
+            val image = InputImage.fromFilePath(context, uri)
+            val scanner = BarcodeScanning.getClient()
+            scanner.process(image)
+                .addOnSuccessListener { barcodes ->
+                    continuation.resume(barcodes.firstOrNull()?.rawValue) {}
+                }
+                .addOnFailureListener {
+                    continuation.resume(null) {}
+                }
+        } catch (e: Exception) {
+            continuation.resume(null) {}
+        }
+    }

@@ -1,5 +1,6 @@
 package com.mealtracker.android.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,17 +22,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.ui.components.DonutChart
+import com.mealtracker.android.ui.components.MacroRingsRow
 
 /**
- * Journal screen -- step 1 of building this out: just the meal cards
- * with REAL data (no header rings, no date nav yet -- those come next,
- * once this is confirmed working). Always shows today's date for now;
- * date navigation is a later step.
+ * Journal screen -- daily summary panel (big kcal ring + 4 macro rings,
+ * matching the design doc's mockup but WITHOUT calories-burned tracking
+ * or any food-rating/"daily assessment" feature -- both deliberately out
+ * of scope, see design doc) followed by the four meal cards. Tapping any
+ * card (even an empty one) opens that meal's detail screen.
  */
 @Composable
 fun JournalScreen(
     viewModel: JournalViewModel = viewModel(),
-    onNavigateToAddItem: () -> Unit = {}
+    onNavigateToMealDetail: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -61,15 +65,10 @@ fun JournalScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    Button(
-                        onClick = onNavigateToAddItem,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("+ Add Item")
-                    }
+                    DailySummaryPanel(state.dailyTotals)
                 }
                 items(state.buckets) { bucket ->
-                    MealCard(bucket)
+                    MealCard(bucket, onClick = { onNavigateToMealDetail(bucket.mealType) })
                 }
             }
         }
@@ -77,8 +76,67 @@ fun JournalScreen(
 }
 
 @Composable
-private fun MealCard(bucket: MealBucket) {
+private fun DailySummaryPanel(totals: DailyTotals) {
     Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            val remaining = totals.goalKcal - totals.eatenKcal
+            val kcalFraction = if (totals.goalKcal > 0) {
+                (totals.eatenKcal.toFloat() / totals.goalKcal.toFloat()).coerceIn(0f, 1f)
+            } else 0f
+
+            DonutChart(
+                segments = listOf(kcalFraction to MaterialTheme.colorScheme.primary),
+                diameter = 140.dp,
+                strokeWidth = 14.dp,
+                centerContent = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (remaining >= 0) {
+                            Text("$remaining", style = MaterialTheme.typography.headlineMedium)
+                            Text("Cal left", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            Text(
+                                "${-remaining}",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                "Cal over",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            )
+            Text(
+                "${totals.eatenKcal} eaten \u00b7 ${totals.goalKcal} goal",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+
+            MacroRingsRow(
+                fatEaten = totals.eatenFat, fatGoal = totals.goalFat,
+                proteinEaten = totals.eatenProtein, proteinGoal = totals.goalProtein,
+                carbsEaten = totals.eatenCarbs, carbsGoal = totals.goalCarbs,
+                fiberEaten = totals.eatenFiber, fiberGoal = totals.goalFiber,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun MealCard(bucket: MealBucket, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "${bucket.displayName} \u00b7 ${bucket.eatenKcal} / ${bucket.goalKcal} Cal",
