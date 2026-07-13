@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.item
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -29,7 +30,10 @@ import com.mealtracker.android.network.models.Log
  * date navigation is a later step.
  */
 @Composable
-fun JournalScreen(viewModel: JournalViewModel = viewModel()) {
+fun JournalScreen(
+    viewModel: JournalViewModel = viewModel(),
+    onNavigateToAddItem: () -> Unit = {}
+) {
     val uiState by viewModel.uiState.collectAsState()
 
     when (val state = uiState) {
@@ -57,6 +61,14 @@ fun JournalScreen(viewModel: JournalViewModel = viewModel()) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                item {
+                    androidx.compose.material3.Button(
+                        onClick = onNavigateToAddItem,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("+ Add Item")
+                    }
+                }
                 items(state.buckets) { bucket ->
                     MealCard(bucket)
                 }

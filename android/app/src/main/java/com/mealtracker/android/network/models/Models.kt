@@ -218,3 +218,70 @@ data class KcalGoalCalculationResult(
     @SerialName("kcal_high") val kcalHigh: Int,
     @SerialName("floor_applied") val floorApplied: Boolean
 )
+
+/**
+ * Mirrors BarcodeScanResult from app/schemas.py.
+ *
+ * IMPORTANT (per real-world testing, see backend README): a decoded
+ * barcode is NOT guaranteed correct even if `checksumValid` is true --
+ * the client MUST show `barcode` to the user for visual confirmation
+ * against the physical package before using it, never auto-proceed.
+ */
+@Serializable
+data class BarcodeScanResult(
+    val barcode: String? = null,
+    @SerialName("decoder_used") val decoderUsed: String? = null,
+    @SerialName("checksum_valid") val checksumValid: Boolean? = null,
+    val item: Item? = null
+)
+
+/**
+ * Mirrors OcrMacros from app/schemas.py -- fields absent (not zero) when
+ * OCR didn't confidently extract them.
+ */
+@Serializable
+data class OcrMacros(
+    @SerialName("kcal_100g") val kcal100g: String? = null,
+    @SerialName("protein_100g") val protein100g: String? = null,
+    @SerialName("carbs_100g") val carbs100g: String? = null,
+    @SerialName("fat_100g") val fat100g: String? = null,
+    @SerialName("fiber_100g") val fiber100g: String? = null,
+    @SerialName("sugar_100g") val sugar100g: String? = null,
+    @SerialName("saturated_fat_100g") val saturatedFat100g: String? = null,
+    @SerialName("sodium_mg_100g") val sodiumMg100g: String? = null
+)
+
+/**
+ * Mirrors OcrScanResult from app/schemas.py. per100gConfirmed being false
+ * means the label's values might be per-serving, not per-100g -- the
+ * client should surface that as a visible warning (see backend README).
+ */
+@Serializable
+data class OcrScanResult(
+    @SerialName("raw_text") val rawText: String,
+    @SerialName("detected_language") val detectedLanguage: String? = null,
+    @SerialName("per_100g_confirmed") val per100gConfirmed: Boolean = false,
+    val macros: OcrMacros
+)
+
+/**
+ * Request body for POST /items. Sends plain numbers (not
+ * Decimal-as-string), same rule as the other *Request models.
+ */
+@Serializable
+data class ItemCreateRequest(
+    val name: String,
+    val barcode: String? = null,
+    val brand: String? = null,
+    @SerialName("image_path") val imagePath: String? = null,
+    @SerialName("kcal_100g") val kcal100g: Double? = null,
+    @SerialName("protein_100g") val protein100g: Double? = null,
+    @SerialName("carbs_100g") val carbs100g: Double? = null,
+    @SerialName("fat_100g") val fat100g: Double? = null,
+    @SerialName("fiber_100g") val fiber100g: Double? = null,
+    @SerialName("sugar_100g") val sugar100g: Double? = null,
+    @SerialName("saturated_fat_100g") val saturatedFat100g: Double? = null,
+    @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null,
+    val type: String = "product",
+    val origin: String = "manual"
+)

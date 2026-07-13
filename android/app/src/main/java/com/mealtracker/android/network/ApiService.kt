@@ -1,20 +1,26 @@
 package com.mealtracker.android.network
 
+import com.mealtracker.android.network.models.BarcodeScanResult
 import com.mealtracker.android.network.models.Goal
 import com.mealtracker.android.network.models.GoalCreateRequest
 import com.mealtracker.android.network.models.GoalUpdateRequest
 import com.mealtracker.android.network.models.HealthResponse
 import com.mealtracker.android.network.models.Item
+import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
+import com.mealtracker.android.network.models.OcrScanResult
 import com.mealtracker.android.network.models.UserProfile
 import com.mealtracker.android.network.models.UserProfileUpdateRequest
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -79,4 +85,30 @@ interface ApiService {
     // required profile fields are missing.
     @POST("profile/calculate-kcal-goal")
     suspend fun calculateKcalGoal(): KcalGoalCalculationResult
+
+    // Uploads an image, decodes a barcode from it (pyzbar + zxing-cpp
+    // fallback, see backend). NEVER auto-creates an item -- caller must
+    // show `barcode` to the user for confirmation before using it (see
+    // BarcodeScanResult's doc comment for why: real-world testing found
+    // decoders can return a wrong value that still looks valid).
+    @Multipart
+    @POST("items/scan-barcode")
+    suspend fun scanBarcode(@Part image: MultipartBody.Part): BarcodeScanResult
+
+    // Uploads a nutrition label photo, OCR-extracts macros (Tesseract,
+    // 9 languages, see backend). NEVER writes to the DB -- caller
+    // pre-fills the Add Item form with the result for user review.
+    @Multipart
+    @POST("items/scan-label")
+    suspend fun scanLabel(@Part image: MultipartBody.Part): OcrScanResult
+
+    // Creates a new item. 409 (HttpException) if the barcode is already
+    // in use by another item.
+    @POST("items")
+    suspend fun createItem(@Body request: ItemCreateRequest): Item
+
+    // Looks up an item by barcode directly -- used before scanning, to
+    // check if a barcode already has a matching item (404 if not).
+    @GET("items/barcode/{barcode}")
+    suspend fun getItemByBarcode(@Path("barcode") barcode: String): Item
 }

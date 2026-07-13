@@ -20,6 +20,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.mealtracker.android.ui.screens.AddItemScreen
 import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
@@ -85,7 +86,15 @@ fun AppNavHost() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Destination.Home.route) { HomeScreen() }
-            composable(Destination.Journal.route) { JournalScreen() }
+            composable(Destination.Journal.route) {
+                JournalScreen(onNavigateToAddItem = { navController.navigate("add_item") })
+            }
+            composable("add_item") {
+                AddItemScreen(
+                    onBack = { navController.popBackStack() },
+                    onDone = { navController.popBackStack() }
+                )
+            }
             composable(Destination.MealPlan.route) { MealPlanScreen() }
             composable(Destination.Profile.route) {
                 ProfileScreen(
