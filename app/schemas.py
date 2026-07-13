@@ -413,13 +413,21 @@ class MealGoalSplitsUpdate(BaseModel):
 PrimaryHormone = Literal["estrogen", "testosterone", "other"]
 
 
+GoalType = Literal["lose", "maintain", "gain"]
+ActivityLevel = Literal["sedentary", "light", "moderate", "active", "very_active"]
+
+
 class UserProfileBase(BaseModel):
     name: Optional[str] = None
     profile_pic_path: Optional[str] = None
     height_cm: Optional[Decimal] = None
     age: Optional[int] = None
+    # Manual stopgap until Health Connect integration exists on Android --
+    # see UserProfile model docstring.
+    weight_kg: Optional[Decimal] = None
     primary_hormone: Optional[PrimaryHormone] = None
-    activity_level: Optional[str] = None
+    activity_level: Optional[ActivityLevel] = None
+    goal_type: Optional[GoalType] = None
     timezone: str = "Europe/Copenhagen"
 
 
@@ -428,8 +436,10 @@ class UserProfileUpdate(BaseModel):
     profile_pic_path: Optional[str] = None
     height_cm: Optional[Decimal] = None
     age: Optional[int] = None
+    weight_kg: Optional[Decimal] = None
     primary_hormone: Optional[PrimaryHormone] = None
-    activity_level: Optional[str] = None
+    activity_level: Optional[ActivityLevel] = None
+    goal_type: Optional[GoalType] = None
     timezone: Optional[str] = None
 
 
@@ -438,3 +448,31 @@ class UserProfileOut(UserProfileBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class KcalGoalCalculationResult(BaseModel):
+    """
+    All intermediate values are returned, not just the final number --
+    lets the client show its work (BMR, then TDEE, then the goal
+    adjustment) rather than presenting a single opaque figure.
+
+    All values are whole integers -- fractional calories aren't
+    meaningful to a user. recommended_kcal/kcal_low/kcal_high are further
+    rounded to the nearest 25, since a number like "1636" is both false
+    precision (the formula is only accurate to ~10% to begin with, which
+    is a wider margin than a 25-kcal step) and awkward to actually track
+    against day to day -- a round number is both more honest and more
+    usable.
+
+    kcal_low/kcal_high express the formula's own accuracy margin (~10%,
+    per Frankenfield et al. 2005 -- see calculate_kcal_goal's docstring)
+    as an honest range, rather than presenting recommended_kcal as if it
+    were precise to the calorie.
+    """
+
+    bmr: int
+    tdee: int
+    recommended_kcal: int
+    kcal_low: int
+    kcal_high: int
+    floor_applied: bool  # true if the 1500 kcal/day safety floor kicked in

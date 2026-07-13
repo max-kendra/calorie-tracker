@@ -93,10 +93,16 @@ fun AppNavHost() {
                     onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") }
                 )
             }
-            composable("macronutrients") { MacronutrientsScreen() }
+            composable("macronutrients") {
+                MacronutrientsScreen(
+                    onNavigateToProfile = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() }
+                )
+            }
             composable("meal_calorie_goal") {
                 MealCalorieGoalScreen(
-                    onNavigateToSetGoal = { navController.navigate("macronutrients") }
+                    onNavigateToSetGoal = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

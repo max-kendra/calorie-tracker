@@ -3,14 +3,12 @@ package com.mealtracker.android.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
-import com.mealtracker.android.network.models.GoalCreateRequest
 import com.mealtracker.android.network.models.GoalUpdateRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 // Standard nutrition-labeling kcal-per-gram conversion factors (matches
 // the pie-chart math discussed in the design doc: protein/carbs = 4,
@@ -21,41 +19,60 @@ private const val KCAL_PER_G_FAT = 9.0
 private const val KCAL_PER_G_FIBER = 2.0
 
 data class MacroRow(
-    val percent: Double,
-    val grams: Double,
-    val kcal: Double
+    val percent: Int,
+    val grams: Int,
+    val kcal: Int
 )
 
+/**
+ * Percentages are whole Ints, adjusted in single-percentage-point steps
+ * (see the Slider's `steps` config in MacronutrientsScreen) -- storing
+ * the value itself as a whole Int means there's no hidden fractional
+ * drift between what's displayed and what's actually sent to the
+ * backend, which requires an exact 100% sum.
+ *
+ * kcalTarget is READ-ONLY here -- it's set exclusively via the Profile
+ * screen's calorie-goal calculator now, not editable on this screen.
+ * This screen requires an active Goal to already exist (Profile gates
+ * navigation here until one does, but we still handle the missing-goal
+ * case defensively in case of direct navigation).
+ */
 data class MacronutrientsUiState(
     val isLoading: Boolean = true,
+    val goalMissing: Boolean = false,
     val existingGoalId: Int? = null,
-    val kcalTarget: String = "2000",
-    val fatPct: Double = 25.0,
-    val proteinPct: Double = 25.0,
-    val carbsPct: Double = 47.0,
-    val fiberPct: Double = 3.0,
+    val kcalTarget: Double = 0.0,
+    val fatPct: Int = 25,
+    val proteinPct: Int = 25,
+    val carbsPct: Int = 47,
+    val fiberPct: Int = 3,
+    val savedFatPct: Int = 25,
+    val savedProteinPct: Int = 25,
+    val savedCarbsPct: Int = 47,
+    val savedFiberPct: Int = 3,
     val isSaving: Boolean = false,
     val saveError: String? = null,
     val saveSuccess: Boolean = false,
     val loadError: String? = null
 ) {
-    val totalPct: Double get() = fatPct + proteinPct + carbsPct + fiberPct
-    // Small tolerance for floating point/slider rounding -- matches the
-    // "must sum to exactly 100%" hard gate from the design doc, without
-    // being overly strict about floating-point noise.
-    val isValidTotal: Boolean get() = kotlin.math.abs(totalPct - 100.0) < 0.5
+    val totalPct: Int get() = fatPct + proteinPct + carbsPct + fiberPct
+    val isValidTotal: Boolean get() = totalPct == 100
 
-    private val kcalTargetValue: Double get() = kcalTarget.toDoubleOrNull() ?: 0.0
+    val hasUnsavedChanges: Boolean
+        get() = fatPct != savedFatPct ||
+            proteinPct != savedProteinPct ||
+            carbsPct != savedCarbsPct ||
+            fiberPct != savedFiberPct
 
     val fat: MacroRow get() = macroRow(fatPct, KCAL_PER_G_FAT)
     val protein: MacroRow get() = macroRow(proteinPct, KCAL_PER_G_PROTEIN)
     val carbs: MacroRow get() = macroRow(carbsPct, KCAL_PER_G_CARBS)
     val fiber: MacroRow get() = macroRow(fiberPct, KCAL_PER_G_FIBER)
 
-    private fun macroRow(pct: Double, kcalPerGram: Double): MacroRow {
-        val kcal = kcalTargetValue * (pct / 100.0)
+    private fun macroRow(pct: Int, kcalPerGram: Double): MacroRow {
+        val kcal = kcalTarget * (pct / 100.0)
         val grams = kcal / kcalPerGram
-        return MacroRow(percent = pct, grams = grams, kcal = kcal)
+        return MacroRow(percent = pct, grams = grams.roundToInt(), kcal = kcal.roundToInt())
     }
 }
 
@@ -72,30 +89,35 @@ class MacronutrientsViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val goal = ApiClient.service.getActiveGoal()
-                val kcalTarget = goal.kcalTarget.toDoubleOrNull() ?: 2000.0
+                val kcalTarget = goal.kcalTarget.toDoubleOrNull() ?: 0.0
 
-                // Back-calculate percentages from the stored gram targets,
-                // so editing an existing goal starts from its real values
-                // rather than resetting to defaults.
-                fun pctOf(grams: String, kcalPerGram: Double): Double {
+                fun pctOf(grams: String, kcalPerGram: Double): Int {
                     val g = grams.toDoubleOrNull() ?: 0.0
-                    return if (kcalTarget > 0) (g * kcalPerGram / kcalTarget) * 100.0 else 0.0
+                    return if (kcalTarget > 0) ((g * kcalPerGram / kcalTarget) * 100.0).roundToInt() else 0
                 }
+
+                val fatPct = pctOf(goal.fatGTarget, KCAL_PER_G_FAT)
+                val proteinPct = pctOf(goal.proteinGTarget, KCAL_PER_G_PROTEIN)
+                val carbsPct = pctOf(goal.carbsGTarget, KCAL_PER_G_CARBS)
+                val fiberPct = pctOf(goal.fiberGTarget, KCAL_PER_G_FIBER)
 
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
+                    goalMissing = false,
                     existingGoalId = goal.id,
-                    kcalTarget = goal.kcalTarget,
-                    fatPct = pctOf(goal.fatGTarget, KCAL_PER_G_FAT),
-                    proteinPct = pctOf(goal.proteinGTarget, KCAL_PER_G_PROTEIN),
-                    carbsPct = pctOf(goal.carbsGTarget, KCAL_PER_G_CARBS),
-                    fiberPct = pctOf(goal.fiberGTarget, KCAL_PER_G_FIBER)
+                    kcalTarget = kcalTarget,
+                    fatPct = fatPct,
+                    proteinPct = proteinPct,
+                    carbsPct = carbsPct,
+                    fiberPct = fiberPct,
+                    savedFatPct = fatPct,
+                    savedProteinPct = proteinPct,
+                    savedCarbsPct = carbsPct,
+                    savedFiberPct = fiberPct
                 )
             } catch (e: HttpException) {
                 if (e.code() == 404) {
-                    // No active goal yet -- perfectly normal for a fresh
-                    // setup, just use the defaults already in the state.
-                    _uiState.value = _uiState.value.copy(isLoading = false)
+                    _uiState.value = _uiState.value.copy(isLoading = false, goalMissing = true)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
@@ -111,59 +133,61 @@ class MacronutrientsViewModel : ViewModel() {
         }
     }
 
-    fun updateKcalTarget(value: String) {
-        _uiState.value = _uiState.value.copy(kcalTarget = value)
-    }
-
-    fun updateFatPct(value: Double) {
+    fun updateFatPct(value: Int) {
         _uiState.value = _uiState.value.copy(fatPct = value)
     }
 
-    fun updateProteinPct(value: Double) {
+    fun updateProteinPct(value: Int) {
         _uiState.value = _uiState.value.copy(proteinPct = value)
     }
 
-    fun updateCarbsPct(value: Double) {
+    fun updateCarbsPct(value: Int) {
         _uiState.value = _uiState.value.copy(carbsPct = value)
     }
 
-    fun updateFiberPct(value: Double) {
+    fun updateFiberPct(value: Int) {
         _uiState.value = _uiState.value.copy(fiberPct = value)
+    }
+
+    /** Reverts all editable fields back to the last-loaded/last-saved snapshot. */
+    fun reset() {
+        val state = _uiState.value
+        _uiState.value = state.copy(
+            fatPct = state.savedFatPct,
+            proteinPct = state.savedProteinPct,
+            carbsPct = state.savedCarbsPct,
+            fiberPct = state.savedFiberPct,
+            saveError = null,
+            saveSuccess = false
+        )
     }
 
     fun save() {
         val state = _uiState.value
+        val goalId = state.existingGoalId ?: return
         if (!state.isValidTotal) return // UI should already prevent calling this
 
         _uiState.value = state.copy(isSaving = true, saveError = null)
 
         viewModelScope.launch {
             try {
-                val existingId = state.existingGoalId
-                if (existingId != null) {
-                    ApiClient.service.updateGoal(
-                        existingId,
-                        GoalUpdateRequest(
-                            kcalTarget = state.kcalTarget.toDoubleOrNull(),
-                            proteinGTarget = state.protein.grams,
-                            carbsGTarget = state.carbs.grams,
-                            fatGTarget = state.fat.grams,
-                            fiberGTarget = state.fiber.grams
-                        )
+                ApiClient.service.updateGoal(
+                    goalId,
+                    GoalUpdateRequest(
+                        proteinGTarget = state.protein.grams.toDouble(),
+                        carbsGTarget = state.carbs.grams.toDouble(),
+                        fatGTarget = state.fat.grams.toDouble(),
+                        fiberGTarget = state.fiber.grams.toDouble()
                     )
-                } else {
-                    ApiClient.service.createGoal(
-                        GoalCreateRequest(
-                            startDate = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
-                            kcalTarget = state.kcalTarget.toDoubleOrNull() ?: 2000.0,
-                            proteinGTarget = state.protein.grams,
-                            carbsGTarget = state.carbs.grams,
-                            fatGTarget = state.fat.grams,
-                            fiberGTarget = state.fiber.grams
-                        )
-                    )
-                }
-                _uiState.value = _uiState.value.copy(isSaving = false, saveSuccess = true)
+                )
+                _uiState.value = _uiState.value.copy(
+                    isSaving = false,
+                    saveSuccess = true,
+                    savedFatPct = state.fatPct,
+                    savedProteinPct = state.proteinPct,
+                    savedCarbsPct = state.carbsPct,
+                    savedFiberPct = state.fiberPct
+                )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isSaving = false,

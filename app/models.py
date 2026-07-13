@@ -308,7 +308,7 @@ class PhysiologicalGuideline(Base):
     __tablename__ = "physiological_guidelines"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)  # e.g. "protein_per_kg_bodyweight"
+    name = Column(String, nullable=False, unique=True)  # e.g. "protein_per_kg_bodyweight"
     min_value = Column(Numeric, nullable=True)
     recommended_value = Column(Numeric, nullable=True)
     max_value = Column(Numeric, nullable=True)
@@ -318,9 +318,11 @@ class PhysiologicalGuideline(Base):
 
 class UserProfile(Base):
     """
-    NOTE: bodyweight is NOT stored here — read live from Health Connect
-    (Android). This table only holds things that aren't better sourced
-    elsewhere.
+    NOTE: bodyweight is a manual stopgap here (weight_kg) until Health
+    Connect integration is built on the Android side -- at that point,
+    this field should be treated as a fallback/cache, with Health
+    Connect's latest reading preferred when available (see design doc's
+    original intent for bodyweight sourcing).
     """
 
     __tablename__ = "user_profile"
@@ -330,10 +332,17 @@ class UserProfile(Base):
     profile_pic_path = Column(String, nullable=True)
     height_cm = Column(Numeric, nullable=True)
     age = Column(Integer, nullable=True)
+    # Manual stopgap -- see class docstring. Nullable since not every
+    # user will have entered it yet, especially before this existed.
+    weight_kg = Column(Numeric, nullable=True)
     # 'estrogen' | 'testosterone' | 'other' | NULL — used only where
     # relevant for guideline calculations, not as a demographic label.
     primary_hormone = Column(String, nullable=True)
     activity_level = Column(String, nullable=True)
+    # 'lose' | 'maintain' | 'gain' -- drives the kcal goal calculation
+    # (see routers/user_profile.py). Stored on the profile since it's a
+    # standing orientation, not a one-off calculation parameter.
+    goal_type = Column(String, nullable=True)
     # e.g. "Europe/Copenhagen" — used to resolve local `date` on logs
     timezone = Column(String, nullable=False, default="Europe/Copenhagen")
 

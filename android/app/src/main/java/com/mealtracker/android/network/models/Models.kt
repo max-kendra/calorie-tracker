@@ -168,3 +168,53 @@ data class MealGoalSplitRequest(
 data class MealGoalSplitsUpdateRequest(
     val splits: List<MealGoalSplitRequest>
 )
+
+/**
+ * Mirrors UserProfileOut from app/schemas.py. All fields nullable/optional
+ * since a fresh profile starts empty (auto-created on first GET /profile).
+ */
+@Serializable
+data class UserProfile(
+    val id: Int,
+    val name: String? = null,
+    @SerialName("profile_pic_path") val profilePicPath: String? = null,
+    @SerialName("height_cm") val heightCm: String? = null,
+    val age: Int? = null,
+    @SerialName("weight_kg") val weightKg: String? = null,
+    @SerialName("primary_hormone") val primaryHormone: String? = null,
+    @SerialName("activity_level") val activityLevel: String? = null,
+    @SerialName("goal_type") val goalType: String? = null,
+    val timezone: String,
+    @SerialName("updated_at") val updatedAt: String
+)
+
+/**
+ * Request body for PATCH /profile. Sends plain numbers (not
+ * Decimal-as-string), same rule as the other *Request models above.
+ */
+@Serializable
+data class UserProfileUpdateRequest(
+    val name: String? = null,
+    @SerialName("height_cm") val heightCm: Double? = null,
+    val age: Int? = null,
+    @SerialName("weight_kg") val weightKg: Double? = null,
+    @SerialName("primary_hormone") val primaryHormone: String? = null,
+    @SerialName("activity_level") val activityLevel: String? = null,
+    @SerialName("goal_type") val goalType: String? = null
+)
+
+/**
+ * Mirrors KcalGoalCalculationResult from app/schemas.py. All values are
+ * whole integers now (rounded to the nearest 25 for
+ * recommended/low/high on the backend) -- no fractional-calorie parsing
+ * needed here.
+ */
+@Serializable
+data class KcalGoalCalculationResult(
+    val bmr: Int,
+    val tdee: Int,
+    @SerialName("recommended_kcal") val recommendedKcal: Int,
+    @SerialName("kcal_low") val kcalLow: Int,
+    @SerialName("kcal_high") val kcalHigh: Int,
+    @SerialName("floor_applied") val floorApplied: Boolean
+)

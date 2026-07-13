@@ -5,8 +5,11 @@ import com.mealtracker.android.network.models.GoalCreateRequest
 import com.mealtracker.android.network.models.GoalUpdateRequest
 import com.mealtracker.android.network.models.HealthResponse
 import com.mealtracker.android.network.models.Item
+import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
+import com.mealtracker.android.network.models.UserProfile
+import com.mealtracker.android.network.models.UserProfileUpdateRequest
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.PATCH
@@ -19,9 +22,6 @@ import retrofit2.http.Query
  * Retrofit turns this interface into real HTTP calls. Each function here
  * corresponds to one endpoint on the FastAPI backend (see the backend's
  * app/routers directory for what each one actually does server-side).
- *
- * Add more functions as we build out each screen, mirroring the backend
- * routers one at a time (items -> recipes -> logs -> goals -> ...).
  */
 interface ApiService {
 
@@ -65,4 +65,18 @@ interface ApiService {
         @Path("goalId") goalId: Int,
         @Body request: MealGoalSplitsUpdateRequest
     ): Goal
+
+    // Single-user profile -- auto-created on first access (backend:
+    // GET /profile).
+    @GET("profile")
+    suspend fun getProfile(): UserProfile
+
+    @PATCH("profile")
+    suspend fun updateProfile(@Body request: UserProfileUpdateRequest): UserProfile
+
+    // Reads height/age/weight/hormone/activity_level/goal_type from the
+    // STORED profile -- no request body. Throws 400 (HttpException) if
+    // required profile fields are missing.
+    @POST("profile/calculate-kcal-goal")
+    suspend fun calculateKcalGoal(): KcalGoalCalculationResult
 }
