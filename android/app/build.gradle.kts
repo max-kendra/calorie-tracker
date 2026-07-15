@@ -94,8 +94,18 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
-    implementation(libs.easycrop)
     implementation(libs.health.connect.client)
+    // Forces a real Guava dependency into the graph -- without this,
+    // Health Connect's transitive deps can pull in the empty
+    // com.google.guava:listenablefuture:1.0 placeholder artifact (some
+    // libraries use it when they only need the ListenableFuture
+    // INTERFACE, not full Guava), and Gradle's default version-based
+    // conflict resolution can end up picking that empty placeholder
+    // over the real Guava that CameraX needs an actual implementation
+    // from -- causing "Cannot access class 'ListenableFuture'" at
+    // compile time even though the import resolves fine. See:
+    // https://github.com/google/guava/issues/2960
+    implementation("com.google.guava:guava:33.3.1-android")
     implementation("androidx.transition:transition:1.7.0")
 
     debugImplementation(libs.androidx.ui.tooling)

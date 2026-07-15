@@ -23,6 +23,31 @@ httpx = "^0.27.2"           # USDA FoodData Central API calls
 easyocr = "^1.7.2"          # OCR for nutrition labels (replaced pytesseract -- better accuracy on real photos)
 numpy = "^1.26.0"           # EasyOCR takes images as numpy arrays; also comes in transitively via easyocr/torch, but we import it directly in app/ocr.py so pinning it explicitly
 
+# EasyOCR depends on torch/torchvision. Pinned to PyTorch's own CPU-only
+# wheel index (below) instead of letting the resolver pick whatever the
+# default "torch" package on PyPI resolves to -- on some recent PyTorch
+# versions that default build pulls in several NVIDIA CUDA packages
+# (nvidia-cusparselt, cublas, cudnn, nccl, ...) as dependencies, each
+# hundreds of MB to 1GB+, totally useless on a Pi with no NVIDIA GPU, and
+# enough on their own to blow through a small disk mid-build. This alone
+# is what was filling the disk on the earlier failed build (see the
+# "nvidia_cusparselt...manylinux2014_aarch64.whl" line in that error) --
+# EasyOCR's own code + models are small (~100-200MB) by comparison.
+#
+# FALLBACK if the pytorch-cpu index below turns out not to publish an
+# aarch64 (Pi) wheel for this torch version: pin torch to an older
+# version instead (e.g. "torch = \"<2.8\"", removing the `source` line),
+# since PyPI's default aarch64 "torch" wheel was CPU-only-only prior to
+# 2.8 -- only from 2.8 onward did NVIDIA's aarch64 CUDA wheels start
+# appearing as a resolvable option there too.
+torch = { version = "^2.4", source = "pytorch-cpu" }
+torchvision = { version = "*", source = "pytorch-cpu" }
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
 httpx = "^0.27.2"

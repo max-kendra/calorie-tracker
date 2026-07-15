@@ -72,7 +72,8 @@
         <!-- Exposes our private cache-file images (captured photos
              awaiting crop) as content:// URIs. No longer strictly
              required for crossing to another app's Activity now that
-             cropping (easycrop) is in-process/Compose-native rather than
+             cropping is now a self-contained, in-process Compose dialog
+             (see ui/components/CropDialog.kt) rather than
              UCrop's separate Activity, but content:// URIs are still the
              safer/more broadly-compatible way to hand off these images
              (e.g. to ContentResolver-based readers), so kept as-is. -->

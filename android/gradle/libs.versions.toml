@@ -15,7 +15,6 @@ viewmodelCompose = "2.8.7"
 lifecycleViewmodelKtx = "2.8.7"
 camerax = "1.4.1"
 mlkitBarcodeScanning = "17.3.0"
-easycrop = "0.1.1"
 healthConnect = "1.1.0"
 
 [libraries]
@@ -42,15 +41,10 @@ androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", 
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
-# Crop UI for the nutrition-label photo step (source: Maven Central) --
-# lets the user tightly crop out ingredient lists/marketing text/other
-# noise before OCR runs, which should meaningfully help OCR accuracy on
-# real package photos. Native Compose (a Composable + suspend crop()
-# call, no separate Activity/theme/manifest entry needed) -- replaced
-# UCrop, which required its own AppCompat-themed Activity and pulled in
-# a transitive androidx.transition dependency that wasn't always
-# resolving correctly at runtime.
-easycrop = { group = "io.github.mr0xf00", name = "easycrop", version.ref = "easycrop" }
+# Crop UI for the nutrition-label/product-photo steps is now a
+# hand-rolled component (ui/components/CropDialog.kt), not a third-party
+# library -- see that file's doc comment for why (both UCrop and then
+# easycrop caused real build breakage). No dependency needed here.
 
 # Reads body-weight history for the Profile screen's weight graph --
 # read-only (see health/HealthConnectManager.kt), never writes. Requires
