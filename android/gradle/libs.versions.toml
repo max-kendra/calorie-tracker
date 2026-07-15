@@ -16,6 +16,7 @@ lifecycleViewmodelKtx = "2.8.7"
 camerax = "1.4.1"
 mlkitBarcodeScanning = "17.3.0"
 easycrop = "0.1.1"
+healthConnect = "1.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -50,6 +51,13 @@ mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning"
 # a transitive androidx.transition dependency that wasn't always
 # resolving correctly at runtime.
 easycrop = { group = "io.github.mr0xf00", name = "easycrop", version.ref = "easycrop" }
+
+# Reads body-weight history for the Profile screen's weight graph --
+# read-only (see health/HealthConnectManager.kt), never writes. Requires
+# the separate Health Connect app on Android 9-13 (built into the OS on
+# 14+); availability/permission state is checked at runtime, not
+# assumed, since the Health Connect app isn't guaranteed to be present.
+health-connect-client = { group = "androidx.health.connect", name = "connect-client", version.ref = "healthConnect" }
 
 # Networking -- Retrofit for the HTTP client, OkHttp as its underlying
 # engine (also lets us add the X-API-Key header via an interceptor),

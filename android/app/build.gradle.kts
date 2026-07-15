@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.easycrop)
+    implementation(libs.health.connect.client)
     implementation("androidx.transition:transition:1.7.0")
 
     debugImplementation(libs.androidx.ui.tooling)

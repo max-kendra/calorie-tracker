@@ -208,6 +208,8 @@ data class UserProfile(
     @SerialName("height_cm") val heightCm: Int? = null,
     val age: Int? = null,
     @SerialName("weight_kg") val weightKg: String? = null,
+    @SerialName("starting_weight_kg") val startingWeightKg: String? = null,
+    @SerialName("goal_weight_kg") val goalWeightKg: String? = null,
     @SerialName("primary_hormone") val primaryHormone: String? = null,
     @SerialName("activity_level") val activityLevel: String? = null,
     @SerialName("goal_type") val goalType: String? = null,
@@ -225,6 +227,8 @@ data class UserProfileUpdateRequest(
     @SerialName("height_cm") val heightCm: Int? = null,
     val age: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
+    @SerialName("starting_weight_kg") val startingWeightKg: Double? = null,
+    @SerialName("goal_weight_kg") val goalWeightKg: Double? = null,
     @SerialName("primary_hormone") val primaryHormone: String? = null,
     @SerialName("activity_level") val activityLevel: String? = null,
     @SerialName("goal_type") val goalType: String? = null

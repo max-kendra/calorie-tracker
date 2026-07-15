@@ -457,6 +457,11 @@ class UserProfileBase(BaseModel):
     # Manual stopgap until Health Connect integration exists on Android --
     # see UserProfile model docstring.
     weight_kg: Optional[Decimal] = None
+    # Fixed reference points for the Profile screen's weight-goal summary
+    # -- see UserProfile model docstring for why these are NOT superseded
+    # by Health Connect the way weight_kg conceptually is.
+    starting_weight_kg: Optional[Decimal] = None
+    goal_weight_kg: Optional[Decimal] = None
     primary_hormone: Optional[PrimaryHormone] = None
     activity_level: Optional[ActivityLevel] = None
     goal_type: Optional[GoalType] = None
@@ -469,6 +474,8 @@ class UserProfileUpdate(BaseModel):
     height_cm: Optional[int] = None
     age: Optional[int] = None
     weight_kg: Optional[Decimal] = None
+    starting_weight_kg: Optional[Decimal] = None
+    goal_weight_kg: Optional[Decimal] = None
     primary_hormone: Optional[PrimaryHormone] = None
     activity_level: Optional[ActivityLevel] = None
     goal_type: Optional[GoalType] = None

@@ -8,6 +8,22 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Health Connect: read-only access to body-weight history for the
+         Profile screen's weight graph (see health/HealthConnectManager.kt).
+         We never request WRITE_WEIGHT - this app is not a source of
+         weight data, only a reader of whatever the user logs elsewhere
+         (a smart scale's app, Health Connect's own UI, etc.). -->
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+
+    <!-- Makes the Health Connect app visible to package-visibility
+         queries (required on Android 11+ to check whether it's
+         installed / launch its permission UI) on Android 9-13, where
+         Health Connect is a separate app rather than a framework
+         module built into the OS (14+). -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -24,7 +40,34 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Required by Health Connect: lets the system link to an
+                 in-app explanation of why we request READ_WEIGHT, shown
+                 from Health Connect's own permission-management UI. We
+                 don't have a dedicated rationale screen yet, so this
+                 currently just opens the app itself (MainActivity) -
+                 fine functionally, but worth replacing with a real
+                 explanation screen before a Play Store release. -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
         </activity>
+
+        <!-- Alternate rationale intent-filter action name required for
+             Health Connect versions prior to the androidx.health.*
+             action above - both are declared per Health Connect's own
+             integration guidance, since which one is used depends on
+             the Health Connect version installed on the device. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Exposes our private cache-file images (captured photos
              awaiting crop) as content:// URIs. No longer strictly

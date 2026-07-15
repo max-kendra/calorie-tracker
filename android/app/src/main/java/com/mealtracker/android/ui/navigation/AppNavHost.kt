@@ -21,6 +21,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mealtracker.android.ui.screens.AddItemScreen
+import com.mealtracker.android.ui.screens.CalorieGoalScreen
+import com.mealtracker.android.ui.screens.EditProfileScreen
 import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
@@ -28,6 +30,8 @@ import com.mealtracker.android.ui.screens.MealCalorieGoalScreen
 import com.mealtracker.android.ui.screens.MealDetailScreen
 import com.mealtracker.android.ui.screens.MealPlanScreen
 import com.mealtracker.android.ui.screens.ProfileScreen
+import com.mealtracker.android.ui.screens.SettingsScreen
+import com.mealtracker.android.ui.screens.WeightGoalScreen
 
 /**
  * The four bottom-nav destinations from the design doc: Home / Journal /
@@ -113,9 +117,27 @@ fun AppNavHost() {
             composable(Destination.MealPlan.route) { MealPlanScreen() }
             composable(Destination.Profile.route) {
                 ProfileScreen(
-                    onNavigateToMacronutrients = { navController.navigate("macronutrients") },
-                    onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") }
+                    onNavigateToSettings = { navController.navigate("profile_settings") }
                 )
+            }
+            composable("profile_settings") {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onNavigateToEditProfile = { navController.navigate("profile_settings/edit") },
+                    onNavigateToCalorieGoal = { navController.navigate("profile_settings/calorie_goal") },
+                    onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
+                    onNavigateToMacronutrients = { navController.navigate("macronutrients") },
+                    onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") }
+                )
+            }
+            composable("profile_settings/edit") {
+                EditProfileScreen(onBack = { navController.popBackStack() })
+            }
+            composable("profile_settings/calorie_goal") {
+                CalorieGoalScreen(onBack = { navController.popBackStack() })
+            }
+            composable("profile_settings/weight_goal") {
+                WeightGoalScreen(onBack = { navController.popBackStack() })
             }
             composable("macronutrients") {
                 MacronutrientsScreen(

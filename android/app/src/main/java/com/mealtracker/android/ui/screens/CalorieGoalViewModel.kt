@@ -14,9 +14,9 @@ import retrofit2.HttpException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-// Standard nutrition-labeling kcal-per-gram conversion factors -- same
-// constants used in MacronutrientsViewModel, needed here to preserve a
-// goal's macro RATIO when its kcal_target changes (see saveAsGoal()).
+// Standard nutrition-labeling kcal-per-gram conversion factors -- needed
+// to preserve a goal's macro RATIO when its kcal_target changes (see
+// saveAsGoal()).
 private const val KCAL_PER_G_PROTEIN = 4.0
 private const val KCAL_PER_G_CARBS = 4.0
 private const val KCAL_PER_G_FAT = 9.0
@@ -32,68 +32,48 @@ private const val DEFAULT_FIBER_PCT = 3.0
 // stepping stays consistent with what the calculation itself produces.
 private const val KCAL_STEP = 25
 
-data class ProfileUiState(
+data class CalorieGoalUiState(
     val isLoading: Boolean = true,
-    val name: String = "",
-    val heightCm: String = "",
-    val age: String = "",
+    val loadError: String? = null,
+
+    // TDEE-calculation inputs, stored on the profile (weight_kg,
+    // activity_level, goal_type) -- height/age come from the profile
+    // too but are edited on the separate Edit Profile screen, not here.
     val weightKg: String = "",
-    val primaryHormone: String? = null, // "testosterone" | "estrogen" | "other" | null
-    val activityLevel: String? = null, // "sedentary" | "light" | "moderate" | "active" | "very_active"
-    val goalType: String? = null, // "lose" | "maintain" | "gain"
+    val activityLevel: String? = null,
+    val goalType: String? = null,
+    val heightCm: Int? = null,
+    val age: Int? = null,
+
     val isSaving: Boolean = false,
     val saveError: String? = null,
     val saveSuccess: Boolean = false,
-    val loadError: String? = null,
-    // Whether an active Goal already exists on the backend -- determines
-    // whether saveAsGoal() creates or updates, and whether the
-    // Macronutrients/Meal Calorie Goal screens are unlocked yet.
+
     val existingGoalId: Int? = null,
     val isCalculating: Boolean = false,
     val calcResult: KcalGoalCalculationResult? = null,
     val calcError: String? = null,
-    // User-adjustable, defaults to calcResult.recommendedKcal once a
-    // calculation succeeds. Deliberately NOT hard-constrained to
-    // [kcal_low, kcal_high] -- the suggested range is shown as reference
-    // text, but the final decision belongs to the user, same as any
-    // commercial tracker lets you set a goal below what it recommends.
-    // A visible warning (not a block) appears if this drops below 1500.
     val editableKcalTarget: Int = 0,
     val isSavingGoal: Boolean = false,
     val goalSaveError: String? = null,
     val goalSaveSuccess: Boolean = false
 ) {
-    /**
-     * Required fields for the kcal-goal calculation to work (matches the
-     * backend's own required-field check in calculate-kcal-goal).
-     * primary_hormone is deliberately NOT required -- the backend falls
-     * back to an averaged constant if it's unset (see design doc).
-     */
+    /** Required fields for the kcal-goal calculation to work (matches
+     * the backend's own required-field check). */
     val isProfileComplete: Boolean
-        get() = heightCm.toIntOrNull() != null &&
-            age.toIntOrNull() != null &&
+        get() = heightCm != null &&
+            age != null &&
             weightKg.toDoubleOrNull() != null &&
             activityLevel != null &&
             goalType != null
 
-    /**
-     * Gates access to the Macronutrients / Meal Calorie Goal screens --
-     * per design: profile must be filled in AND an active goal (with a
-     * real kcal_target) must exist before those screens make sense.
-     */
-    val isUnlocked: Boolean get() = isProfileComplete && existingGoalId != null
-
-    /** Warning (not a block) shown when the user has adjusted the target
-     * below the general safety floor -- see design doc discussion: this
-     * is a soft warning since the final call belongs to the user, not
-     * something the app should hard-prevent. */
     val belowSafetyFloor: Boolean get() = calcResult != null && editableKcalTarget < 1500
 }
 
-class ProfileViewModel : ViewModel() {
+class CalorieGoalViewModel : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ProfileUiState())
-    val uiState: StateFlow<ProfileUiState> = _uiState
+    private val _uiState = MutableStateFlow(CalorieGoalUiState())
+    val uiState: StateFlow<CalorieGoalUiState> = _uiState
 
     init {
         loadProfile()
@@ -103,24 +83,18 @@ class ProfileViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val profile = ApiClient.service.getProfile()
-
-                // Separately check whether an active goal exists --
-                // 404 just means "none yet," not an error.
                 val goalId = try {
                     ApiClient.service.getActiveGoal().id
                 } catch (e: HttpException) {
                     if (e.code() == 404) null else throw e
                 }
-
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    name = profile.name ?: "",
-                    heightCm = profile.heightCm?.toString() ?: "",
-                    age = profile.age?.toString() ?: "",
                     weightKg = profile.weightKg ?: "",
-                    primaryHormone = profile.primaryHormone,
                     activityLevel = profile.activityLevel,
                     goalType = profile.goalType,
+                    heightCm = profile.heightCm,
+                    age = profile.age,
                     existingGoalId = goalId
                 )
             } catch (e: Exception) {
@@ -132,78 +106,43 @@ class ProfileViewModel : ViewModel() {
         }
     }
 
-    fun updateName(value: String) {
-        _uiState.value = _uiState.value.copy(name = value)
-    }
+    fun updateWeightKg(value: String) { _uiState.value = _uiState.value.copy(weightKg = value) }
+    fun updateActivityLevel(value: String) { _uiState.value = _uiState.value.copy(activityLevel = value) }
+    fun updateGoalType(value: String) { _uiState.value = _uiState.value.copy(goalType = value) }
 
-    fun updateHeightCm(value: String) {
-        _uiState.value = _uiState.value.copy(heightCm = value)
-    }
-
-    fun updateAge(value: String) {
-        _uiState.value = _uiState.value.copy(age = value)
-    }
-
-    fun updateWeightKg(value: String) {
-        _uiState.value = _uiState.value.copy(weightKg = value)
-    }
-
-    fun updatePrimaryHormone(value: String) {
-        _uiState.value = _uiState.value.copy(primaryHormone = value)
-    }
-
-    fun updateActivityLevel(value: String) {
-        _uiState.value = _uiState.value.copy(activityLevel = value)
-    }
-
-    fun updateGoalType(value: String) {
-        _uiState.value = _uiState.value.copy(goalType = value)
-    }
-
-    fun saveProfile() {
+    /** Saves weight/activity/goal_type to the profile -- must happen
+     * before calculate(), since the backend's calculate-kcal-goal
+     * endpoint reads these from the STORED profile, not from a request
+     * body (see backend docstring). */
+    fun saveInputsThenCalculate() {
         val state = _uiState.value
-        _uiState.value = state.copy(isSaving = true, saveError = null)
+        if (!state.isProfileComplete) return
+
+        _uiState.value = state.copy(isSaving = true, saveError = null, isCalculating = true, calcError = null, calcResult = null)
 
         viewModelScope.launch {
             try {
                 ApiClient.service.updateProfile(
                     UserProfileUpdateRequest(
-                        name = state.name.ifBlank { null },
-                        heightCm = state.heightCm.toIntOrNull(),
-                        age = state.age.toIntOrNull(),
                         weightKg = state.weightKg.toDoubleOrNull(),
-                        primaryHormone = state.primaryHormone,
                         activityLevel = state.activityLevel,
                         goalType = state.goalType
                     )
                 )
-                _uiState.value = _uiState.value.copy(isSaving = false, saveSuccess = true)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isSaving = false,
-                    saveError = e.message ?: "Failed to save"
-                )
-            }
-        }
-    }
+                _uiState.value = _uiState.value.copy(isSaving = true, saveSuccess = true)
 
-    fun calculate() {
-        val state = _uiState.value
-        if (!state.isProfileComplete) return
-
-        _uiState.value = state.copy(isCalculating = true, calcError = null, calcResult = null)
-
-        viewModelScope.launch {
-            try {
                 val result = ApiClient.service.calculateKcalGoal()
                 _uiState.value = _uiState.value.copy(
+                    isSaving = false,
                     isCalculating = false,
                     calcResult = result,
                     editableKcalTarget = result.recommendedKcal
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
+                    isSaving = false,
                     isCalculating = false,
+                    saveError = e.message ?: "Failed to save",
                     calcError = e.message ?: "Calculation failed"
                 )
             }
@@ -223,10 +162,9 @@ class ProfileViewModel : ViewModel() {
     /**
      * Saves the calculated kcal target as the active Goal's kcal_target.
      * If a goal already exists, its current macro RATIO (not absolute
-     * grams) is preserved -- e.g. if it was previously 30% protein, it
-     * stays 30% protein at the new kcal total, rather than keeping the
-     * old gram amounts (which would silently change the effective
-     * percentage). If no goal exists yet, sensible defaults are used.
+     * grams) is preserved. If no goal exists yet, sensible defaults are
+     * used. See ProfileViewModel's (now removed) original version of
+     * this function for the same logic -- unchanged, just relocated.
      */
     fun saveAsGoal() {
         val state = _uiState.value

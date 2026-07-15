@@ -1,6 +1,7 @@
 package com.mealtracker.android.ui.screens
 
-import androidx.compose.foundation.horizontalScroll
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,52 +9,57 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-
-private val ACTIVITY_LEVELS = listOf(
-    "sedentary" to "Sedentary",
-    "light" to "Light",
-    "moderate" to "Moderate",
-    "active" to "Active",
-    "very_active" to "Very Active"
-)
-
-private val GOAL_TYPES = listOf(
-    "lose" to "Lose weight",
-    "maintain" to "Maintain",
-    "gain" to "Gain weight"
-)
-
-private val HORMONES = listOf(
-    "testosterone" to "Testosterone",
-    "estrogen" to "Estrogen"
-)
+import com.mealtracker.android.health.HealthConnectManager
+import com.mealtracker.android.ui.components.WeightLineChart
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 @Composable
 fun ProfileScreen(
-    viewModel: ProfileViewModel = viewModel(),
-    onNavigateToMacronutrients: () -> Unit,
-    onNavigateToMealCalorieGoal: () -> Unit
+    viewModel: ProfileOverviewViewModel = viewModel(),
+    onNavigateToSettings: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
+        HealthConnectManager.requestPermissionsContract()
+    ) {
+        // Result itself (which permissions were granted) isn't used
+        // directly -- simplest to just re-check overall state, which
+        // also covers the "user denied" case without extra branching.
+        viewModel.refreshHealthConnectState(context)
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.initialize(context)
+    }
 
     if (state.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -68,7 +74,41 @@ fun ProfileScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("Profile", style = MaterialTheme.typography.headlineSmall)
+        // ----- Header: avatar + name + settings -----
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                // No image-loading library wired up yet (see
+                // profilePicPath, currently unused here) -- falls back
+                // to a plain icon regardless of whether a photo exists.
+                // Swap in a real image loader (e.g. Coil) to render
+                // state.profilePicPath when this needs to show an
+                // actual photo.
+                Icon(
+                    Icons.Filled.Person,
+                    contentDescription = "Profile picture",
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+            Text(
+                state.name?.takeIf { it.isNotBlank() } ?: "Your profile",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings")
+            }
+        }
 
         if (state.loadError != null) {
             Text(
@@ -78,205 +118,171 @@ fun ProfileScreen(
             )
         }
 
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-        OutlinedTextField(
-            value = state.name,
-            onValueChange = viewModel::updateName,
-            label = { Text("Name (optional)") },
-            modifier = Modifier.fillMaxWidth()
+        // ----- Weight goal summary -----
+        WeightGoalSummary(
+            startingWeightKg = state.startingWeightKg,
+            currentWeightKg = state.currentWeightKg,
+            goalWeightKg = state.goalWeightKg
         )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.heightCm,
-            onValueChange = viewModel::updateHeightCm,
-            label = { Text("Height (cm)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.age,
-            onValueChange = viewModel::updateAge,
-            label = { Text("Age") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.weightKg,
-            onValueChange = viewModel::updateWeightKg,
-            label = { Text("Weight (kg)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Text("Primary hormone (optional)", style = MaterialTheme.typography.labelLarge)
-        ChipRow(HORMONES, state.primaryHormone, viewModel::updatePrimaryHormone)
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Text("Activity level", style = MaterialTheme.typography.labelLarge)
-        ChipRow(ACTIVITY_LEVELS, state.activityLevel, viewModel::updateActivityLevel)
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Text("Goal", style = MaterialTheme.typography.labelLarge)
-        ChipRow(GOAL_TYPES, state.goalType, viewModel::updateGoalType)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 
-        Button(
-            onClick = { viewModel.saveProfile() },
-            enabled = !state.isSaving,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (state.isSaving) "Saving..." else "Save Profile")
-        }
-        if (state.saveError != null) {
-            Text(
-                "Couldn't save: ${state.saveError}",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        if (state.saveSuccess) {
-            Text("\u2705 Saved", color = MaterialTheme.colorScheme.primary)
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-
-        if (!state.isProfileComplete) {
-            Text(
-                "Fill in height, age, weight, activity level, and goal above to calculate your calorie goal.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            Text("Calorie Goal", style = MaterialTheme.typography.titleMedium)
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-
-            Button(
-                onClick = { viewModel.calculate() },
-                enabled = !state.isCalculating,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (state.isCalculating) "Calculating..." else "Calculate My Calorie Goal")
-            }
-
-            if (state.calcError != null) {
+        // ----- Health Connect gating -----
+        when {
+            !state.healthConnectAvailable -> {
                 Text(
-                    "Couldn't calculate: ${state.calcError}",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            val result = state.calcResult
-            if (result != null) {
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-                Text("BMR: ${result.bmr} kcal", style = MaterialTheme.typography.bodyMedium)
-                Text("TDEE: ${result.tdee} kcal", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "Suggested range: ${result.kcalLow}\u2013${result.kcalHigh} kcal",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Health Connect isn't available on this device. Install it from " +
+                        "the Play Store to see your weight history here.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (result.floorApplied) {
-                    Text(
-                        "Note: the low end was raised to the 1500 kcal/day safety floor.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { viewModel.decrementKcalTarget() }) {
-                        Text("\u2212", style = MaterialTheme.typography.headlineMedium)
-                    }
-                    Text(
-                        "${state.editableKcalTarget} Cal",
-                        style = MaterialTheme.typography.headlineSmall,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                    IconButton(onClick = { viewModel.incrementKcalTarget() }) {
-                        Text("+", style = MaterialTheme.typography.headlineMedium)
-                    }
-                }
-
-                if (state.belowSafetyFloor) {
-                    Text(
-                        "\u26a0\ufe0f Going below 1500 kcal/day isn't recommended without medical supervision.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+            }
+            !state.healthConnectPermissionGranted -> {
+                Text(
+                    "Connect Health Connect to see your weight trend here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
                 Button(
-                    onClick = { viewModel.saveAsGoal() },
-                    enabled = !state.isSavingGoal,
+                    onClick = { healthConnectPermissionLauncher.launch(HealthConnectManager.PERMISSIONS) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (state.isSavingGoal) "Saving..." else "Use as my Calorie Goal")
+                    Text("Connect Health Connect")
                 }
-                if (state.goalSaveError != null) {
+            }
+            else -> {
+                // ----- Range selector -----
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    WeightRange.entries.forEach { range ->
+                        FilterChip(
+                            selected = state.selectedRange == range,
+                            onClick = { viewModel.selectRange(context, range) },
+                            label = { Text(range.label) }
+                        )
+                    }
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+
+                if (state.isLoadingWeights) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    WeightLineChart(
+                        points = state.weightHistory.map { it.time to it.kg },
+                        goalKg = state.goalWeightKg
+                    )
+                }
+
+                if (state.weightsError != null) {
                     Text(
-                        "Couldn't save: ${state.goalSaveError}",
+                        state.weightsError!!,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                if (state.goalSaveSuccess) {
-                    Text("\u2705 Goal saved", color = MaterialTheme.colorScheme.primary)
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+                Text("Weights saved", style = MaterialTheme.typography.titleMedium)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+
+                if (state.weightHistory.isEmpty()) {
+                    Text(
+                        "No weight entries in this range.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
+                    // Most recent first for the list (readWeightHistory
+                    // returns oldest-first, which is what the chart wants).
+                    state.weightHistory.sortedByDescending { it.time }.forEach { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "${formatKg(entry.kg)}kg",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                dateFormatter.format(entry.time.atZone(ZoneId.systemDefault())),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        HorizontalDivider()
+                    }
                 }
             }
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-
-        if (state.isUnlocked) {
-            Button(onClick = onNavigateToMacronutrients, modifier = Modifier.fillMaxWidth()) {
-                Text("Set Calorie & Macro Goals")
-            }
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-            Button(onClick = onNavigateToMealCalorieGoal, modifier = Modifier.fillMaxWidth()) {
-                Text("Set Meal Calorie Split")
-            }
-        } else {
-            Text(
-                "Complete your profile and set a calorie goal above to unlock macro and meal-split settings.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
 
 @Composable
-private fun ChipRow(
-    options: List<Pair<String, String>>,
-    selected: String?,
-    onSelect: (String) -> Unit
+private fun WeightGoalSummary(
+    startingWeightKg: Double?,
+    currentWeightKg: Double?,
+    goalWeightKg: Double?
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        options.forEach { (value, label) ->
-            FilterChip(
-                selected = selected == value,
-                onClick = { onSelect(value) },
-                label = { Text(label) }
-            )
-        }
+    if (startingWeightKg == null && currentWeightKg == null && goalWeightKg == null) {
+        Text(
+            "Set a starting and goal weight in Settings \u2192 Weight goal to see your progress here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        return
     }
+
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        WeightStat("Start weight", startingWeightKg)
+        WeightStat("Current weight", currentWeightKg)
+        WeightStat("Goal weight", goalWeightKg)
+    }
+
+    val diff = if (currentWeightKg != null && goalWeightKg != null) currentWeightKg - goalWeightKg else null
+    if (diff != null) {
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+        val remainingText = when {
+            kotlin.math.abs(diff) < 0.05 -> "You've reached your goal weight \uD83C\uDF89"
+            diff > 0 -> "${formatKg(diff)}kg to go"
+            else -> "${formatKg(-diff)}kg past your goal"
+        }
+        Text(
+            remainingText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+@Composable
+private fun WeightStat(label: String, kg: Double?) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            if (kg != null) "${formatKg(kg)}kg" else "\u2013",
+            style = MaterialTheme.typography.titleLarge
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun formatKg(kg: Double): String {
+    // One decimal place, trimmed to a whole number when exact (e.g.
+    // "88" instead of "88.0") -- matches how the design inspiration
+    // displays weights.
+    val rounded = (kg * 10).roundToInt() / 10.0
+    return if (rounded == rounded.toInt().toDouble()) rounded.toInt().toString() else rounded.toString()
 }
