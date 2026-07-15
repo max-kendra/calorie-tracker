@@ -69,6 +69,12 @@ fun LiveLabelCaptureView(
             }, ContextCompat.getMainExecutor(ctx))
 
             previewView
+        },
+        onRelease = {
+            // Composable left composition (navigated away, disposed, etc.) --
+            // unbind so we don't leave a dangling camera session bound to a
+            // PreviewView that's about to be destroyed.
+            ProcessCameraProvider.getInstance(context).get().unbindAll()
         }
     )
 }
