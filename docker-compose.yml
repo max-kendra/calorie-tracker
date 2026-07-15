@@ -12,6 +12,13 @@ services:
     # No `ports:` needed under host networking -- the container shares
     # the Pi's network stack directly, so port 8000 is already exposed
     # on the Pi itself once the container is running.
+    # Persists uploaded product photos (see POST /items/scan-product-photo)
+    # on the host, outside the container's filesystem -- otherwise they'd
+    # vanish on every rebuild/recreate. Left-hand side is a path on the
+    # Pi; right-hand side must match Settings.media_dir resolved against
+    # the container's WORKDIR (/app), i.e. media_dir="media" -> /app/media.
+    volumes:
+      - ./media:/app/media
 
 # Note: if you ever containerize Postgres too, you'd switch back to
 # bridge networking with an explicit `ports: ["8000:8000"]` mapping and

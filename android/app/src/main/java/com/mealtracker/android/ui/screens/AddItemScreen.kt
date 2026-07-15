@@ -1,643 +1,380 @@
 package com.mealtracker.android.ui.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.Camera
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.FlashOff
-import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mealtracker.android.ui.components.LiveBarcodeScannerView
-import com.mealtracker.android.ui.components.LiveLabelCaptureView
-import com.mealtracker.android.ui.components.decodeBarcodeFromUri
-import com.yalantis.ucrop.UCrop
-import kotlinx.coroutines.delay
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.mealtracker.android.network.ApiClient
+import com.mealtracker.android.network.models.Item
+import com.mealtracker.android.network.models.ItemCreateRequest
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import retrofit2.HttpException
 
-// How long the live barcode scanner runs before offering a manual-entry
-// fallback -- see design doc: real barcodes do occasionally get worn or
-// printed badly, so this isn't a general "manual entry" escape hatch,
-// just a narrow fallback for when scanning genuinely can't read a
-// physically-present barcode.
-private const val BARCODE_TIMEOUT_MS = 8000L
+/**
+ * Barcode is now the mandatory first step -- there's no independent
+ * "Scan Label" or "Enter Manually" entry point, since without a barcode
+ * match there'd be nothing to check against and every new item needs
+ * SOME identifying step first (see design doc discussion). Flow:
+ *
+ *   SCAN_BARCODE (live, on-device, ~8s timeout)
+ *     -> BARCODE_LOOKUP -> BARCODE_RESULT
+ *         -> matched existing item: done
+ *         -> no match: one confirmation tap -> CAPTURE_PRODUCT_PHOTO
+ *   (or, if the timeout fires with nothing detected: a prompt offers
+ *    MANUAL_BARCODE_ENTRY, which feeds into the same lookup)
+ *
+ *   CAPTURE_PRODUCT_PHOTO (live, in-app camera OR gallery pick; always
+ *   cropped client-side before upload, same as the label step)
+ *     -> PROCESSING_PRODUCT_PHOTO -> CAPTURE_LABEL (name/brand/image
+ *        carried into state, pre-filled but still editable in the
+ *        eventual form -- see scanProductPhoto())
+ *
+ *   CAPTURE_LABEL (live, in-app camera OR gallery pick)
+ *     -> PROCESSING_LABEL -> ITEM_FORM (pre-filled, barcode/name/brand/
+ *        image carried over)
+ *         -> SAVING -> SAVED
+ *
+ * Editing an EXISTING item is a separate, not-yet-built feature (reached
+ * from a future My Foods browse screen, not this flow).
+ */
+enum class AddItemPhase {
+    SCAN_BARCODE, BARCODE_LOOKUP, BARCODE_RESULT, MANUAL_BARCODE_ENTRY,
+    CAPTURE_PRODUCT_PHOTO, PROCESSING_PRODUCT_PHOTO,
+    CAPTURE_LABEL, PROCESSING_LABEL, ITEM_FORM, SAVING, SAVED
+}
 
-@Composable
-fun AddItemScreen(
-    viewModel: AddItemViewModel = viewModel(),
-    onBack: () -> Unit = {},
-    onDone: () -> Unit = {}
-) {
-    val state by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
+data class AddItemUiState(
+    val phase: AddItemPhase = AddItemPhase.SCAN_BARCODE,
+    val scanError: String? = null,
 
-    var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                PackageManager.PERMISSION_GRANTED
-        )
+    // Shown when the live barcode scan times out with nothing detected.
+    val showManualEntryPrompt: Boolean = false,
+    val manualBarcodeInput: String = "",
+
+    // Barcode result -- see LiveBarcodeScannerView's doc comment for why
+    // the barcode must always be shown for user confirmation, regardless
+    // of decoder/source.
+    val scannedBarcode: String? = null,
+    val decoderUsed: String? = null,
+    val matchedItem: Item? = null,
+
+    // OCR context, shown as info/warnings in the item form
+    val ocrDetectedLanguage: String? = null,
+    val ocrPer100gConfirmed: Boolean = true,
+    val ocrWasUsed: Boolean = false,
+
+    // Product photo step -- image_path comes back from the backend once
+    // uploaded (see scanProductPhoto()) and is carried through to the
+    // final POST /items call so the photo gets attached to the item.
+    // guessedName/guessedBrand are rough OCR heuristics used ONLY to
+    // pre-fill `name`/`brand` below -- not kept as separate fields, since
+    // once they've pre-filled the (still-editable) form fields there's
+    // nothing else that needs to reference the original guess.
+    val productImagePath: String? = null,
+
+    // Shown when OCR genuinely couldn't extract anything useful from the
+    // label photo (not just a network/upload error, which uses scanError
+    // instead) -- offers retake or skip-to-manual-entry rather than
+    // silently handing the user an empty form with no explanation.
+    val showOcrFailedDialog: Boolean = false,
+
+    // Item form fields -- all Strings for TextField editing, parsed on save
+    val name: String = "",
+    val brand: String = "",
+    val barcode: String = "",
+    val itemType: String = "product", // "product" | "ingredient"
+    val kcal100g: String = "",
+    val protein100g: String = "",
+    val carbs100g: String = "",
+    val fat100g: String = "",
+    val fiber100g: String = "",
+    val sugar100g: String = "",
+    val saturatedFat100g: String = "",
+    val sodiumMg100g: String = "",
+
+    val saveError: String? = null,
+    val createdItem: Item? = null
+)
+
+class AddItemViewModel : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AddItemUiState())
+    val uiState: StateFlow<AddItemUiState> = _uiState
+
+    fun resetToScanChoice() {
+        _uiState.value = AddItemUiState()
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> hasCameraPermission = granted }
+    private fun imageBytesToPart(bytes: ByteArray): MultipartBody.Part {
+        val requestBody = bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+        return MultipartBody.Part.createFormData("image", "photo.jpg", requestBody)
+    }
 
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+    // ----- Barcode step -----
+
+    /** Called by the Composable's timeout timer if SCAN_BARCODE has been
+     * showing for ~8s with nothing detected. */
+    fun onBarcodeTimeout() {
+        if (_uiState.value.phase == AddItemPhase.SCAN_BARCODE) {
+            _uiState.value = _uiState.value.copy(showManualEntryPrompt = true)
         }
     }
 
-    // Nutrition-label photos (captured OR gallery-picked) go through a
-    // crop step before OCR -- tightly cropping out ingredient lists/
-    // marketing text/other noise should meaningfully help Tesseract's
-    // accuracy on real package photos. No fixed aspect ratio (freestyle
-    // crop), since labels vary a lot in shape.
-    val ucropLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
-            val croppedUri = UCrop.getOutput(result.data!!)
-            if (croppedUri != null) {
-                context.contentResolver.openInputStream(croppedUri)?.use { stream ->
-                    viewModel.scanLabel(stream.readBytes())
+    fun dismissManualEntryPrompt() {
+        _uiState.value = _uiState.value.copy(showManualEntryPrompt = false)
+    }
+
+    fun proceedToManualBarcodeEntry() {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.MANUAL_BARCODE_ENTRY,
+            showManualEntryPrompt = false
+        )
+    }
+
+    fun updateManualBarcodeInput(value: String) {
+        _uiState.value = _uiState.value.copy(manualBarcodeInput = value)
+    }
+
+    fun submitManualBarcode() {
+        val barcode = _uiState.value.manualBarcodeInput.trim()
+        if (barcode.isEmpty()) return
+        lookUpBarcode(barcode, decoderUsed = "Manual entry")
+    }
+
+    /** Called when the live scanner (multi-frame consensus, see
+     * LiveBarcodeScannerView) settles on a value. */
+    fun onLiveBarcodeDetected(barcode: String) {
+        lookUpBarcode(barcode, decoderUsed = "ML Kit (on-device)")
+    }
+
+    /** Called after a gallery-picked image was run through
+     * decodeBarcodeFromUri() in the Composable (needs Context, so the
+     * actual decode call happens there, not here). */
+    fun onGalleryBarcodeResult(barcode: String?) {
+        if (barcode == null) {
+            _uiState.value = _uiState.value.copy(
+                scanError = "Couldn't find a barcode in that photo"
+            )
+            return
+        }
+        lookUpBarcode(barcode, decoderUsed = "ML Kit (from photo)")
+    }
+
+    private fun lookUpBarcode(barcode: String, decoderUsed: String) {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.BARCODE_LOOKUP,
+            showManualEntryPrompt = false,
+            scanError = null
+        )
+        viewModelScope.launch {
+            val matched = try {
+                ApiClient.service.getItemByBarcode(barcode)
+            } catch (e: HttpException) {
+                if (e.code() == 404) {
+                    null
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        phase = AddItemPhase.SCAN_BARCODE,
+                        scanError = "Lookup failed: ${e.message() ?: "server error"}"
+                    )
+                    return@launch
                 }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.SCAN_BARCODE,
+                    scanError = e.message ?: "Lookup failed"
+                )
+                return@launch
             }
-        }
-        // Cancelled or errored -- user just stays on CAPTURE_LABEL and
-        // can retake/repick; nothing else to do here.
-    }
 
-    fun startCrop(sourceUri: Uri) {
-        val destFile = java.io.File(context.cacheDir, "cropped_${System.currentTimeMillis()}.jpg")
-        val destUri = androidx.core.content.FileProvider.getUriForFile(
-            context, "${context.packageName}.fileprovider", destFile
-        )
-        val intent = UCrop.of(sourceUri, destUri).getIntent(context)
-        ucropLauncher.launch(intent)
-    }
-
-    fun writeBytesToCacheAndGetUri(bytes: ByteArray): Uri {
-        val file = java.io.File(context.cacheDir, "captured_${System.currentTimeMillis()}.jpg")
-        file.writeBytes(bytes)
-        return androidx.core.content.FileProvider.getUriForFile(
-            context, "${context.packageName}.fileprovider", file
-        )
-    }
-
-    // Gallery pickers -- modern Android Photo Picker, no storage
-    // permission needed at all. One shared launcher per step, since each
-    // needs a different follow-up action.
-    val galleryPickerForBarcode = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            coroutineScope.launch {
-                val barcode = decodeBarcodeFromUri(context, uri)
-                viewModel.onGalleryBarcodeResult(barcode)
-            }
-        }
-    }
-
-    val galleryPickerForLabel = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        // Content Uris from the picker can be used directly as UCrop's
-        // source, no need to copy to cache first.
-        if (uri != null) {
-            startCrop(uri)
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = {
-                if (state.phase == AddItemPhase.SAVED) onDone() else onBack()
-            }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Text("Add Item", style = MaterialTheme.typography.titleLarge)
-        }
-
-        if (state.showManualEntryPrompt) {
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissManualEntryPrompt() },
-                title = { Text("No barcode detected") },
-                text = { Text("Would you like to enter the barcode number manually instead?") },
-                confirmButton = {
-                    TextButton(onClick = { viewModel.proceedToManualBarcodeEntry() }) {
-                        Text("Enter Manually")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { viewModel.dismissManualEntryPrompt() }) {
-                        Text("Keep Scanning")
-                    }
-                }
+            _uiState.value = _uiState.value.copy(
+                phase = AddItemPhase.BARCODE_RESULT,
+                scannedBarcode = barcode,
+                decoderUsed = decoderUsed,
+                matchedItem = matched
             )
         }
+    }
 
-        if (state.showOcrFailedDialog) {
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissOcrFailedDialog() },
-                title = { Text("Couldn't read that label") },
-                text = { Text("Would you like to take a new picture, or enter the nutrition info yourself?") },
-                confirmButton = {
-                    TextButton(onClick = { viewModel.dismissOcrFailedDialog() }) {
-                        Text("Take New Picture")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { viewModel.proceedToManualFormFromOcrFailure() }) {
-                        Text("Enter Manually")
-                    }
-                }
-            )
-        }
+    /** User confirmed no existing item matches and wants to continue --
+     * moves into the (mandatory, since we now have a barcode to attach)
+     * product photo step. */
+    fun proceedToCaptureProductPhoto() {
+        val state = _uiState.value
+        _uiState.value = state.copy(
+            phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
+            barcode = state.scannedBarcode ?: ""
+        )
+    }
 
-        if (!hasCameraPermission &&
-            (state.phase == AddItemPhase.SCAN_BARCODE || state.phase == AddItemPhase.CAPTURE_LABEL)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text("Camera permission is needed to add items this way.")
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                    Text("Grant Permission")
-                }
+    fun retryBarcodeScan() {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.SCAN_BARCODE,
+            scanError = null,
+            showManualEntryPrompt = false
+        )
+    }
+
+    // ----- Product photo step -----
+
+    /** Uploads the cropped product-package photo -- saves it server-side
+     * (image_path comes back for us to carry through to the eventual
+     * item save) and pre-fills name/brand with OCR's best-effort guess.
+     * Always proceeds to CAPTURE_LABEL on success, even if OCR found
+     * nothing useful to guess from -- unlike scanLabel()'s failure
+     * handling, there's no "couldn't read anything" dialog here, since
+     * an unhelpful guess just means the name/brand fields start blank,
+     * same as manual entry always was; it's not a dead end the way a
+     * fully-failed label scan is. */
+    fun scanProductPhoto(imageBytes: ByteArray) {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_PRODUCT_PHOTO, scanError = null)
+        viewModelScope.launch {
+            try {
+                val result = ApiClient.service.scanProductPhoto(imageBytesToPart(imageBytes))
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.CAPTURE_LABEL,
+                    productImagePath = result.imagePath,
+                    name = result.guessedName ?: _uiState.value.name,
+                    brand = result.guessedBrand ?: _uiState.value.brand
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
+                    scanError = e.message ?: "Product photo upload failed"
+                )
             }
+        }
+    }
+
+    /** User chose to skip the product photo entirely -- barcode carries
+     * over, name/brand/image stay blank for manual entry later. */
+    fun skipProductPhoto() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
+    }
+
+    // ----- Label step -----
+
+    fun scanLabel(imageBytes: ByteArray) {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_LABEL, scanError = null)
+        viewModelScope.launch {
+            try {
+                val result = ApiClient.service.scanLabel(imageBytesToPart(imageBytes))
+                val macros = result.macros
+                val extractedNothing = result.detectedLanguage == null &&
+                    macros.kcal100g == null && macros.protein100g == null &&
+                    macros.carbs100g == null && macros.fat100g == null &&
+                    macros.fiber100g == null && macros.sugar100g == null &&
+                    macros.saturatedFat100g == null && macros.sodiumMg100g == null
+
+                if (extractedNothing) {
+                    // A genuine "couldn't read this label" case -- offer
+                    // retake or skip-to-manual rather than silently
+                    // handing over an empty form.
+                    _uiState.value = _uiState.value.copy(
+                        phase = AddItemPhase.CAPTURE_LABEL,
+                        showOcrFailedDialog = true
+                    )
+                    return@launch
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.ITEM_FORM,
+                    ocrDetectedLanguage = result.detectedLanguage,
+                    ocrPer100gConfirmed = result.per100gConfirmed,
+                    ocrWasUsed = true,
+                    kcal100g = macros.kcal100g ?: "",
+                    protein100g = macros.protein100g ?: "",
+                    carbs100g = macros.carbs100g ?: "",
+                    fat100g = macros.fat100g ?: "",
+                    fiber100g = macros.fiber100g ?: "",
+                    sugar100g = macros.sugar100g ?: "",
+                    saturatedFat100g = macros.saturatedFat100g ?: "",
+                    sodiumMg100g = macros.sodiumMg100g ?: ""
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.CAPTURE_LABEL,
+                    scanError = e.message ?: "Label scan failed"
+                )
+            }
+        }
+    }
+
+    fun dismissOcrFailedDialog() {
+        _uiState.value = _uiState.value.copy(showOcrFailedDialog = false)
+    }
+
+    /** User chose to skip OCR entirely and fill in macros by hand --
+     * barcode carries over, everything else starts blank. */
+    fun proceedToManualFormFromOcrFailure() {
+        _uiState.value = _uiState.value.copy(
+            phase = AddItemPhase.ITEM_FORM,
+            showOcrFailedDialog = false,
+            ocrWasUsed = false
+        )
+    }
+
+    // ----- Item form -----
+
+    fun updateName(value: String) { _uiState.value = _uiState.value.copy(name = value) }
+    fun updateBrand(value: String) { _uiState.value = _uiState.value.copy(brand = value) }
+    fun updateBarcode(value: String) { _uiState.value = _uiState.value.copy(barcode = value) }
+    fun updateItemType(value: String) { _uiState.value = _uiState.value.copy(itemType = value) }
+    fun updateKcal(value: String) { _uiState.value = _uiState.value.copy(kcal100g = value) }
+    fun updateProtein(value: String) { _uiState.value = _uiState.value.copy(protein100g = value) }
+    fun updateCarbs(value: String) { _uiState.value = _uiState.value.copy(carbs100g = value) }
+    fun updateFat(value: String) { _uiState.value = _uiState.value.copy(fat100g = value) }
+    fun updateFiber(value: String) { _uiState.value = _uiState.value.copy(fiber100g = value) }
+    fun updateSugar(value: String) { _uiState.value = _uiState.value.copy(sugar100g = value) }
+    fun updateSaturatedFat(value: String) { _uiState.value = _uiState.value.copy(saturatedFat100g = value) }
+    fun updateSodium(value: String) { _uiState.value = _uiState.value.copy(sodiumMg100g = value) }
+
+    fun saveItem() {
+        val state = _uiState.value
+        if (state.name.isBlank()) {
+            _uiState.value = state.copy(saveError = "Name is required")
             return
         }
 
-        when (state.phase) {
-            AddItemPhase.SCAN_BARCODE -> {
-                LaunchedEffect(state.phase, state.scanError) {
-                    delay(BARCODE_TIMEOUT_MS)
-                    viewModel.onBarcodeTimeout()
-                }
-                BarcodeScanContent(
-                    scanError = state.scanError,
-                    onBarcodeDetected = { viewModel.onLiveBarcodeDetected(it) },
-                    onPickFromGallery = {
-                        galleryPickerForBarcode.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    }
-                )
-            }
-            AddItemPhase.BARCODE_LOOKUP -> LoadingContent()
-            AddItemPhase.BARCODE_RESULT -> BarcodeResultContent(
-                barcode = state.scannedBarcode,
-                decoderUsed = state.decoderUsed,
-                matchedItem = state.matchedItem,
-                onUseExisting = onDone,
-                onContinueToLabel = { viewModel.proceedToCaptureLabel() },
-                onRetry = { viewModel.retryBarcodeScan() }
-            )
-            AddItemPhase.MANUAL_BARCODE_ENTRY -> ManualBarcodeEntryContent(
-                value = state.manualBarcodeInput,
-                onValueChange = { viewModel.updateManualBarcodeInput(it) },
-                onSubmit = { viewModel.submitManualBarcode() }
-            )
-            AddItemPhase.CAPTURE_LABEL -> CaptureLabelContent(
-                scanError = state.scanError,
-                onImageCaptured = { bytes -> startCrop(writeBytesToCacheAndGetUri(bytes)) },
-                onPickFromGallery = {
-                    galleryPickerForLabel.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        _uiState.value = state.copy(phase = AddItemPhase.SAVING, saveError = null)
+
+        viewModelScope.launch {
+            try {
+                val item = ApiClient.service.createItem(
+                    ItemCreateRequest(
+                        name = state.name,
+                        barcode = state.barcode.ifBlank { null },
+                        brand = state.brand.ifBlank { null },
+                        imagePath = state.productImagePath,
+                        kcal100g = state.kcal100g.toDoubleOrNull(),
+                        protein100g = state.protein100g.toDoubleOrNull(),
+                        carbs100g = state.carbs100g.toDoubleOrNull(),
+                        fat100g = state.fat100g.toDoubleOrNull(),
+                        fiber100g = state.fiber100g.toDoubleOrNull(),
+                        sugar100g = state.sugar100g.toDoubleOrNull(),
+                        saturatedFat100g = state.saturatedFat100g.toDoubleOrNull(),
+                        sodiumMg100g = state.sodiumMg100g.toDoubleOrNull(),
+                        type = state.itemType,
+                        origin = if (state.ocrWasUsed) "ocr_assisted" else "manual"
                     )
+                )
+                _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
+            } catch (e: HttpException) {
+                val message = if (e.code() == 409) {
+                    "An item with this barcode already exists"
+                } else {
+                    e.message() ?: "Failed to save"
                 }
-            )
-            AddItemPhase.PROCESSING_LABEL -> LoadingContent()
-            AddItemPhase.ITEM_FORM, AddItemPhase.SAVING -> ItemFormContent(
-                state = state,
-                isSaving = state.phase == AddItemPhase.SAVING,
-                viewModel = viewModel
-            )
-            AddItemPhase.SAVED -> SavedContent(
-                itemName = state.createdItem?.name ?: "",
-                onDone = onDone
-            )
-        }
-    }
-}
-
-@Composable
-private fun LoadingContent() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun BarcodeScanContent(
-    scanError: String?,
-    onBarcodeDetected: (String) -> Unit,
-    onPickFromGallery: () -> Unit
-) {
-    var camera by remember { mutableStateOf<Camera?>(null) }
-    var isFlashOn by remember { mutableStateOf(false) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LiveBarcodeScannerView(
-            onBarcodeDetected = onBarcodeDetected,
-            onCameraReady = { camera = it },
-            modifier = Modifier.fillMaxSize()
-        )
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "Point the camera at a barcode",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White
-            )
-            if (scanError != null) {
-                Text(scanError, color = MaterialTheme.colorScheme.error)
-            }
-        }
-        IconButton(
-            onClick = {
-                isFlashOn = !isFlashOn
-                camera?.cameraControl?.enableTorch(isFlashOn)
-            },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-        ) {
-            Icon(
-                if (isFlashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                contentDescription = "Toggle flash",
-                tint = Color.White
-            )
-        }
-        IconButton(
-            onClick = onPickFromGallery,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
-        ) {
-            Icon(
-                Icons.Filled.PhotoLibrary,
-                contentDescription = "Pick from gallery instead",
-                tint = Color.White,
-                modifier = Modifier.padding(4.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ManualBarcodeEntryContent(
-    value: String,
-    onValueChange: (String) -> Unit,
-    onSubmit: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("Enter the barcode number", style = MaterialTheme.typography.titleMedium)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text("Barcode") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Button(
-            onClick = onSubmit,
-            enabled = value.isNotBlank(),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Continue")
-        }
-    }
-}
-
-@Composable
-private fun BarcodeResultContent(
-    barcode: String?,
-    decoderUsed: String?,
-    matchedItem: com.mealtracker.android.network.models.Item?,
-    onUseExisting: () -> Unit,
-    onContinueToLabel: () -> Unit,
-    onRetry: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // IMPORTANT: always show the decoded digits for the user to
-        // visually confirm against the physical package -- real-world
-        // testing found decoders can return a wrong value that still
-        // looks structurally valid (see AddItemViewModel/Models.kt docs).
-        Text("Scanned barcode:", style = MaterialTheme.typography.bodyMedium)
-        Text(barcode ?: "", style = MaterialTheme.typography.headlineSmall)
-        if (decoderUsed != null) {
-            Text(
-                "(via $decoderUsed)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Text(
-            "Double-check this matches the number on the package before continuing.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error
-        )
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
-
-        if (matchedItem != null) {
-            Text("Found an existing item: ${matchedItem.name}", style = MaterialTheme.typography.bodyLarge)
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-            Button(onClick = onUseExisting, modifier = Modifier.fillMaxWidth()) {
-                Text("Use This Item")
-            }
-        } else {
-            Text(
-                "No existing item has this barcode.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-            Button(onClick = onContinueToLabel, modifier = Modifier.fillMaxWidth()) {
-                Text("Continue \u2192 Scan Nutrition Label")
-            }
-        }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-            Text("Scan Again")
-        }
-    }
-}
-
-@Composable
-private fun CaptureLabelContent(
-    scanError: String?,
-    onImageCaptured: (ByteArray) -> Unit,
-    onPickFromGallery: () -> Unit
-) {
-    val context = LocalContext.current
-    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
-    var camera by remember { mutableStateOf<Camera?>(null) }
-    var isFlashOn by remember { mutableStateOf(false) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LiveLabelCaptureView(
-            onImageCaptureReady = { imageCapture = it },
-            onCameraReady = { camera = it },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "Frame the nutrition label",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White
-            )
-            if (scanError != null) {
-                Text(scanError, color = MaterialTheme.colorScheme.error)
-            }
-        }
-
-        IconButton(
-            onClick = {
-                isFlashOn = !isFlashOn
-                camera?.cameraControl?.enableTorch(isFlashOn)
-            },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-        ) {
-            Icon(
-                if (isFlashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                contentDescription = "Toggle flash",
-                tint = Color.White
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(bottom = 32.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onPickFromGallery) {
-                Icon(
-                    Icons.Filled.PhotoLibrary,
-                    contentDescription = "Pick from gallery instead",
-                    tint = Color.White
+                _uiState.value = _uiState.value.copy(phase = AddItemPhase.ITEM_FORM, saveError = message)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.ITEM_FORM,
+                    saveError = e.message ?: "Failed to save"
                 )
             }
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(24.dp))
-            Button(onClick = {
-                val capture = imageCapture ?: return@Button
-                capture.takePicture(
-                    ContextCompat.getMainExecutor(context),
-                    object : ImageCapture.OnImageCapturedCallback() {
-                        override fun onCaptureSuccess(image: ImageProxy) {
-                            val buffer = image.planes[0].buffer
-                            val bytes = ByteArray(buffer.remaining())
-                            buffer.get(bytes)
-                            image.close()
-                            onImageCaptured(bytes)
-                        }
-
-                        override fun onError(exception: ImageCaptureException) {
-                            // Not surfaced to the UI -- a failed capture just
-                            // means the user taps the button again; not worth
-                            // a separate error-plumbing path for a rare
-                            // hardware-level failure.
-                        }
-                    }
-                )
-            }) {
-                Text("Capture")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ItemFormContent(state: AddItemUiState, isSaving: Boolean, viewModel: AddItemViewModel) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-    ) {
-        if (state.ocrWasUsed) {
-            if (!state.ocrPer100gConfirmed) {
-                Text(
-                    "\u26a0\ufe0f Couldn't confirm these values are per 100g -- " +
-                        "double-check against the label (they might be per-serving).",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (state.ocrDetectedLanguage != null) {
-                Text(
-                    "Detected label language: ${state.ocrDetectedLanguage}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                "Review the extracted values below -- OCR isn't perfect.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        }
-
-        OutlinedTextField(
-            value = state.name,
-            onValueChange = viewModel::updateName,
-            label = { Text("Name") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.brand,
-            onValueChange = viewModel::updateBrand,
-            label = { Text("Brand (optional)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.barcode,
-            onValueChange = viewModel::updateBarcode,
-            label = { Text("Barcode") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = state.itemType == "product",
-                onClick = { viewModel.updateItemType("product") },
-                label = { Text("Product") }
-            )
-            FilterChip(
-                selected = state.itemType == "ingredient",
-                onClick = { viewModel.updateItemType("ingredient") },
-                label = { Text("Ingredient") }
-            )
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        Text("Per 100g", style = MaterialTheme.typography.titleSmall)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-
-        NumberField("Calories (kcal)", state.kcal100g, viewModel::updateKcal)
-        NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
-        NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
-        NumberField("Fat (g)", state.fat100g, viewModel::updateFat)
-        NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
-        NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
-        NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
-        NumberField("Sodium (mg)", state.sodiumMg100g, viewModel::updateSodium)
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
-
-        Button(
-            onClick = { viewModel.saveItem() },
-            enabled = !isSaving,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (isSaving) "Saving..." else "Save Item")
-        }
-        if (state.saveError != null) {
-            Text(
-                state.saveError,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-    }
-}
-
-@Composable
-private fun NumberField(label: String, value: String, onValueChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-    )
-}
-
-@Composable
-private fun SavedContent(itemName: String, onDone: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("\u2705 Saved", style = MaterialTheme.typography.headlineMedium)
-        Text(itemName, style = MaterialTheme.typography.titleMedium)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
-        Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
-            Text("Done")
         }
     }
 }

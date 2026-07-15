@@ -10,9 +10,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // JitPack -- needed for UCrop (image cropping), which isn't
-        // published to Maven Central/Google's repos.
-        maven { url = uri("https://jitpack.io") }
     }
 }
 

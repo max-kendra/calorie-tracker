@@ -22,12 +22,19 @@ import retrofit2.HttpException
  *   SCAN_BARCODE (live, on-device, ~8s timeout)
  *     -> BARCODE_LOOKUP -> BARCODE_RESULT
  *         -> matched existing item: done
- *         -> no match: one confirmation tap -> CAPTURE_LABEL
+ *         -> no match: one confirmation tap -> CAPTURE_PRODUCT_PHOTO
  *   (or, if the timeout fires with nothing detected: a prompt offers
  *    MANUAL_BARCODE_ENTRY, which feeds into the same lookup)
  *
+ *   CAPTURE_PRODUCT_PHOTO (live, in-app camera OR gallery pick; always
+ *   cropped client-side before upload, same as the label step)
+ *     -> PROCESSING_PRODUCT_PHOTO -> CAPTURE_LABEL (name/brand/image
+ *        carried into state, pre-filled but still editable in the
+ *        eventual form -- see scanProductPhoto())
+ *
  *   CAPTURE_LABEL (live, in-app camera OR gallery pick)
- *     -> PROCESSING_LABEL -> ITEM_FORM (pre-filled, barcode carried over)
+ *     -> PROCESSING_LABEL -> ITEM_FORM (pre-filled, barcode/name/brand/
+ *        image carried over)
  *         -> SAVING -> SAVED
  *
  * Editing an EXISTING item is a separate, not-yet-built feature (reached
@@ -35,6 +42,7 @@ import retrofit2.HttpException
  */
 enum class AddItemPhase {
     SCAN_BARCODE, BARCODE_LOOKUP, BARCODE_RESULT, MANUAL_BARCODE_ENTRY,
+    CAPTURE_PRODUCT_PHOTO, PROCESSING_PRODUCT_PHOTO,
     CAPTURE_LABEL, PROCESSING_LABEL, ITEM_FORM, SAVING, SAVED
 }
 
@@ -57,6 +65,15 @@ data class AddItemUiState(
     val ocrDetectedLanguage: String? = null,
     val ocrPer100gConfirmed: Boolean = true,
     val ocrWasUsed: Boolean = false,
+
+    // Product photo step -- image_path comes back from the backend once
+    // uploaded (see scanProductPhoto()) and is carried through to the
+    // final POST /items call so the photo gets attached to the item.
+    // guessedName/guessedBrand are rough OCR heuristics used ONLY to
+    // pre-fill `name`/`brand` below -- not kept as separate fields, since
+    // once they've pre-filled the (still-editable) form fields there's
+    // nothing else that needs to reference the original guess.
+    val productImagePath: String? = null,
 
     // Shown when OCR genuinely couldn't extract anything useful from the
     // label photo (not just a network/upload error, which uses scanError
@@ -184,11 +201,11 @@ class AddItemViewModel : ViewModel() {
 
     /** User confirmed no existing item matches and wants to continue --
      * moves into the (mandatory, since we now have a barcode to attach)
-     * label capture step. */
-    fun proceedToCaptureLabel() {
+     * product photo step. */
+    fun proceedToCaptureProductPhoto() {
         val state = _uiState.value
         _uiState.value = state.copy(
-            phase = AddItemPhase.CAPTURE_LABEL,
+            phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
             barcode = state.scannedBarcode ?: ""
         )
     }
@@ -199,6 +216,43 @@ class AddItemViewModel : ViewModel() {
             scanError = null,
             showManualEntryPrompt = false
         )
+    }
+
+    // ----- Product photo step -----
+
+    /** Uploads the cropped product-package photo -- saves it server-side
+     * (image_path comes back for us to carry through to the eventual
+     * item save) and pre-fills name/brand with OCR's best-effort guess.
+     * Always proceeds to CAPTURE_LABEL on success, even if OCR found
+     * nothing useful to guess from -- unlike scanLabel()'s failure
+     * handling, there's no "couldn't read anything" dialog here, since
+     * an unhelpful guess just means the name/brand fields start blank,
+     * same as manual entry always was; it's not a dead end the way a
+     * fully-failed label scan is. */
+    fun scanProductPhoto(imageBytes: ByteArray) {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_PRODUCT_PHOTO, scanError = null)
+        viewModelScope.launch {
+            try {
+                val result = ApiClient.service.scanProductPhoto(imageBytesToPart(imageBytes))
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.CAPTURE_LABEL,
+                    productImagePath = result.imagePath,
+                    name = result.guessedName ?: _uiState.value.name,
+                    brand = result.guessedBrand ?: _uiState.value.brand
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
+                    scanError = e.message ?: "Product photo upload failed"
+                )
+            }
+        }
+    }
+
+    /** User chose to skip the product photo entirely -- barcode carries
+     * over, name/brand/image stay blank for manual entry later. */
+    fun skipProductPhoto() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
     }
 
     // ----- Label step -----
@@ -294,6 +348,7 @@ class AddItemViewModel : ViewModel() {
                         name = state.name,
                         barcode = state.barcode.ifBlank { null },
                         brand = state.brand.ifBlank { null },
+                        imagePath = state.productImagePath,
                         kcal100g = state.kcal100g.toDoubleOrNull(),
                         protein100g = state.protein100g.toDoubleOrNull(),
                         carbs100g = state.carbs100g.toDoubleOrNull(),

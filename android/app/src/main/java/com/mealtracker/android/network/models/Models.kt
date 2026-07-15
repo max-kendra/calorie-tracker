@@ -279,6 +279,22 @@ data class OcrMacros(
 )
 
 /**
+ * Mirrors ProductPhotoScanResult from app/schemas.py. guessedName/
+ * guessedBrand are rough heuristics (NOT a confident extraction the way
+ * OcrMacros is for nutrition labels) -- always show these as pre-filled
+ * but clearly editable text, never as if they're confirmed correct. See
+ * the backend schema's docstring for why this heuristic is inherently
+ * weaker than the label OCR.
+ */
+@Serializable
+data class ProductPhotoScanResult(
+    @SerialName("image_path") val imagePath: String,
+    @SerialName("raw_text") val rawText: String,
+    @SerialName("guessed_name") val guessedName: String? = null,
+    @SerialName("guessed_brand") val guessedBrand: String? = null
+)
+
+/**
  * Mirrors OcrScanResult from app/schemas.py. per100gConfirmed being false
  * means the label's values might be per-serving, not per-100g -- the
  * client should surface that as a visible warning (see backend README).

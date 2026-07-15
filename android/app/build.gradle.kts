@@ -94,7 +94,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
-    implementation(libs.ucrop)
+    implementation(libs.easycrop)
     implementation("androidx.transition:transition:1.7.0")
 
     debugImplementation(libs.androidx.ui.tooling)

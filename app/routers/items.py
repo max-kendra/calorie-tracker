@@ -1,3 +1,5 @@
+import uuid
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -6,10 +8,20 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
 from app.barcode import decode_barcode_from_image_bytes
+from app.config import settings
 from app.database import get_db
 from app.models import Item, ServingSize
-from app.ocr import extract_label_from_image
-from app.schemas import BarcodeScanResult, ItemCreate, ItemOut, ItemUpdate, ItemType, OcrMacros, OcrScanResult
+from app.ocr import extract_label_from_image, guess_name_and_brand, run_ocr
+from app.schemas import (
+    BarcodeScanResult,
+    ItemCreate,
+    ItemOut,
+    ItemUpdate,
+    ItemType,
+    OcrMacros,
+    OcrScanResult,
+    ProductPhotoScanResult,
+)
 
 router = APIRouter(
     prefix="/items",
@@ -70,6 +82,56 @@ async def scan_barcode(image: UploadFile = File(...), db: Session = Depends(get_
     )
 
 
+@router.post("/scan-product-photo", response_model=ProductPhotoScanResult)
+async def scan_product_photo(image: UploadFile = File(...)):
+    """
+    Second step of the Add Item flow (between barcode scan and nutrition
+    label scan) -- upload a (client-cropped) photo of the product
+    package itself. Two things happen:
+
+    1. The image is saved to disk under `settings.media_dir` and its
+       path is returned as `image_path` -- the client should carry this
+       through and include it in the eventual POST /items call so the
+       photo gets attached to the item (e.g. shown later in My Foods).
+    2. OCR runs over the photo and we take a best-effort guess at name/
+       brand from whatever text is on the packaging (see
+       guess_name_and_brand's docstring in app/ocr.py for exactly how
+       rough this heuristic is) -- client pre-fills the Add Item form's
+       Name/Brand fields with these, editable, same review-before-save
+       pattern as every other OCR-derived value in this app.
+
+    Like scan-label, this NEVER writes to our DB directly -- saving the
+    image file to disk is the one exception (needed so we have something
+    for `image_path` to point at), but no Item row is touched.
+    """
+    image_bytes = await image.read()
+
+    # Save first, with a random filename -- collisions are practically
+    # impossible with uuid4, and using the original client filename
+    # would risk path-traversal or overwrite issues if we ever pass it
+    # through unsanitized. Always .jpg since the client always sends a
+    # JPEG-compressed crop (see Android AddItemScreen.kt: easycrop's
+    # `.compress(Bitmap.CompressFormat.JPEG, ...)`), regardless of what
+    # format the original photo was in before cropping.
+    filename = f"{uuid.uuid4().hex}.jpg"
+    media_dir = Path(settings.media_dir)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    (media_dir / filename).write_bytes(image_bytes)
+    # Relative path matching how app/main.py mounts StaticFiles at
+    # /media -- e.g. "media/<filename>" is reachable at GET /media/<filename>.
+    image_path = f"{settings.media_dir}/{filename}"
+
+    text = run_ocr(image_bytes)
+    guessed_name, guessed_brand = guess_name_and_brand(text)
+
+    return ProductPhotoScanResult(
+        image_path=image_path,
+        raw_text=text,
+        guessed_name=guessed_name,
+        guessed_brand=guessed_brand,
+    )
+
+
 @router.post("/scan-label", response_model=OcrScanResult)
 async def scan_label(image: UploadFile = File(...)):
     """
@@ -79,8 +141,9 @@ async def scan_label(image: UploadFile = File(...)):
     pre-fill the Add Item form, which the user reviews/corrects before
     actually saving via POST /items. See app/ocr.py for what's been
     tested and what hasn't (Danish/German/English verified against real
-    Tesseract OCR; other languages use standard EU label vocabulary but
-    aren't yet verified against real OCR output).
+    Tesseract OCR, not yet re-verified against EasyOCR output since the
+    engine switch; other languages use standard EU label vocabulary but
+    aren't yet verified against real OCR output of either engine).
     """
     image_bytes = await image.read()
     result = extract_label_from_image(image_bytes)

@@ -178,6 +178,38 @@ class OcrScanResult(BaseModel):
     macros: OcrMacros
 
 
+class ProductPhotoScanResult(BaseModel):
+    """
+    Result of uploading a (cropped) photo of the product itself -- the
+    step BEFORE the nutrition-label photo in the Add Item flow. Two
+    separate things happen here:
+
+    1. The image is saved to disk and `image_path` is returned so the
+       client can carry it through and attach it to the item on save
+       (POST /items with `image_path` set) -- this is the item's
+       "package photo", same one shown later in My Foods/search results.
+    2. We run OCR over it and take a best-effort guess at the product's
+       name and brand from whatever text we found, since packaging
+       almost always has both printed somewhere on the front.
+
+    IMPORTANT -- `guessed_name`/`guessed_brand` are genuinely rough
+    heuristics (longest line of text found = name, another prominent
+    line = brand), NOT a confident structured extraction the way
+    OcrScanResult's `macros` are for nutrition labels. There's no
+    per-language keyword dictionary to anchor on here -- a product
+    package's front doesn't have consistent field labels the way a
+    nutrition table does. Client MUST show these as pre-filled but
+    clearly editable text fields, never as an assumed-correct value --
+    same review-before-save principle as everything else OCR-derived in
+    this app.
+    """
+
+    image_path: str
+    raw_text: str
+    guessed_name: Optional[str] = None
+    guessed_brand: Optional[str] = None
+
+
 RecipeType = Literal["recipe", "meal"]
 
 

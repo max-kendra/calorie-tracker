@@ -20,7 +20,8 @@ python-multipart = "^0.0.12"  # required for FastAPI file uploads (barcode scan 
 pyzbar = "^0.1.9"           # server-side barcode decoding (primary)
 zxing-cpp = "^2.2.0"        # server-side barcode decoding (fallback -- see app/barcode.py)
 httpx = "^0.27.2"           # USDA FoodData Central API calls
-pytesseract = "^0.3.13"     # OCR for nutrition labels
+easyocr = "^1.7.2"          # OCR for nutrition labels (replaced pytesseract -- better accuracy on real photos)
+numpy = "^1.26.0"           # EasyOCR takes images as numpy arrays; also comes in transitively via easyocr/torch, but we import it directly in app/ocr.py so pinning it explicitly
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

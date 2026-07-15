@@ -11,6 +11,7 @@ import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
 import com.mealtracker.android.network.models.OcrScanResult
+import com.mealtracker.android.network.models.ProductPhotoScanResult
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.UserProfile
@@ -102,7 +103,18 @@ interface ApiService {
     @POST("items/scan-barcode")
     suspend fun scanBarcode(@Part image: MultipartBody.Part): BarcodeScanResult
 
-    // Uploads a nutrition label photo, OCR-extracts macros (Tesseract,
+    // Uploads a (client-cropped) photo of the product package itself --
+    // step 2 of the Add Item flow, between barcode scan and nutrition
+    // label scan. Saves the image server-side (see backend) and returns
+    // its path for the client to attach to the item on save, plus a
+    // best-effort guessed name/brand from OCR -- NEVER writes to the DB
+    // itself, and the guesses must be shown as editable, not assumed
+    // correct (see ProductPhotoScanResult's doc comment).
+    @Multipart
+    @POST("items/scan-product-photo")
+    suspend fun scanProductPhoto(@Part image: MultipartBody.Part): ProductPhotoScanResult
+
+    // Uploads a nutrition label photo, OCR-extracts macros (EasyOCR,
     // 9 languages, see backend). NEVER writes to the DB -- caller
     // pre-fills the Add Item form with the result for user review.
     @Multipart

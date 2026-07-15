@@ -4,10 +4,13 @@ WORKDIR /app
 
 # pyzbar is a Python wrapper around libzbar -- the actual barcode-decoding
 # C library needs to be present at the OS level, not just pip-installed.
-# tesseract-ocr + language packs: same story for OCR (pytesseract wraps
-# the tesseract binary, doesn't include it). Language packs cover the
-# 9 languages we support (see app/ocr.py) -- eng is included by default
-# with tesseract-ocr itself.
+# OCR (app/ocr.py) runs on EasyOCR now instead of Tesseract -- EasyOCR is
+# pure Python + PyTorch, so unlike pytesseract it does NOT need a system
+# binary/language packs installed via apt (the tesseract-ocr-* packages
+# that used to be here are gone). EasyOCR does download its model weights
+# on first run instead, so the container needs outbound network access
+# the first time it starts (or bake the weights into the image ahead of
+# time if this needs to run fully offline).
 # build-essential + cmake: zxing-cpp has no prebuilt wheel for ARM64
 # (the Pi's architecture), so pip has to compile it from source, which
 # needs a C/C++ compiler and cmake. Not needed on x86_64 where a
@@ -18,15 +21,6 @@ WORKDIR /app
 # image) if image size becomes a real problem.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libzbar0 \
-    tesseract-ocr \
-    tesseract-ocr-dan \
-    tesseract-ocr-deu \
-    tesseract-ocr-swe \
-    tesseract-ocr-fin \
-    tesseract-ocr-nor \
-    tesseract-ocr-spa \
-    tesseract-ocr-slk \
-    tesseract-ocr-ces \
     build-essential \
     cmake \
     && rm -rf /var/lib/apt/lists/*

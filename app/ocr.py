@@ -1,7 +1,7 @@
 """
 OCR extraction for nutrition labels.
 
-Flow: run Tesseract across all supported languages combined -> pick the
+Flow: run EasyOCR across all supported languages combined -> pick the
 best-matching language by counting keyword hits per language's dictionary
 -> parse per-100g macro values from the recognized text using that
 language's keyword patterns -> convert salt->sodium if the label uses
@@ -11,35 +11,88 @@ This NEVER writes to our DB -- same pattern as USDA and barcode scanning:
 the result is a best-effort draft for the client to show in the Add Item
 review form, which the user corrects before anything is saved.
 
-IMPORTANT -- tested against real Tesseract output (not just designed on
-paper): a synthetic but realistically-rendered Danish label, run through
-the actual installed `dan` Tesseract model, exposed a real OCR quirk --
-"Salt 1,2 g" was recognized as "Salt1,2g" (Tesseract dropped the space).
-The parsing regexes below are written to tolerate missing whitespace
-between a keyword and its number for exactly this reason.
+ENGINE NOTE: this used to run on Tesseract (pytesseract). We switched to
+EasyOCR because it was noticeably more accurate on real, imperfectly-lit
+photos of labels -- Tesseract needed fairly clean, well-cropped input to
+do well, which didn't match how people actually photograph labels in the
+app. Tradeoff: EasyOCR runs on PyTorch, so it's heavier (bigger image,
+slower per-request CPU inference, and it downloads model weights on
+first run) than Tesseract was, which matters if this is deployed on a
+Raspberry Pi -- worth benchmarking real request latency post-deploy.
+
+The parsing/keyword logic below (`_extract_number_near_keyword`,
+`_extract_kcal`, `LANGUAGE_CONFIGS`, etc.) is engine-agnostic -- it just
+operates on whatever text string the OCR step returns, one line per
+detected text region -- so none of that needed to change. The comments
+in there about specific Tesseract quirks (dropped whitespace, misread
+characters) are historical context from when this was tuned against
+Tesseract output; they're left in place since tolerating that kind of
+noise is harmless even if EasyOCR doesn't happen to exhibit the exact
+same quirks, but they haven't been re-verified against real EasyOCR
+output. Treat that the same way as the "HONESTY ABOUT LANGUAGE COVERAGE"
+note below -- re-verify against real EasyOCR output before trusting it
+fully in production.
 
 HONESTY ABOUT LANGUAGE COVERAGE: Danish, German, and English keyword
-dictionaries below have been verified against real Tesseract OCR output
-on synthetic label images (see tests). Swedish, Finnish, Norwegian,
-Spanish, Slovak, and Czech dictionaries use standard EU nutrition-label
-vocabulary (consistent under EU FIC labeling regulation) but have NOT
-been run through real OCR here -- they should be treated as a reasonable
-starting point, not verified, until tested against real labels in those
+dictionaries below were verified against real Tesseract OCR output on
+synthetic label images (see tests) -- not yet re-verified against
+EasyOCR output. Swedish, Finnish, Norwegian, Spanish, Slovak, and Czech
+dictionaries use standard EU nutrition-label vocabulary (consistent
+under EU FIC labeling regulation) but have NOT been run through real OCR
+of either engine here -- they should be treated as a reasonable starting
+point, not verified, until tested against real labels in those
 languages.
 """
 
 import re
+import threading
 from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
 from typing import Optional
 
-import pytesseract
+import easyocr
+import numpy as np
 from PIL import Image
 
 from app.nutrition import salt_g_to_sodium_mg
 
-ALL_LANGS = "dan+deu+eng+swe+fin+nor+spa+slk+ces"
+# EasyOCR language codes for the 9 languages we support -- these are NOT
+# the same codes Tesseract used (e.g. "dan" -> "da", "deu" -> "de"). The
+# LANGUAGE_CONFIGS dict below still keys off the Tesseract-style codes
+# ("dan", "deu", ...) since that's what detect_language()/parse_label()
+# use internally and what the rest of the app (tests, API responses)
+# expects -- this map is only used to talk to EasyOCR itself.
+_EASYOCR_LANG_CODES = {
+    "dan": "da",
+    "deu": "de",
+    "eng": "en",
+    "swe": "sv",
+    "fin": "fi",
+    "nor": "no",
+    "spa": "es",
+    "slk": "sk",
+    "ces": "cs",
+}
+
+# EasyOCR's Reader is expensive to construct (loads model weights from
+# disk/downloads them on first run) -- build it once lazily and reuse it
+# across requests rather than per-call. Guarded with a lock since FastAPI
+# may serve requests concurrently and Reader construction isn't meant to
+# be called from multiple threads at once.
+_reader: Optional[easyocr.Reader] = None
+_reader_lock = threading.Lock()
+
+
+def _get_reader() -> easyocr.Reader:
+    global _reader
+    if _reader is None:
+        with _reader_lock:
+            if _reader is None:  # re-check inside the lock
+                _reader = easyocr.Reader(
+                    list(_EASYOCR_LANG_CODES.values()), gpu=False
+                )
+    return _reader
 
 
 @dataclass
@@ -191,9 +244,19 @@ class OcrExtractionResult:
     macros: dict = field(default_factory=dict)
 
 
-def run_ocr(image_bytes: bytes, languages: str = ALL_LANGS) -> str:
-    image = Image.open(BytesIO(image_bytes))
-    return pytesseract.image_to_string(image, lang=languages)
+def run_ocr(image_bytes: bytes) -> str:
+    """Runs EasyOCR across all supported languages and returns the
+    recognized text as one line per detected text region (newline-joined),
+    matching the line-oriented shape the parsing functions below expect --
+    same shape pytesseract.image_to_string used to produce."""
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    reader = _get_reader()
+    # detail=0 -> just the recognized strings (no bounding boxes/confidence);
+    # paragraph=False -> keep individual detected lines separate rather than
+    # merging into paragraphs, since the per-line keyword matching below
+    # relies on each nutrition-label row being its own line.
+    lines = reader.readtext(np.array(image), detail=0, paragraph=False)
+    return "\n".join(lines)
 
 
 def detect_language(text: str) -> Optional[str]:
@@ -345,3 +408,63 @@ def extract_label_from_image(image_bytes: bytes) -> OcrExtractionResult:
         return OcrExtractionResult(raw_text=text, detected_language=None, per_100g_confirmed=False)
 
     return parse_label(text, lang)
+
+
+# Lines that are mostly digits/punctuation are almost always a barcode
+# number, a net-weight declaration ("250 g", "12x330ml"), a best-before
+# date, or similar -- never a product name or brand. Filtering these out
+# before guessing name/brand meaningfully improves the heuristic below.
+# Threshold: if fewer than 40% of a line's non-space characters are
+# letters, treat it as "mostly not text" and skip it.
+_MIN_LETTER_FRACTION = 0.4
+
+
+def _looks_like_text(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    letters = sum(1 for ch in stripped if ch.isalpha())
+    non_space = sum(1 for ch in stripped if not ch.isspace())
+    if non_space == 0:
+        return False
+    return (letters / non_space) >= _MIN_LETTER_FRACTION
+
+
+def guess_name_and_brand(text: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Best-effort, NOT confident structured extraction (see
+    ProductPhotoScanResult's docstring in app/schemas.py for why this is
+    fundamentally different from the nutrition-label parsing above --
+    there's no consistent field-label vocabulary on a product package
+    front to anchor on).
+
+    Heuristic: take the "text-like" lines (filtering out barcode/weight/
+    date-looking lines via _looks_like_text), guess the LONGEST such line
+    is the product name -- on real packaging the product name is
+    typically the most prominent (often largest-font) text, and while
+    EasyOCR doesn't give us font-size info to check that directly, line
+    length is a rough proxy that's easy to compute and better than
+    guessing randomly. The brand guess is simply the next-longest
+    distinct line, on the (weak, often wrong) assumption that the brand
+    name is the second most prominent text on the front of the pack.
+
+    Both are meant to pre-fill editable text fields the user reviews,
+    never to be trusted as-is -- callers must treat these as drafts.
+    """
+    candidates = [line.strip() for line in text.split("\n") if _looks_like_text(line)]
+    if not candidates:
+        return None, None
+
+    # Sort by length, longest first, keeping only the first occurrence of
+    # each distinct line (dedupes cases where OCR repeats a line, e.g.
+    # from a logo appearing twice in-frame).
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for line in sorted(candidates, key=len, reverse=True):
+        if line.lower() not in seen:
+            seen.add(line.lower())
+            deduped.append(line)
+
+    guessed_name = deduped[0] if len(deduped) >= 1 else None
+    guessed_brand = deduped[1] if len(deduped) >= 2 else None
+    return guessed_name, guessed_brand
