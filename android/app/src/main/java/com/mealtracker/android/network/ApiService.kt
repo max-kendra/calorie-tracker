@@ -56,6 +56,15 @@ interface ApiService {
         @Query("meal_type") mealType: String? = null
     ): List<Log>
 
+    // Used by the Journal screen's calendar picker to color each day by
+    // how many distinct meal types were logged that day -- one call for
+    // the whole visible month rather than 28-31 individual per-day calls.
+    @GET("logs")
+    suspend fun getLogsInRange(
+        @Query("start_date") startDate: String,
+        @Query("end_date") endDate: String
+    ): List<Log>
+
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --
     // callers should catch that specifically to distinguish "no goal set

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 /**
@@ -59,6 +60,20 @@ sealed class JournalUiState {
     data class Error(val message: String) : JournalUiState()
 }
 
+/**
+ * Backs the calendar date-picker dialog -- `mealTypesLoggedByDay` is how
+ * many DISTINCT meal types (of the 4: breakfast/lunch/dinner/snack) got
+ * at least one log on that day, 0-4. This is deliberately NOT a raw log
+ * count (someone could log 5 separate snacks and 0 of anything else --
+ * that's still "1" for coloring purposes, matching the intent of
+ * "how much of the day did you track", not "how many items did you eat").
+ */
+data class CalendarMonthState(
+    val yearMonth: YearMonth,
+    val isLoading: Boolean = true,
+    val mealTypesLoggedByDay: Map<LocalDate, Int> = emptyMap()
+)
+
 // Fixed order/display names -- matches the design doc's meal card order.
 private val MEAL_TYPES = listOf(
     "breakfast" to "Breakfast",
@@ -72,8 +87,42 @@ class JournalViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<JournalUiState>(JournalUiState.Loading)
     val uiState: StateFlow<JournalUiState> = _uiState
 
+    private val _calendarState = MutableStateFlow<CalendarMonthState?>(null)
+    val calendarState: StateFlow<CalendarMonthState?> = _calendarState
+
     init {
         loadJournal(LocalDate.now())
+    }
+
+    /** Loads (or reloads) the tracked-day coloring for one month at a
+     * time -- called when the calendar dialog opens and again whenever
+     * the user navigates to a different month within it. */
+    fun loadCalendarMonth(yearMonth: YearMonth) {
+        _calendarState.value = CalendarMonthState(yearMonth, isLoading = true)
+        viewModelScope.launch {
+            try {
+                val start = yearMonth.atDay(1)
+                val end = yearMonth.atEndOfMonth()
+                val logs = ApiClient.service.getLogsInRange(
+                    start.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                    end.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                )
+                val counts = logs
+                    .groupBy { LocalDate.parse(it.date) }
+                    .mapValues { (_, dayLogs) -> dayLogs.map { it.mealType }.distinct().size }
+                _calendarState.value = CalendarMonthState(yearMonth, isLoading = false, mealTypesLoggedByDay = counts)
+            } catch (e: Exception) {
+                // Calendar coloring is a nice-to-have, not core
+                // functionality -- on failure just show an empty (all
+                // gray) month rather than blocking the date picker
+                // itself from working.
+                _calendarState.value = CalendarMonthState(yearMonth, isLoading = false)
+            }
+        }
+    }
+
+    fun clearCalendarState() {
+        _calendarState.value = null
     }
 
     fun loadJournal(date: LocalDate) {

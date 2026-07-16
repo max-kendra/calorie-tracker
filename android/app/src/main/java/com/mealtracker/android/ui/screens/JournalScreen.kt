@@ -35,9 +35,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.ui.components.CalendarPickerDialog
 import com.mealtracker.android.ui.components.DonutChart
 import com.mealtracker.android.ui.components.MacroRingsRow
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 /**
@@ -53,7 +55,10 @@ fun JournalScreen(
     onNavigateToMealDetail: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val calendarMonthState by viewModel.calendarState.collectAsState()
     var macroCardExpanded by remember { mutableStateOf(true) }
+    var showCalendarPicker by remember { mutableStateOf(false) }
+    var pickerMonth by remember { mutableStateOf(YearMonth.now()) }
 
     // Bottom-nav tab switches preserve ViewModel state by design (see
     // AppNavHost's saveState/restoreState config) -- but Journal should
@@ -102,8 +107,34 @@ fun JournalScreen(
                     buckets = state.buckets,
                     onPrevDay = { viewModel.loadJournal(state.date.minusDays(1)) },
                     onNextDay = { viewModel.loadJournal(state.date.plusDays(1)) },
+                    onDateClick = {
+                        pickerMonth = YearMonth.from(state.date)
+                        viewModel.loadCalendarMonth(pickerMonth)
+                        showCalendarPicker = true
+                    },
                     onMealClick = onNavigateToMealDetail,
                     modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (showCalendarPicker) {
+                CalendarPickerDialog(
+                    displayedMonth = pickerMonth,
+                    selectedDate = state.date,
+                    monthState = calendarMonthState,
+                    onMonthChange = { newMonth ->
+                        pickerMonth = newMonth
+                        viewModel.loadCalendarMonth(newMonth)
+                    },
+                    onDateSelected = { date ->
+                        viewModel.loadJournal(date)
+                        showCalendarPicker = false
+                        viewModel.clearCalendarState()
+                    },
+                    onDismiss = {
+                        showCalendarPicker = false
+                        viewModel.clearCalendarState()
+                    }
                 )
             }
         }
@@ -212,6 +243,7 @@ private fun CalendarCard(
     buckets: List<MealBucket>,
     onPrevDay: () -> Unit,
     onNextDay: () -> Unit,
+    onDateClick: () -> Unit,
     onMealClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -227,7 +259,8 @@ private fun CalendarCard(
                 }
                 Text(
                     date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")),
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.clickable(onClick = onDateClick)
                 )
                 IconButton(onClick = onNextDay) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next day")
