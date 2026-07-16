@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -48,9 +49,19 @@ private val GOAL_TYPES = listOf(
 @Composable
 fun CalorieGoalScreen(
     viewModel: CalorieGoalViewModel = viewModel(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    // Fires on goalSaveSuccess specifically -- NOT state.saveSuccess,
+    // which just means the TDEE inputs (weight/activity/goal type) were
+    // saved to the profile before calculating. The actual "done with
+    // this step" moment for onboarding purposes is the goal itself
+    // being saved via "Use as my Calorie Goal".
+    onSaved: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(state.goalSaveSuccess) {
+        if (state.goalSaveSuccess) onSaved?.invoke()
+    }
 
     if (state.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

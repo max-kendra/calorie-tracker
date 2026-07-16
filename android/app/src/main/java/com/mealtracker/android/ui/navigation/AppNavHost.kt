@@ -1,19 +1,26 @@
 package com.mealtracker.android.ui.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -29,6 +36,8 @@ import com.mealtracker.android.ui.screens.MacronutrientsScreen
 import com.mealtracker.android.ui.screens.MealCalorieGoalScreen
 import com.mealtracker.android.ui.screens.MealDetailScreen
 import com.mealtracker.android.ui.screens.MealPlanScreen
+import com.mealtracker.android.ui.screens.OnboardingGateViewModel
+import com.mealtracker.android.ui.screens.OnboardingScreen
 import com.mealtracker.android.ui.screens.ProfileScreen
 import com.mealtracker.android.ui.screens.SettingsScreen
 import com.mealtracker.android.ui.screens.WeightGoalScreen
@@ -52,44 +61,82 @@ private val bottomNavDestinations = listOf(
     Destination.Profile
 )
 
+// Routes that should NOT show the bottom nav bar -- the required
+// onboarding flow (and the brief gate check before it) is deliberately
+// full-screen, no tab-bar escape hatch, since the rest of the app
+// assumes a complete profile + active goal exist.
+private val routesWithoutBottomBar = setOf("gate", "onboarding")
+
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+            if (currentRoute !in routesWithoutBottomBar) {
+                NavigationBar {
+                    val currentDestination = navBackStackEntry?.destination
 
-                bottomNavDestinations.forEach { destination ->
-                    NavigationBarItem(
-                        icon = { Icon(destination.icon, contentDescription = destination.label) },
-                        label = { Text(destination.label) },
-                        selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                // Standard bottom-nav behavior: avoid piling up
-                                // a huge back stack as the user bounces between
-                                // tabs, and don't create duplicate copies of the
-                                // same destination on repeated taps.
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                    bottomNavDestinations.forEach { destination ->
+                        NavigationBarItem(
+                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            label = { Text(destination.label) },
+                            selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
+                            onClick = {
+                                navController.navigate(destination.route) {
+                                    // Standard bottom-nav behavior: avoid piling up
+                                    // a huge back stack as the user bounces between
+                                    // tabs, and don't create duplicate copies of the
+                                    // same destination on repeated taps.
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Destination.Home.route,
+            startDestination = "gate",
             modifier = Modifier.padding(innerPadding)
         ) {
+            composable("gate") {
+                val gateViewModel: OnboardingGateViewModel = viewModel()
+                val gateState by gateViewModel.uiState.collectAsState()
+
+                LaunchedEffect(Unit) {
+                    gateViewModel.checkSetupComplete()
+                }
+
+                LaunchedEffect(gateState.needsOnboarding) {
+                    val needsOnboarding = gateState.needsOnboarding ?: return@LaunchedEffect
+                    val destination = if (needsOnboarding) "onboarding" else Destination.Home.route
+                    navController.navigate(destination) {
+                        popUpTo("gate") { inclusive = true }
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            composable("onboarding") {
+                OnboardingScreen(
+                    onComplete = {
+                        navController.navigate(Destination.Home.route) {
+                            popUpTo("onboarding") { inclusive = true }
+                        }
+                    }
+                )
+            }
             composable(Destination.Home.route) { HomeScreen() }
             composable(Destination.Journal.route) {
                 JournalScreen(

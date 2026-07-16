@@ -36,8 +36,20 @@ COPY pyproject.toml poetry.lock* ./
 # --no-root: don't try to install this project itself as a package (it's
 # not structured as one -- see pyproject.toml's package-mode = false)
 # --only main: skip dev dependencies (pytest etc) in the production image
+# Clearing poetry's package cache in this SAME RUN command matters on a
+# space-constrained disk (e.g. a small SD card): Docker layers are
+# append-only, so deleting cached files in a LATER step doesn't shrink a
+# layer that already wrote those bytes in an earlier one. With torch/
+# OpenCV-sized wheels passing through that cache, leaving it in place
+# would otherwise permanently cost several hundred MB to ~1GB of image
+# size for no benefit -- the cache only ever speeds up a second install
+# inside the SAME container, which never happens here (this container's
+# filesystem is thrown away and rebuilt from scratch every time
+# pyproject.toml/poetry.lock change).
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-root --only main --no-interaction --no-ansi
+    && poetry install --no-root --only main --no-interaction --no-ansi \
+    && poetry cache clear --all -n pypi \
+    && rm -rf /root/.cache/pypoetry /root/.cache/pip
 
 # Now copy the actual application code
 COPY app/ ./app/

@@ -23,6 +23,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,10 +48,15 @@ private val FiberColor = Color(0xFF9C7A54)
 fun MacronutrientsScreen(
     viewModel: MacronutrientsViewModel = viewModel(),
     onNavigateToProfile: () -> Unit = {},
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onSaved: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
     var showDiscardDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.saveSuccess) {
+        if (state.saveSuccess) onSaved?.invoke()
+    }
 
     fun handleBack() {
         if (!state.isValidTotal && state.hasUnsavedChanges) {

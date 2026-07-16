@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -30,9 +31,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun WeightGoalScreen(
     viewModel: WeightGoalViewModel = viewModel(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onSaved: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(state.saveSuccess) {
+        if (state.saveSuccess) onSaved?.invoke()
+    }
 
     if (state.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

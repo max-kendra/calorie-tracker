@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,9 +39,20 @@ private val HORMONES = listOf(
 @Composable
 fun EditProfileScreen(
     viewModel: EditProfileViewModel = viewModel(),
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    // Fired once, right after a successful save -- null in the normal
+    // Settings-reached usage (nothing should auto-navigate there, the
+    // user reviews the "Saved" confirmation and taps back manually).
+    // Onboarding passes this to advance to the next step automatically,
+    // since stopping to require a manual "Next" tap on every step would
+    // make an already-long required flow feel even longer.
+    onSaved: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(state.saveSuccess) {
+        if (state.saveSuccess) onSaved?.invoke()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (state.isLoading) {
