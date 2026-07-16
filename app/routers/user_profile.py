@@ -1,9 +1,12 @@
+import uuid
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
+from app.config import settings
 from app.database import get_db
 from app.models import UserProfile
 from app.schemas import (
@@ -79,6 +82,36 @@ def update_profile(payload: UserProfileUpdate, db: Session = Depends(get_db)):
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
 
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.post("/picture", response_model=UserProfileOut)
+async def upload_profile_picture(image: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    Saves a (client-cropped) profile picture and sets it as the current
+    profile's `profile_pic_path` in one step -- unlike scan-product-photo
+    (which just saves+returns a path for the CALLER to decide what to do
+    with, since it's mid-flow in Add Item and the item doesn't exist yet
+    to attach it to), there's exactly one profile row in this app (see
+    _get_or_create_profile), so there's no ambiguity about what this
+    image belongs to -- saving it IS the update.
+
+    Same storage convention as scan-product-photo: written under
+    settings.media_dir, served back at /media/<filename> per the
+    StaticFiles mount in app/main.py.
+    """
+    image_bytes = await image.read()
+
+    filename = f"{uuid.uuid4().hex}.jpg"
+    media_dir = Path(settings.media_dir)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    (media_dir / filename).write_bytes(image_bytes)
+    image_path = f"{settings.media_dir}/{filename}"
+
+    profile = _get_or_create_profile(db)
+    profile.profile_pic_path = image_path
     db.commit()
     db.refresh(profile)
     return profile

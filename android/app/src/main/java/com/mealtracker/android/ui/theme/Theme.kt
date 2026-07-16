@@ -9,18 +9,26 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = TealPrimaryDark,
+    background = TealBackgroundDark,
+    surface = TealSurfaceDark,
+    surfaceVariant = TealSurfaceDark
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+    primary = TealPrimary,
+    primaryContainer = TealPrimaryContainer,
+    // Screen background -- soft teal. Cards default to `surface` (below),
+    // which is plain white, so any Card()/Scaffold() using the theme's
+    // colors automatically gets "white card on teal background" with no
+    // per-screen styling needed.
+    background = TealBackground,
+    surface = Color.White,
+    surfaceVariant = TealSurfaceVariant
 )
 
 @Composable

@@ -1,22 +1,35 @@
 package com.mealtracker.android.ui.screens
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -24,13 +37,15 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.ui.components.DonutChart
 import com.mealtracker.android.ui.components.MacroRingsRow
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
- * Journal screen -- daily summary panel (big kcal ring + 4 macro rings,
- * matching the design doc's mockup but WITHOUT calories-burned tracking
- * or any food-rating/"daily assessment" feature -- both deliberately out
- * of scope, see design doc) followed by the four meal cards. Tapping any
- * card (even an empty one) opens that meal's detail screen.
+ * Journal screen -- two cards on a teal background (see ui/theme/Color.kt):
+ * a collapsible macro summary card (kcal ring + 4 macro rings) and a
+ * scrollable calendar card (date navigation + that day's meal cards).
+ * Deliberately no calories-burned tracking or food-rating/"daily
+ * assessment" feature -- both out of scope, see design doc.
  */
 @Composable
 fun JournalScreen(
@@ -38,6 +53,7 @@ fun JournalScreen(
     onNavigateToMealDetail: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var macroCardExpanded by remember { mutableStateOf(true) }
 
     // Bottom-nav tab switches preserve ViewModel state by design (see
     // AppNavHost's saveState/restoreState config) -- but Journal should
@@ -47,7 +63,7 @@ fun JournalScreen(
     // preservation specifically for the date, without needing to opt the
     // whole ViewModel out of state-saving.
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        viewModel.loadJournal(java.time.LocalDate.now())
+        viewModel.loadJournal(LocalDate.now())
     }
 
     when (val state = uiState) {
@@ -64,36 +80,80 @@ fun JournalScreen(
             ) {
                 Text("Couldn't load your journal", style = MaterialTheme.typography.titleMedium)
                 Text(state.message, style = MaterialTheme.typography.bodySmall)
-                Button(onClick = { viewModel.loadJournal(java.time.LocalDate.now()) }) {
+                Button(onClick = { viewModel.loadJournal(LocalDate.now()) }) {
                     Text("Retry")
                 }
             }
         }
         is JournalUiState.Success -> {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                item {
-                    DailySummaryPanel(state.dailyTotals)
-                }
-                items(state.buckets) { bucket ->
-                    MealCard(bucket, onClick = { onNavigateToMealDetail(bucket.mealType) })
-                }
+                DailySummaryCard(
+                    totals = state.dailyTotals,
+                    expanded = macroCardExpanded,
+                    onToggleExpanded = { macroCardExpanded = !macroCardExpanded }
+                )
+                CalendarCard(
+                    date = state.date,
+                    buckets = state.buckets,
+                    onPrevDay = { viewModel.loadJournal(state.date.minusDays(1)) },
+                    onNextDay = { viewModel.loadJournal(state.date.plusDays(1)) },
+                    onMealClick = onNavigateToMealDetail,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun DailySummaryPanel(totals: DailyTotals) {
+private fun DailySummaryCard(
+    totals: DailyTotals,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit
+) {
+    val remaining = totals.goalKcal - totals.eatenKcal
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth()
+                .animateContentSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val remaining = totals.goalKcal - totals.eatenKcal
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Macronutrients", style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = onToggleExpanded) {
+                    Icon(
+                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = if (expanded) "Collapse" else "Expand"
+                    )
+                }
+            }
+
+            if (!expanded) {
+                // Compact one-line summary when collapsed -- enough to
+                // glance at without needing to expand, matching the
+                // purpose of a collapsible card (hide detail, not hide
+                // the headline number).
+                Text(
+                    if (remaining >= 0) "$remaining Cal left \u00b7 ${totals.eatenKcal} eaten"
+                    else "${-remaining} Cal over \u00b7 ${totals.eatenKcal} eaten",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (remaining >= 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
+                )
+                return@Column
+            }
+
             val kcalFraction = if (totals.goalKcal > 0) {
                 (totals.eatenKcal.toFloat() / totals.goalKcal.toFloat()).coerceIn(0f, 1f)
             } else 0f
@@ -102,6 +162,11 @@ private fun DailySummaryPanel(totals: DailyTotals) {
                 segments = listOf(kcalFraction to MaterialTheme.colorScheme.primary),
                 diameter = 140.dp,
                 strokeWidth = 14.dp,
+                // Faded version of the same primary color, not a generic
+                // gray -- matches the macro rings below (see
+                // MacroProgressRing) so the whole card reads as
+                // "pale -> vibrant" of ONE color per ring, consistently.
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
                 centerContent = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         if (remaining >= 0) {
@@ -142,11 +207,61 @@ private fun DailySummaryPanel(totals: DailyTotals) {
 }
 
 @Composable
+private fun CalendarCard(
+    date: LocalDate,
+    buckets: List<MealBucket>,
+    onPrevDay: () -> Unit,
+    onNextDay: () -> Unit,
+    onMealClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onPrevDay) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous day")
+                }
+                Text(
+                    date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                IconButton(onClick = onNextDay) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next day")
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // The card itself doesn't scroll (it's sized by the parent
+            // Column's weight(1f) in JournalScreen) -- this LazyColumn is
+            // what actually scrolls, independently of the macro card
+            // above it, once the meal list is taller than the available
+            // space.
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(buckets) { bucket ->
+                    MealCard(bucket, onClick = { onMealClick(bucket.mealType) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MealCard(bucket: MealBucket, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(

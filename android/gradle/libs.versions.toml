@@ -16,6 +16,7 @@ lifecycleViewmodelKtx = "2.8.7"
 camerax = "1.4.1"
 mlkitBarcodeScanning = "17.3.0"
 healthConnect = "1.1.0"
+coil = "3.5.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -52,6 +53,16 @@ mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning"
 # 14+); availability/permission state is checked at runtime, not
 # assumed, since the Health Connect app isn't guaranteed to be present.
 health-connect-client = { group = "androidx.health.connect", name = "connect-client", version.ref = "healthConnect" }
+
+# Renders the profile picture (and any other network image, if this app
+# ever needs one elsewhere) -- first image-loading library in this
+# project; previously avatars were just a placeholder icon since nothing
+# needed to actually render a fetched image yet. coil3 needs a separate
+# network-engine artifact since Coil decoupled networking in the 3.x
+# line -- using OkHttp's since Retrofit/ApiClient already depends on it,
+# so this doesn't add a second HTTP stack.
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
+coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 
 # Networking -- Retrofit for the HTTP client, OkHttp as its underlying
 # engine (also lets us add the X-API-Key header via an interceptor),

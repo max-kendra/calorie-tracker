@@ -2,13 +2,17 @@ package com.mealtracker.android.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Placeholder palette -- feel free to replace with whatever fits your
-// actual design once you're past the skeleton stage. These are just
-// Material3's default-ish tones so the app looks reasonable immediately.
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Teal palette -- background is a soft, desaturated teal; card surfaces
+// are plain white on top of it (see Theme.kt's colorScheme: background
+// vs surface). Deliberately app-wide (set on the ColorScheme, not
+// per-screen), so this applies consistently everywhere Cards/Scaffolds
+// already rely on MaterialTheme.colorScheme.background/surface rather
+// than a hardcoded color.
+val TealPrimary = Color(0xFF2C6E63)
+val TealPrimaryContainer = Color(0xFFB6D9D2)
+val TealBackground = Color(0xFFDCE9E5)
+val TealSurfaceVariant = Color(0xFFE6EFEC)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+val TealPrimaryDark = Color(0xFF8FCFC0)
+val TealBackgroundDark = Color(0xFF14201D)
+val TealSurfaceDark = Color(0xFF1B2A26)

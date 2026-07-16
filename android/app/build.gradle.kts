@@ -95,6 +95,8 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.health.connect.client)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     // Forces a real Guava dependency into the graph -- without this,
     // Health Connect's transitive deps can pull in the empty
     // com.google.guava:listenablefuture:1.0 placeholder artifact (some

@@ -8,6 +8,9 @@ import com.mealtracker.android.network.ApiClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -38,6 +41,18 @@ data class ProfileOverviewUiState(
     // "current" always comes from Health Connect, not a stored column.
     val startingWeightKg: Double? = null,
     val goalWeightKg: Double? = null,
+    // The weight the user last entered on the Calorie Goal screen for
+    // its TDEE calculation (profile.weight_kg on the backend) -- used
+    // as a fallback for currentWeightKg below when Health Connect has
+    // no reading, so "current weight" on this screen isn't ONLY ever
+    // sourced from Health Connect. Health Connect still wins when both
+    // exist, since it's the more likely to be fresh/accurate of the two
+    // (a live reading vs. whatever was typed in during goal setup,
+    // possibly a while ago).
+    val profileWeightKg: Double? = null,
+
+    val isUploadingPicture: Boolean = false,
+    val pictureError: String? = null,
 
     // Health Connect state -- distinct "not available on this device"
     // vs "available but we don't have permission yet" vs "granted,
@@ -49,7 +64,7 @@ data class ProfileOverviewUiState(
     val isLoadingWeights: Boolean = false,
     val weightsError: String? = null
 ) {
-    val currentWeightKg: Double? get() = weightHistory.maxByOrNull { it.time }?.kg
+    val currentWeightKg: Double? get() = weightHistory.maxByOrNull { it.time }?.kg ?: profileWeightKg
     val weightDiffFromGoalKg: Double?
         get() {
             val current = currentWeightKg ?: return null
@@ -81,7 +96,8 @@ class ProfileOverviewViewModel : ViewModel() {
                     name = profile.name,
                     profilePicPath = profile.profilePicPath,
                     startingWeightKg = profile.startingWeightKg?.toDoubleOrNull(),
-                    goalWeightKg = profile.goalWeightKg?.toDoubleOrNull()
+                    goalWeightKg = profile.goalWeightKg?.toDoubleOrNull(),
+                    profileWeightKg = profile.weightKg?.toDoubleOrNull()
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -115,6 +131,26 @@ class ProfileOverviewViewModel : ViewModel() {
     fun selectRange(context: Context, range: WeightRange) {
         _uiState.value = _uiState.value.copy(selectedRange = range)
         loadWeightHistory(context.applicationContext)
+    }
+
+    fun uploadProfilePicture(imageBytes: ByteArray) {
+        _uiState.value = _uiState.value.copy(isUploadingPicture = true, pictureError = null)
+        viewModelScope.launch {
+            try {
+                val requestBody = imageBytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+                val part = MultipartBody.Part.createFormData("image", "profile.jpg", requestBody)
+                val updated = ApiClient.service.uploadProfilePicture(part)
+                _uiState.value = _uiState.value.copy(
+                    isUploadingPicture = false,
+                    profilePicPath = updated.profilePicPath
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isUploadingPicture = false,
+                    pictureError = e.message ?: "Failed to upload picture"
+                )
+            }
+        }
     }
 
     private fun loadWeightHistory(appContext: Context) {

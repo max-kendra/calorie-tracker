@@ -29,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mealtracker.android.ui.components.ProfileAvatar
+import com.mealtracker.android.ui.components.rememberImagePickerWithCrop
 
 private val HORMONES = listOf(
     "testosterone" to "Testosterone",
@@ -49,6 +51,7 @@ fun EditProfileScreen(
     onSaved: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pickProfilePicture = rememberImagePickerWithCrop { bytes -> viewModel.uploadProfilePicture(bytes) }
 
     LaunchedEffect(state.saveSuccess) {
         if (state.saveSuccess) onSaved?.invoke()
@@ -78,6 +81,26 @@ fun EditProfileScreen(
             if (state.loadError != null) {
                 Text(
                     state.loadError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                ProfileAvatar(
+                    imagePath = state.profilePicPath,
+                    size = 96.dp,
+                    onClick = pickProfilePicture
+                )
+            }
+            if (state.pictureError != null) {
+                Text(
+                    "Couldn't upload picture: ${state.pictureError}",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )

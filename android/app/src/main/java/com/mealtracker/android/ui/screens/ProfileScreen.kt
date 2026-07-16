@@ -1,7 +1,6 @@
 package com.mealtracker.android.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,12 +8,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,7 +31,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.health.HealthConnectManager
+import com.mealtracker.android.ui.components.ProfileAvatar
 import com.mealtracker.android.ui.components.WeightLineChart
+import com.mealtracker.android.ui.components.rememberImagePickerWithCrop
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -47,6 +45,7 @@ fun ProfileScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val pickProfilePicture = rememberImagePickerWithCrop { bytes -> viewModel.uploadProfilePicture(bytes) }
 
     val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
         HealthConnectManager.requestPermissionsContract()
@@ -79,26 +78,11 @@ fun ProfileScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                // No image-loading library wired up yet (see
-                // profilePicPath, currently unused here) -- falls back
-                // to a plain icon regardless of whether a photo exists.
-                // Swap in a real image loader (e.g. Coil) to render
-                // state.profilePicPath when this needs to show an
-                // actual photo.
-                Icon(
-                    Icons.Filled.Person,
-                    contentDescription = "Profile picture",
-                    modifier = Modifier.size(32.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            ProfileAvatar(
+                imagePath = state.profilePicPath,
+                size = 56.dp,
+                onClick = pickProfilePicture
+            )
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
             Text(
                 state.name?.takeIf { it.isNotBlank() } ?: "Your profile",

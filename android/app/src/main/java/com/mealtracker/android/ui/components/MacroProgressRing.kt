@@ -38,6 +38,12 @@ fun MacroProgressRing(
             segments = listOf(fraction to color),
             diameter = diameter,
             strokeWidth = strokeWidth,
+            // Faded version of the SAME color, not a generic gray -- the
+            // unfilled track is a pale tint of the macro's own color, so
+            // it visually "fills up" with a more vibrant version of
+            // itself as eaten approaches goal, rather than the ring
+            // looking like a different color underneath.
+            trackColor = color.copy(alpha = 0.22f),
             centerContent = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("$eaten", style = MaterialTheme.typography.titleMedium)

@@ -88,6 +88,15 @@ interface ApiService {
     @PATCH("profile")
     suspend fun updateProfile(@Body request: UserProfileUpdateRequest): UserProfile
 
+    // Saves a (client-cropped) profile picture and sets it as the
+    // current profile's picture in one step -- returns the updated
+    // profile (with the new profile_pic_path) directly, unlike
+    // scanProductPhoto/scanLabel which just return a draft for the
+    // caller to decide what to do with.
+    @Multipart
+    @POST("profile/picture")
+    suspend fun uploadProfilePicture(@Part image: MultipartBody.Part): UserProfile
+
     // Reads height/age/weight/hormone/activity_level/goal_type from the
     // STORED profile -- no request body. Throws 400 (HttpException) if
     // required profile fields are missing.
