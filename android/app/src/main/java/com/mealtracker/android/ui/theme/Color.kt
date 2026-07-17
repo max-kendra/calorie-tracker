@@ -15,6 +15,10 @@ val TealSurfaceVariant = Color(0xFFF0F0F0)
 // Soft pastel, replacing the earlier bold #1FAFED -- see design
 // discussion ("that color was too bold... pick out some cute pastel").
 val JournalHeroPastel = Color(0xFFBFEAFB)
+// Darker, desaturated version of the same blue hue for dark mode -- see
+// design discussion ("the pastel hero card colors do have to be a
+// little different [in dark mode]... darker versions of themselves").
+val JournalHeroPastelDark = Color(0xFF1B4A5A)
 
 // Dark theme -- per design discussion, this is meant to read as "mostly
 // an inversion" (dark gray backgrounds, white text/neutral icons) while

@@ -2,6 +2,7 @@ package com.mealtracker.android.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,6 +63,7 @@ import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.MacroRingsRow
 import com.mealtracker.android.ui.components.MealVisuals
 import com.mealtracker.android.ui.theme.JournalHeroPastel
+import com.mealtracker.android.ui.theme.JournalHeroPastelDark
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -174,7 +176,11 @@ fun JournalScreen(
                 // Deliberately not fillMaxSize/weight(1f): its height is
                 // just "however tall its content is", so nothing pastel
                 // is left over below the meal list.
-                Column(modifier = Modifier.fillMaxWidth().background(JournalHeroPastel)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(if (isSystemInDarkTheme()) JournalHeroPastelDark else JournalHeroPastel)
+                ) {
                     // The pastel background itself extends all the way
                     // to y=0 (this Column has no top padding/inset
                     // handling) -- this spacer just pushes the readable
@@ -464,7 +470,7 @@ private fun MealIcon(mealType: String) {
         modifier = Modifier.size(40.dp).clip(CircleShape).background(MealVisuals.backgroundFor(mealType)),
         contentAlignment = Alignment.Center
     ) {
-        Icon(MealVisuals.iconFor(mealType), contentDescription = null, tint = MealVisuals.iconTint)
+        Icon(MealVisuals.iconFor(mealType), contentDescription = null, tint = MealVisuals.iconTint())
     }
 }
 

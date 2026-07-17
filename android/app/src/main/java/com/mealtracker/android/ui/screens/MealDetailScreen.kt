@@ -662,7 +662,14 @@ private fun AddMethodIcon(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val background = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    // Was primaryContainer (a light teal tint) when selected -- too
+    // close to the unselected surfaceVariant color to tell apart at a
+    // glance, especially in dark mode. Using the actual primary teal
+    // now, with onPrimary (light) icon tint for contrast against it --
+    // see design discussion ("darker green color when selected, but
+    // still vibrant enough to tell apart from the background").
+    val background = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val iconTint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(
             onClick = onClick,
@@ -670,7 +677,7 @@ private fun AddMethodIcon(
                 .size(48.dp)
                 .background(background, CircleShape)
         ) {
-            Icon(icon, contentDescription = label, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(icon, contentDescription = label, tint = iconTint)
         }
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
         Text(label, style = MaterialTheme.typography.labelSmall)
