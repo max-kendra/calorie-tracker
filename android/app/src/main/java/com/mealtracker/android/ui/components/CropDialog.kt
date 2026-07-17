@@ -2,7 +2,6 @@ package com.mealtracker.android.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
-import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -29,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,12 +43,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -68,6 +62,21 @@ private const val HANDLE_TOUCH_SIZE_DP = 32
  * API when compiled against our current Compose BOM. Owning this
  * ourselves means there's nothing external to go stale or mismatch
  * against a future Compose upgrade.
+ *
+ * IMPORTANT: this is a plain composable, NOT wrapped in
+ * androidx.compose.ui.window.Dialog. It used to be -- but Dialog's
+ * separate Android Window kept NOT actually sizing to the full screen
+ * reliably (DialogProperties flags, then forcing the underlying
+ * Window's LayoutParams to MATCH_PARENT via a SideEffect, both still
+ * left the Cancel/Rotate/Crop row missing/barely-visible on some
+ * devices -- reported multiple times). Rendering inline in the CALLER's
+ * own window sidesteps that whole class of bug, since that window's
+ * insets/sizing are already known to work correctly (same one Journal/
+ * MealDetail etc. use). Callers are responsible for layering this on
+ * top of their other content themselves (e.g. as a later sibling in an
+ * outer Box) so it visually overlays rather than pushing content down
+ * in normal Column/Row flow -- see AddItemScreen.kt or
+ * MealDetailScreen.kt's ItemLogPageDialog for the pattern.
  *
  * Shows the source image fit-to-container with a draggable/resizable
  * crop rectangle on top -- drag inside the rectangle to move it, drag a
@@ -103,192 +112,157 @@ fun CropDialog(
     var imageBounds by remember(displayBitmap) { mutableStateOf(Rect.Zero) }
     var cropRect by remember(displayBitmap) { mutableStateOf(Rect.Zero) }
 
-    Dialog(
-        onDismissRequest = onCancel,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            // decorFitsSystemWindows defaults to true, which was
-            // shrinking this dialog's usable window height and pushing
-            // the Cancel/Rotate/Crop row below the visible screen on
-            // some devices (see design discussion: "buttons missing").
-            // We want the image area to genuinely go full-bleed
-            // edge-to-edge anyway (it's a black background either way),
-            // so this is set false and the button row below gets its
-            // own navigationBarsPadding() instead, rather than trying to
-            // keep the whole dialog inset.
-            decorFitsSystemWindows = false
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
     ) {
-        // DialogProperties alone (usePlatformDefaultWidth/
-        // decorFitsSystemWindows) turned out not to reliably force this
-        // dialog's actual window height to the full screen on every
-        // device -- when it doesn't, the BoxWithConstraints below
-        // measures against a shorter-than-screen window, and the
-        // Cancel/Rotate/Crop row ends up pushed below the visible
-        // viewport entirely (reported: "button is literally not on the
-        // screen"). This directly sets the underlying Android Window's
-        // layout params to MATCH_PARENT/MATCH_PARENT, which is the
-        // well-established fix for Compose Dialogs not actually filling
-        // the screen, rather than continuing to rely on DialogProperties
-        // flags that behave inconsistently across OEMs/API levels.
-        val view = LocalView.current
-        SideEffect {
-            val window = (view.parent as? DialogWindowProvider)?.window
-            window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
-        }
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                val containerWidthPx = constraints.maxWidth.toFloat()
+                val containerHeightPx = constraints.maxHeight.toFloat()
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-        ) {
-            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    val containerWidthPx = constraints.maxWidth.toFloat()
-                    val containerHeightPx = constraints.maxHeight.toFloat()
+                // Derives imageBounds/cropRect once per container size
+                // (or when the bitmap changes) rather than every
+                // recomposition -- also means dragging cropRect around
+                // doesn't get reset by unrelated recompositions, since
+                // this effect only re-runs when its keys actually change.
+                LaunchedEffect(containerWidthPx, containerHeightPx, displayBitmap) {
+                    if (containerWidthPx <= 0f || containerHeightPx <= 0f) return@LaunchedEffect
 
-                    // Derives imageBounds/cropRect once per container size
-                    // (or when the bitmap changes) rather than every
-                    // recomposition -- also means dragging cropRect around
-                    // doesn't get reset by unrelated recompositions, since
-                    // this effect only re-runs when its keys actually change.
-                    LaunchedEffect(containerWidthPx, containerHeightPx, displayBitmap) {
-                        if (containerWidthPx <= 0f || containerHeightPx <= 0f) return@LaunchedEffect
+                    val bitmapAspect = displayBitmap.width.toFloat() / displayBitmap.height.toFloat()
+                    val containerAspect = containerWidthPx / containerHeightPx
 
-                        val bitmapAspect = displayBitmap.width.toFloat() / displayBitmap.height.toFloat()
-                        val containerAspect = containerWidthPx / containerHeightPx
-
-                        val displayedWidth: Float
-                        val displayedHeight: Float
-                        if (bitmapAspect > containerAspect) {
-                            displayedWidth = containerWidthPx
-                            displayedHeight = containerWidthPx / bitmapAspect
-                        } else {
-                            displayedHeight = containerHeightPx
-                            displayedWidth = containerHeightPx * bitmapAspect
-                        }
-                        val offsetX = (containerWidthPx - displayedWidth) / 2f
-                        val offsetY = (containerHeightPx - displayedHeight) / 2f
-                        val bounds = Rect(offsetX, offsetY, offsetX + displayedWidth, offsetY + displayedHeight)
-                        imageBounds = bounds
-
-                        // Centered 80% inset so the handles are immediately
-                        // visible/grabbable rather than sitting exactly on
-                        // the image edge.
-                        val inset = 0.1f
-                        cropRect = Rect(
-                            bounds.left + bounds.width * inset,
-                            bounds.top + bounds.height * inset,
-                            bounds.right - bounds.width * inset,
-                            bounds.bottom - bounds.height * inset
-                        )
+                    val displayedWidth: Float
+                    val displayedHeight: Float
+                    if (bitmapAspect > containerAspect) {
+                        displayedWidth = containerWidthPx
+                        displayedHeight = containerWidthPx / bitmapAspect
+                    } else {
+                        displayedHeight = containerHeightPx
+                        displayedWidth = containerHeightPx * bitmapAspect
                     }
+                    val offsetX = (containerWidthPx - displayedWidth) / 2f
+                    val offsetY = (containerHeightPx - displayedHeight) / 2f
+                    val bounds = Rect(offsetX, offsetY, offsetX + displayedWidth, offsetY + displayedHeight)
+                    imageBounds = bounds
 
-                    if (imageBounds != Rect.Zero) {
-                        Image(
-                            bitmap = displayBitmap.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize()
-                        )
-
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val dimColor = Color.Black.copy(alpha = 0.55f)
-                            drawRect(dimColor, topLeft = Offset(0f, 0f), size = Size(size.width, cropRect.top))
-                            drawRect(
-                                dimColor,
-                                topLeft = Offset(0f, cropRect.bottom),
-                                size = Size(size.width, size.height - cropRect.bottom)
-                            )
-                            drawRect(
-                                dimColor,
-                                topLeft = Offset(0f, cropRect.top),
-                                size = Size(cropRect.left, cropRect.height)
-                            )
-                            drawRect(
-                                dimColor,
-                                topLeft = Offset(cropRect.right, cropRect.top),
-                                size = Size(size.width - cropRect.right, cropRect.height)
-                            )
-                            drawRect(
-                                color = Color.White,
-                                topLeft = cropRect.topLeft,
-                                size = cropRect.size,
-                                style = Stroke(width = 3f)
-                            )
-                        }
-
-                        // Move the whole rect by dragging inside it.
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(imageBounds) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        cropRect = clampRectWithinBounds(cropRect.translate(dragAmount), imageBounds)
-                                    }
-                                }
-                        )
-
-                        CropHandle(positionPx = cropRect.topLeft) { delta ->
-                            cropRect = clampResize(
-                                Rect(cropRect.left + delta.x, cropRect.top + delta.y, cropRect.right, cropRect.bottom),
-                                imageBounds
-                            )
-                        }
-                        CropHandle(positionPx = Offset(cropRect.right, cropRect.top)) { delta ->
-                            cropRect = clampResize(
-                                Rect(cropRect.left, cropRect.top + delta.y, cropRect.right + delta.x, cropRect.bottom),
-                                imageBounds
-                            )
-                        }
-                        CropHandle(positionPx = Offset(cropRect.left, cropRect.bottom)) { delta ->
-                            cropRect = clampResize(
-                                Rect(cropRect.left + delta.x, cropRect.top, cropRect.right, cropRect.bottom + delta.y),
-                                imageBounds
-                            )
-                        }
-                        CropHandle(positionPx = cropRect.bottomRight) { delta ->
-                            cropRect = clampResize(
-                                Rect(cropRect.left, cropRect.top, cropRect.right + delta.x, cropRect.bottom + delta.y),
-                                imageBounds
-                            )
-                        }
-                    }
+                    // Centered 80% inset so the handles are immediately
+                    // visible/grabbable rather than sitting exactly on
+                    // the image edge.
+                    val inset = 0.1f
+                    cropRect = Rect(
+                        bounds.left + bounds.width * inset,
+                        bounds.top + bounds.height * inset,
+                        bounds.right - bounds.width * inset,
+                        bounds.bottom - bounds.height * inset
+                    )
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = onCancel) {
-                        Text("Cancel", color = Color.White)
+                if (imageBounds != Rect.Zero) {
+                    Image(
+                        bitmap = displayBitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val dimColor = Color.Black.copy(alpha = 0.55f)
+                        drawRect(dimColor, topLeft = Offset(0f, 0f), size = Size(size.width, cropRect.top))
+                        drawRect(
+                            dimColor,
+                            topLeft = Offset(0f, cropRect.bottom),
+                            size = Size(size.width, size.height - cropRect.bottom)
+                        )
+                        drawRect(
+                            dimColor,
+                            topLeft = Offset(0f, cropRect.top),
+                            size = Size(cropRect.left, cropRect.height)
+                        )
+                        drawRect(
+                            dimColor,
+                            topLeft = Offset(cropRect.right, cropRect.top),
+                            size = Size(size.width - cropRect.right, cropRect.height)
+                        )
+                        drawRect(
+                            color = Color.White,
+                            topLeft = cropRect.topLeft,
+                            size = cropRect.size,
+                            style = Stroke(width = 3f)
+                        )
                     }
-                    IconButton(onClick = { rotationDegrees = (rotationDegrees + 90) % 360 }) {
-                        Icon(Icons.Filled.RotateRight, contentDescription = "Rotate", tint = Color.White)
+
+                    // Move the whole rect by dragging inside it.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(imageBounds) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    cropRect = clampRectWithinBounds(cropRect.translate(dragAmount), imageBounds)
+                                }
+                            }
+                    )
+
+                    CropHandle(positionPx = cropRect.topLeft) { delta ->
+                        cropRect = clampResize(
+                            Rect(cropRect.left + delta.x, cropRect.top + delta.y, cropRect.right, cropRect.bottom),
+                            imageBounds
+                        )
                     }
-                    Button(onClick = {
-                        if (imageBounds == Rect.Zero) return@Button
-                        val scale = displayBitmap.width / imageBounds.width
-                        val srcLeft = ((cropRect.left - imageBounds.left) * scale).roundToInt()
-                            .coerceIn(0, displayBitmap.width - 1)
-                        val srcTop = ((cropRect.top - imageBounds.top) * scale).roundToInt()
-                            .coerceIn(0, displayBitmap.height - 1)
-                        val srcWidth = (cropRect.width * scale).roundToInt()
-                            .coerceIn(1, displayBitmap.width - srcLeft)
-                        val srcHeight = (cropRect.height * scale).roundToInt()
-                            .coerceIn(1, displayBitmap.height - srcTop)
-                        onCropped(Bitmap.createBitmap(displayBitmap, srcLeft, srcTop, srcWidth, srcHeight))
-                    }) {
-                        Text("Crop")
+                    CropHandle(positionPx = Offset(cropRect.right, cropRect.top)) { delta ->
+                        cropRect = clampResize(
+                            Rect(cropRect.left, cropRect.top + delta.y, cropRect.right + delta.x, cropRect.bottom),
+                            imageBounds
+                        )
                     }
+                    CropHandle(positionPx = Offset(cropRect.left, cropRect.bottom)) { delta ->
+                        cropRect = clampResize(
+                            Rect(cropRect.left + delta.x, cropRect.top, cropRect.right, cropRect.bottom + delta.y),
+                            imageBounds
+                        )
+                    }
+                    CropHandle(positionPx = cropRect.bottomRight) { delta ->
+                        cropRect = clampResize(
+                            Rect(cropRect.left, cropRect.top, cropRect.right + delta.x, cropRect.bottom + delta.y),
+                            imageBounds
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onCancel) {
+                    Text("Cancel", color = Color.White)
+                }
+                IconButton(onClick = { rotationDegrees = (rotationDegrees + 90) % 360 }) {
+                    Icon(Icons.Filled.RotateRight, contentDescription = "Rotate", tint = Color.White)
+                }
+                Button(onClick = {
+                    if (imageBounds == Rect.Zero) return@Button
+                    val scale = displayBitmap.width / imageBounds.width
+                    val srcLeft = ((cropRect.left - imageBounds.left) * scale).roundToInt()
+                        .coerceIn(0, displayBitmap.width - 1)
+                    val srcTop = ((cropRect.top - imageBounds.top) * scale).roundToInt()
+                        .coerceIn(0, displayBitmap.height - 1)
+                    val srcWidth = (cropRect.width * scale).roundToInt()
+                        .coerceIn(1, displayBitmap.width - srcLeft)
+                    val srcHeight = (cropRect.height * scale).roundToInt()
+                        .coerceIn(1, displayBitmap.height - srcTop)
+                    onCropped(Bitmap.createBitmap(displayBitmap, srcLeft, srcTop, srcWidth, srcHeight))
+                }) {
+                    Text("Crop")
                 }
             }
         }

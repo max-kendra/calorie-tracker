@@ -73,7 +73,7 @@ import java.time.format.DateTimeFormatter
 private val MACRO_CARD_MAX_HEIGHT = 150.dp
 private val MACRO_CARD_MIN_HEIGHT = 64.dp
 private val CARD_CORNER_RADIUS = 24.dp
-private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containerColor = Color.White)
+private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
 
 /**
  * Journal screen. Layout, top to bottom:
@@ -97,6 +97,28 @@ fun JournalScreen(
     val calendarMonthState by viewModel.calendarState.collectAsState()
     var showCalendarPicker by remember { mutableStateOf(false) }
     var pickerMonth by remember { mutableStateOf(YearMonth.now()) }
+
+    // Reload whenever this screen comes back into view (e.g. returning
+    // from Meal Detail after logging something) -- previously this only
+    // ever loaded once via JournalViewModel's init{}, so anything logged
+    // elsewhere never showed up here until a manual date-nav tap forced
+    // a reload. loadJournal() itself already avoids a full-screen
+    // loading flash when there's existing data to show (see that
+    // function's own doc comment), so this is a quiet background
+    // refresh, not a visible reset.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val currentState = viewModel.uiState.value
+                if (currentState is JournalUiState.Success) {
+                    viewModel.loadJournal(currentState.date)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val density = LocalDensity.current
     val maxMacroHeightPx = with(density) { MACRO_CARD_MAX_HEIGHT.toPx() }

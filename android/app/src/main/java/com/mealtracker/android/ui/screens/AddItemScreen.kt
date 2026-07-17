@@ -16,20 +16,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -49,6 +55,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -77,7 +84,13 @@ private const val BARCODE_TIMEOUT_MS = 20000L
 fun AddItemScreen(
     viewModel: AddItemViewModel = viewModel(),
     onBack: () -> Unit = {},
-    onDone: () -> Unit = {}
+    onDone: () -> Unit = {},
+    // Tapping the matched-item toast -- bubbles up to MealDetailScreen,
+    // which owns the actual rich item info page (ItemLogPageDialog).
+    // AddItemViewModel has no access to that (separate ViewModel/
+    // screen), so this can't be handled locally the way onDone/onBack
+    // are.
+    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -187,6 +200,7 @@ fun AddItemScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -236,25 +250,10 @@ fun AddItemScreen(
             )
         }
 
-        // Shown whenever a crop is in progress (i.e. cropSourceBitmap has
-        // finished decoding) -- not tied to AddItemPhase since cropping
-        // can be triggered either from CAPTURE_PRODUCT_PHOTO/CAPTURE_LABEL
-        // (camera capture) or while still effectively mid-phase (gallery
-        // pick).
-        val bitmapToCrop = cropSourceBitmap
-        if (bitmapToCrop != null) {
-            CropDialog(
-                sourceBitmap = bitmapToCrop,
-                onCropped = { cropped ->
-                    val stream = java.io.ByteArrayOutputStream()
-                    cropped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                    val callback = onCropComplete
-                    clearCropState()
-                    callback?.invoke(stream.toByteArray())
-                },
-                onCancel = { clearCropState() }
-            )
-        }
+        // CropDialog itself now renders as a Box sibling below (outside
+        // this Column), so it overlays full-screen instead of being laid
+        // out as normal Column flow content -- see CropDialog's doc
+        // comment for why it's no longer its own separate Dialog window.
 
         if (!hasCameraPermission &&
             (state.phase == AddItemPhase.SCAN_BARCODE ||
@@ -281,15 +280,34 @@ fun AddItemScreen(
                     delay(BARCODE_TIMEOUT_MS)
                     viewModel.onBarcodeTimeout()
                 }
-                BarcodeScannerWithControls(
-                    scanError = state.scanError,
-                    onBarcodeDetected = { viewModel.onLiveBarcodeDetected(it) },
-                    onPickFromGallery = {
-                        galleryPickerForBarcode.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    BarcodeScannerWithControls(
+                        scanError = state.scanError,
+                        onBarcodeDetected = { viewModel.onLiveBarcodeDetected(it) },
+                        onPickFromGallery = {
+                            galleryPickerForBarcode.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    )
+                    // Matched item shown as a toast OVER the still-live
+                    // camera instead of navigating away -- see design
+                    // discussion ("the barcode flow was good exactly the
+                    // way it was", just wanted the match result to be
+                    // less of an interruption).
+                    state.matchedItemToast?.let { item ->
+                        MatchedItemToast(
+                            item = item,
+                            onDismiss = { viewModel.dismissMatchedItemToast() },
+                            onTapDetail = {
+                                viewModel.dismissMatchedItemToast()
+                                onOpenItemDetail(item)
+                            },
+                            onAdd = { viewModel.useMatchedItem() },
+                            modifier = Modifier.align(Alignment.BottomCenter)
                         )
                     }
-                )
+                }
             }
             AddItemPhase.BARCODE_LOOKUP -> LoadingContent()
             AddItemPhase.BARCODE_RESULT -> BarcodeResultContent(
@@ -303,10 +321,6 @@ fun AddItemScreen(
                 value = state.manualBarcodeInput,
                 onValueChange = { viewModel.updateManualBarcodeInput(it) },
                 onSubmit = { viewModel.submitManualBarcode() }
-            )
-            AddItemPhase.NEW_ITEM_TYPE_PROMPT -> NewItemTypePromptContent(
-                onPackagedProduct = { viewModel.choosePackagedProduct() },
-                onRawIngredient = { viewModel.chooseRawIngredient() }
             )
             AddItemPhase.USDA_SEARCH -> UsdaSearchContent(
                 query = state.usdaQuery,
@@ -355,6 +369,28 @@ fun AddItemScreen(
             )
         }
     }
+
+    // Rendered as a Box sibling AFTER the main Column above, so it
+    // overlays full-screen on top of whatever phase is showing instead
+    // of being laid out as normal Column flow content (which would push
+    // things down / not actually cover the camera preview etc.). See
+    // CropDialog's own doc comment for why it's a plain composable now,
+    // not a separate Dialog window.
+    val bitmapToCrop = cropSourceBitmap
+    if (bitmapToCrop != null) {
+        CropDialog(
+            sourceBitmap = bitmapToCrop,
+            onCropped = { cropped ->
+                val stream = java.io.ByteArrayOutputStream()
+                cropped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                val callback = onCropComplete
+                clearCropState()
+                callback?.invoke(stream.toByteArray())
+            },
+            onCancel = { clearCropState() }
+        )
+    }
+    }
 }
 
 @Composable
@@ -395,32 +431,64 @@ private fun ManualBarcodeEntryContent(
     }
 }
 
-/** Shown on a no-match barcode -- see AddItemPhase.NEW_ITEM_TYPE_PROMPT's
- * doc comment for why this asks rather than assumes "packaged product". */
+/** Cute little toast shown over the still-live camera when a scanned
+ * barcode matches an existing item (see design discussion) -- tapping
+ * the card body opens BARCODE_RESULT for more detail, tapping Add logs
+ * it directly, X dismisses and lets scanning continue. */
 @Composable
-private fun NewItemTypePromptContent(
-    onPackagedProduct: () -> Unit,
-    onRawIngredient: () -> Unit
+private fun MatchedItemToast(
+    item: com.mealtracker.android.network.models.Item,
+    onDismiss: () -> Unit,
+    onTapDetail: () -> Unit,
+    onAdd: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .clickable(onClick = onTapDetail)
     ) {
-        Text("What kind of item is this?", style = MaterialTheme.typography.titleMedium)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Text(
-            "This helps us find the right nutrition info.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(16.dp))
-        Button(onClick = onRawIngredient, modifier = Modifier.fillMaxWidth()) {
-            Text("Raw ingredient (e.g. a banana, an onion)")
-        }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-        Button(onClick = onPackagedProduct, modifier = Modifier.fillMaxWidth()) {
-            Text("Packaged product (has a label)")
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (item.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + item.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.name, style = MaterialTheme.typography.titleMedium)
+                if (item.brand != null) {
+                    Text(
+                        item.brand,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (item.kcal100g != null) {
+                    Text(
+                        "${item.kcal100g} Cal / 100g",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Filled.Add, contentDescription = "Add")
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Filled.Close, contentDescription = "Dismiss")
+            }
         }
     }
 }
@@ -732,7 +800,7 @@ private fun ItemFormContent(state: AddItemUiState, isSaving: Boolean, viewModel:
         NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
         NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
         NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
-        NumberField("Sodium (g)", state.sodiumG100g, viewModel::updateSodium)
+        NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 

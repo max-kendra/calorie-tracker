@@ -2,6 +2,7 @@ package com.mealtracker.android.ui.theme
 
 import android.app.Activity
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -12,10 +13,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = TealPrimaryDark,
-    background = TealBackgroundDark,
-    surface = TealSurfaceDark,
-    surfaceVariant = TealSurfaceDark
+    // Deliberately the SAME TealPrimary as light mode, not a muted
+    // variant -- per design discussion, colored/branded elements are
+    // meant to stay exactly as they are; only neutral surfaces/text
+    // invert. Same reasoning applies to every other hardcoded color in
+    // the app (JournalHeroPastel, MacroColors, MealVisuals meal-icon
+    // tints, etc.) -- none of those read from the theme at all, by
+    // design, so they don't need a dark-mode counterpart here.
+    primary = TealPrimary,
+    primaryContainer = TealPrimaryContainer,
+    background = AppBackgroundDark,
+    surface = SurfaceDark,
+    surfaceVariant = SurfaceVariantDark,
+    onBackground = OnSurfaceDark,
+    onSurface = OnSurfaceDark,
+    onSurfaceVariant = OnSurfaceVariantDark
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -31,20 +43,15 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun MealTrackerTheme(
-    // Deliberately does NOT default to isSystemInDarkTheme() right now.
-    // DarkColorScheme below exists but only sets primary/background/
-    // surface/surfaceVariant -- every screen we've built (Journal's
-    // pastel hero, Meal Detail's hero, card whites, chart colors, meal
-    // icon tints) paints hardcoded light colors directly rather than
-    // reading them from the theme, while Text/Icon DO pick up
-    // Material3's dark-mode default (light) "on" colors automatically.
-    // Net effect on a dark-mode device: light text on hardcoded light
-    // backgrounds -- barely legible, not a real adapted dark theme (see
-    // design discussion, this was reported as "dark mode is hella
-    // messed up"). Forcing light mode here is the honest fix until
-    // those screens are actually redesigned with dark-mode-aware
-    // colors -- that's real, separate work, not done as part of this fix.
-    darkTheme: Boolean = false,
+    // Now genuinely follows the system setting -- see this function's
+    // git history/design discussion for why it was hardcoded to false
+    // for a while (every screen was painting hardcoded Color.White for
+    // cards, which read as barely-legible light-text-on-light-
+    // background in dark mode). That's fixed now: cards read
+    // MaterialTheme.colorScheme.surface instead of a literal
+    // Color.White, and the bottom nav bar does too -- so dark mode is a
+    // real, coherent theme now, not a half-applied one.
+    darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color (Material You) is available Android 12+ -- uses
     // colors derived from the user's wallpaper. Off by default here so
     // the look is consistent and predictable; flip to true if you want

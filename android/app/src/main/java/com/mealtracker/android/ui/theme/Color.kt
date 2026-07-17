@@ -16,6 +16,16 @@ val TealSurfaceVariant = Color(0xFFF0F0F0)
 // discussion ("that color was too bold... pick out some cute pastel").
 val JournalHeroPastel = Color(0xFFBFEAFB)
 
-val TealPrimaryDark = Color(0xFF8FCFC0)
-val TealBackgroundDark = Color(0xFF14201D)
-val TealSurfaceDark = Color(0xFF1B2A26)
+// Dark theme -- per design discussion, this is meant to read as "mostly
+// an inversion" (dark gray backgrounds, white text/neutral icons) while
+// every COLORED/branded element (teal accent, JournalHeroPastel,
+// MacroColors, MealVisuals meal-icon tints, etc.) stays exactly the same
+// as light mode rather than getting its own darker variant. That's why
+// Theme.kt's DarkColorScheme uses TealPrimary directly again, not a
+// separate muted color the way TealPrimaryDark used to -- deliberate
+// now, not an oversight.
+val AppBackgroundDark = Color(0xFF121212)
+val SurfaceDark = Color(0xFF1E1E1E)
+val SurfaceVariantDark = Color(0xFF2C2C2C)
+val OnSurfaceDark = Color(0xFFF2F2F2)
+val OnSurfaceVariantDark = Color(0xFFB0B0B0)

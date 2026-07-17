@@ -6,6 +6,8 @@ import com.mealtracker.android.network.models.GoalCreateRequest
 import com.mealtracker.android.network.models.GoalUpdateRequest
 import com.mealtracker.android.network.models.HealthResponse
 import com.mealtracker.android.network.models.Item
+import com.mealtracker.android.network.models.ItemImagePathUpdateRequest
+import com.mealtracker.android.network.models.ItemMacrosUpdateRequest
 import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
@@ -105,6 +107,34 @@ interface ApiService {
     @GET("usda/food/{fdcId}")
     suspend fun getUsdaFood(@Path("fdcId") fdcId: Int): UsdaFoodDetail
 
+    // Backs opening an already-logged item on the same page used to log
+    // a new one (see MealDetailViewModel.openLogDetail) -- Log itself
+    // only carries denormalized name/image, not per-100g macros or
+    // serving_sizes, so the full Item is fetched separately.
+    @GET("items/{itemId}")
+    suspend fun getItem(@Path("itemId") itemId: Int): Item
+
+    // See ItemImagePathUpdateRequest's doc comment for why this is a
+    // dedicated minimal request rather than reusing a general item
+    // update shape.
+    @PATCH("items/{itemId}")
+    suspend fun updateItemImage(@Path("itemId") itemId: Int, @Body request: ItemImagePathUpdateRequest): Item
+
+    // Backs the item info page's edit (pencil) button -- see
+    // ItemMacrosUpdateRequest's doc comment.
+    @PATCH("items/{itemId}")
+    suspend fun updateItemMacros(@Path("itemId") itemId: Int, @Body request: ItemMacrosUpdateRequest): Item
+
+    // name/weight_g are query params on the backend (not a body), see
+    // add_serving_size in app/routers/items.py. Returns the full Item
+    // with the new serving included in serving_sizes.
+    @POST("items/{itemId}/serving-sizes")
+    suspend fun createServingSize(
+        @Path("itemId") itemId: Int,
+        @Query("name") name: String,
+        @Query("weight_g") weightG: Double
+    ): Item
+
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --
     // callers should catch that specifically to distinguish "no goal set
@@ -191,6 +221,15 @@ interface ApiService {
 
     // Used by the "star icon: save this meal" feature -- a saved Meal is
     // just a Recipe with recipe_type="meal" and servings=1.
+    // Backs the search filter's Recipe/Meal options -- recipe_type
+    // distinguishes them (see Recipe.recipeType's doc comment).
+    @GET("recipes")
+    suspend fun searchRecipes(
+        @Query("q") query: String? = null,
+        @Query("recipe_type") recipeType: String? = null,
+        @Query("limit") limit: Int = 50
+    ): List<Recipe>
+
     @POST("recipes")
     suspend fun createRecipe(@Body request: RecipeCreateRequest): Recipe
 }

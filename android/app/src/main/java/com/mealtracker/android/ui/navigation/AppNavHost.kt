@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -96,7 +97,7 @@ fun AppNavHost() {
         contentWindowInsets = WindowInsets.safeDrawing.exclude(WindowInsets.statusBars),
         bottomBar = {
             if (currentRoute !in routesWithoutBottomBar) {
-                NavigationBar(containerColor = androidx.compose.ui.graphics.Color.White) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     val currentDestination = navBackStackEntry?.destination
 
                     bottomNavDestinations.forEach { destination ->

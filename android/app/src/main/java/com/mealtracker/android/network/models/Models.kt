@@ -74,7 +74,10 @@ data class Log(
     @SerialName("fat_g_logged") val fatGLogged: Int,
     @SerialName("fiber_g_logged") val fiberGLogged: Int,
     @SerialName("item_name") val itemName: String? = null,
-    @SerialName("recipe_name") val recipeName: String? = null
+    @SerialName("recipe_name") val recipeName: String? = null,
+    // Denormalized from the source item/recipe -- backs the thumbnail in
+    // the logged-items list.
+    @SerialName("image_path") val imagePath: String? = null
 )
 
 /**
@@ -188,12 +191,20 @@ data class RecipeCreateRequest(
     val ingredients: List<RecipeIngredientCreateRequest> = emptyList()
 )
 
-/** Minimal response model -- we only need to confirm success, extra
- * fields in the real response are ignored (ignoreUnknownKeys=true). */
+/** Mirrors RecipeOut from app/schemas.py. recipeType distinguishes an
+ * actual recipe from a saved reusable "meal" (same underlying table --
+ * see RecipeType on the backend) -- backs the search filter's
+ * Recipe/Meal options. Reuses the existing NutritionTotals model above
+ * (already defined for daily/goal totals) for totalsPerServing, same
+ * shape on the backend for both. */
 @Serializable
 data class Recipe(
     @SerialName("recipe_id") val recipeId: Int,
-    val name: String
+    val name: String,
+    @SerialName("recipe_type") val recipeType: String = "recipe",
+    @SerialName("image_path") val imagePath: String? = null,
+    val servings: String = "1",
+    @SerialName("totals_per_serving") val totalsPerServing: NutritionTotals? = null
 )
 
 /**
@@ -282,6 +293,37 @@ data class OcrMacros(
     @SerialName("sodium_mg_100g") val sodiumMg100g: String? = null
 )
 
+/** Same shape as OcrMacros -- fields absent (not zero) when USDA didn't
+ * report them. Mirrors UsdaMacros from app/schemas.py. */
+@Serializable
+data class UsdaMacros(
+    @SerialName("kcal_100g") val kcal100g: String? = null,
+    @SerialName("protein_100g") val protein100g: String? = null,
+    @SerialName("carbs_100g") val carbs100g: String? = null,
+    @SerialName("fat_100g") val fat100g: String? = null,
+    @SerialName("fiber_100g") val fiber100g: String? = null,
+    @SerialName("sugar_100g") val sugar100g: String? = null,
+    @SerialName("saturated_fat_100g") val saturatedFat100g: String? = null,
+    @SerialName("sodium_mg_100g") val sodiumMg100g: String? = null
+)
+
+@Serializable
+data class UsdaFoodSummary(
+    @SerialName("fdc_id") val fdcId: Int,
+    val description: String,
+    @SerialName("data_type") val dataType: String,
+    @SerialName("brand_owner") val brandOwner: String? = null,
+    val macros: UsdaMacros
+)
+
+@Serializable
+data class UsdaFoodDetail(
+    @SerialName("fdc_id") val fdcId: Int,
+    val description: String,
+    @SerialName("data_type") val dataType: String,
+    val macros: UsdaMacros
+)
+
 /**
  * Mirrors ProductPhotoScanResult from app/schemas.py. guessedName/
  * guessedBrand are rough heuristics (NOT a confident extraction the way
@@ -358,4 +400,35 @@ data class LogCreateRequest(
 data class LogUpdateRequest(
     val quantity: Double? = null,
     @SerialName("serving_size_id") val servingSizeId: Int? = null
+)
+
+/** Deliberately minimal (image_path only), NOT a general ItemUpdateRequest
+ * with every field nullable -- kotlinx.serialization encodes nulls
+ * explicitly by default, and the backend's update_item uses
+ * exclude_unset=True, so a general request object with unset fields
+ * defaulting to null would serialize those nulls and WIPE OUT the
+ * item's other fields (name, macros, etc.) on every image-only update.
+ * A single non-nullable field sidesteps that entirely. */
+@Serializable
+data class ItemImagePathUpdateRequest(@SerialName("image_path") val imagePath: String)
+
+/** Backs the item info page's edit (pencil) button -- name + macros
+ * only. Deliberately does NOT declare barcode/brand/type/origin/
+ * image_path fields at all (not just "leaves them null") -- same
+ * exclude_unset landmine as ItemImagePathUpdateRequest's doc comment:
+ * a field genuinely absent from this class is never serialized, so the
+ * backend never sees it as "set" and leaves it untouched. A null VALUE
+ * here (for a macro the user cleared) is intentional and does get
+ * applied, unlike an absent field. */
+@Serializable
+data class ItemMacrosUpdateRequest(
+    val name: String,
+    @SerialName("kcal_100g") val kcal100g: Double? = null,
+    @SerialName("protein_100g") val protein100g: Double? = null,
+    @SerialName("carbs_100g") val carbs100g: Double? = null,
+    @SerialName("fat_100g") val fat100g: Double? = null,
+    @SerialName("fiber_100g") val fiber100g: Double? = null,
+    @SerialName("sugar_100g") val sugar100g: Double? = null,
+    @SerialName("saturated_fat_100g") val saturatedFat100g: Double? = null,
+    @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null
 )

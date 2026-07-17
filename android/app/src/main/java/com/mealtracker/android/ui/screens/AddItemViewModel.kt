@@ -25,6 +25,12 @@ import java.time.format.DateTimeFormatter
 // accurate quantity entry. Revisit once a quantity step exists.
 private const val MEAL_LOG_QUANTITY_G = 100.0
 
+// Standard rounded salt<->sodium conversion (salt is ~39.3% sodium by
+// mass; EU nutrition labels round this to salt = sodium x 2.5, i.e.
+// sodium = salt / 2.5). Used at the boundaries of AddItemUiState.
+// saltG100g -- see that field's doc comment.
+private const val SALT_TO_SODIUM_RATIO = 2.5
+
 /**
  * Barcode is now the mandatory first step -- there's no independent
  * "Scan Label" or "Enter Manually" entry point, since without a barcode
@@ -54,11 +60,10 @@ private const val MEAL_LOG_QUANTITY_G = 100.0
  */
 enum class AddItemPhase {
     SCAN_BARCODE, BARCODE_LOOKUP, BARCODE_RESULT, MANUAL_BARCODE_ENTRY,
-    // Shown on a no-match barcode instead of jumping straight to product
-    // photo -- packaged products and raw/whole ingredients (a banana, an
-    // onion) need very different next steps (photo+OCR vs. USDA lookup),
-    // and we have no way to guess which just from a barcode.
-    NEW_ITEM_TYPE_PROMPT, USDA_SEARCH,
+    // Reached only via jumpToUsdaSearch() from the meal's text Search
+    // tab now, not from barcode scanning -- see design discussion ("the
+    // barcode flow was good exactly the way it was").
+    USDA_SEARCH,
     CAPTURE_PRODUCT_PHOTO, PROCESSING_PRODUCT_PHOTO,
     CAPTURE_LABEL, PROCESSING_LABEL, ITEM_FORM, SAVING, SAVED
 }
@@ -77,6 +82,11 @@ data class AddItemUiState(
     val scannedBarcode: String? = null,
     val decoderUsed: String? = null,
     val matchedItem: Item? = null,
+    // Set on a barcode match instead of navigating away -- shown as a
+    // toast over the still-live camera (see design discussion). Null
+    // once dismissed, added directly, or tapped through to
+    // BARCODE_RESULT for more detail.
+    val matchedItemToast: Item? = null,
 
     // OCR context, shown as info/warnings in the item form
     val ocrDetectedLanguage: String? = null,
@@ -84,8 +94,8 @@ data class AddItemUiState(
     val ocrWasUsed: Boolean = false,
     val usdaImportUsed: Boolean = false,
 
-    // Raw-ingredient (USDA) search -- see NEW_ITEM_TYPE_PROMPT/
-    // USDA_SEARCH phases.
+    // Raw-ingredient (USDA) search -- see USDA_SEARCH phase, reached
+    // from the meal's text Search tab.
     val usdaQuery: String = "",
     val usdaResults: List<UsdaFoodSummary> = emptyList(),
     val isSearchingUsda: Boolean = false,
@@ -118,13 +128,16 @@ data class AddItemUiState(
     val fiber100g: String = "",
     val sugar100g: String = "",
     val saturatedFat100g: String = "",
-    // Displayed/entered in GRAMS, not mg -- food labels universally show
-    // sodium in g (e.g. "0.5 g"), so asking for mg here was a mismatch
-    // with what the user is actually reading off the package. Backend
-    // still stores/logs sodium in mg (ItemCreateRequest.sodiumMg100g) --
+    // SALT, not sodium -- food labels show salt (that's literally what's
+    // printed on the package: "Salt: 0.5g"), and asking someone to
+    // mentally convert to sodium themselves invites mistakes. Backend
+    // still stores/logs SODIUM in mg (ItemCreateRequest.sodiumMg100g) --
     // conversion happens at the boundaries (see prefillFromOcr and
-    // saveItem below), this field itself always holds grams.
-    val sodiumG100g: String = "",
+    // saveItem below) using the standard salt-to-sodium ratio (salt is
+    // ~40% sodium by mass, i.e. salt_g \u00d7 2.5 \u2248 sodium_g -- the
+    // same rounded factor used on EU nutrition labels). This field
+    // itself always holds SALT in grams, never sodium.
+    val saltG100g: String = "",
 
     val saveError: String? = null,
     val createdItem: Item? = null
@@ -193,7 +206,11 @@ class AddItemViewModel : ViewModel() {
     /** Called by the Composable's timeout timer if SCAN_BARCODE has been
      * showing for ~8s with nothing detected. */
     fun onBarcodeTimeout() {
-        if (_uiState.value.phase == AddItemPhase.SCAN_BARCODE) {
+        // If a toast is showing, we clearly DID detect and match a
+        // barcode -- "no barcode detected" would be actively wrong here,
+        // and it kept firing even while a match was actively displayed
+        // (see design discussion).
+        if (_uiState.value.phase == AddItemPhase.SCAN_BARCODE && _uiState.value.matchedItemToast == null) {
             _uiState.value = _uiState.value.copy(showManualEntryPrompt = true)
         }
     }
@@ -221,7 +238,15 @@ class AddItemViewModel : ViewModel() {
 
     /** Called when the live scanner (multi-frame consensus, see
      * LiveBarcodeScannerView) settles on a value. */
+    /** ML Kit's analyzer calls back on EVERY frame it sees a barcode, not
+     * just once -- without a guard here, that meant re-running the
+     * lookup (and replacing the toast's state, causing a visible
+     * flicker/reset) many times a second for as long as the same code
+     * stayed in frame. Ignore further detections while a toast for a
+     * match is already showing or a lookup is already in flight. */
     fun onLiveBarcodeDetected(barcode: String) {
+        val state = _uiState.value
+        if (state.matchedItemToast != null || state.phase == AddItemPhase.BARCODE_LOOKUP) return
         lookUpBarcode(barcode, decoderUsed = "ML Kit (on-device)")
     }
 
@@ -266,18 +291,17 @@ class AddItemViewModel : ViewModel() {
             }
 
             if (matched == null) {
-                // No existing item for this barcode -- per earlier design
-                // discussion, don't stop and make the user tap a
-                // confirmation button just to proceed; we already have
-                // the barcode captured. But packaged products and raw
-                // ingredients need different next steps, so ask which
-                // this is rather than assuming "packaged" (see
-                // NEW_ITEM_TYPE_PROMPT's doc comment on the enum).
-                // BARCODE_RESULT itself is now ONLY used to show a
-                // matched item (see below), never a "nothing found,
-                // continue?" prompt.
+                // No existing item for this barcode -- don't stop and
+                // make the user tap a confirmation button just to
+                // proceed; we already have the barcode captured, so go
+                // straight into adding a new item (original behavior --
+                // do NOT reintroduce a "what kind of item" prompt here,
+                // see design discussion: "the barcode flow was good
+                // exactly the way it was"). Raw-ingredient/USDA lookup
+                // lives only under the text Search tab now (see
+                // jumpToUsdaSearch below), not injected into scanning.
                 _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.NEW_ITEM_TYPE_PROMPT,
+                    phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
                     scannedBarcode = barcode,
                     decoderUsed = decoderUsed,
                     matchedItem = null,
@@ -286,13 +310,31 @@ class AddItemViewModel : ViewModel() {
                 return@launch
             }
 
+            // Matched -- stays on SCAN_BARCODE (camera keeps running) and
+            // shows a toast over it instead of navigating to a separate
+            // full-screen result, per design discussion. Tapping the
+            // toast (openMatchedItemToastDetail) reuses BARCODE_RESULT as
+            // the "item info" view; tapping its own Add button
+            // (useMatchedItem) logs it directly without that detour.
             _uiState.value = _uiState.value.copy(
-                phase = AddItemPhase.BARCODE_RESULT,
+                phase = AddItemPhase.SCAN_BARCODE,
                 scannedBarcode = barcode,
                 decoderUsed = decoderUsed,
-                matchedItem = matched
+                matchedItem = matched,
+                matchedItemToast = matched
             )
         }
+    }
+
+    fun dismissMatchedItemToast() {
+        _uiState.value = _uiState.value.copy(matchedItemToast = null, matchedItem = null)
+    }
+
+    /** Reached only from the Search tab now, not from scanning -- see
+     * design discussion. Jumps straight into USDA_SEARCH without going
+     * through SCAN_BARCODE at all. */
+    fun jumpToUsdaSearch() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.USDA_SEARCH)
     }
 
     fun retryBarcodeScan() {
@@ -338,16 +380,6 @@ class AddItemViewModel : ViewModel() {
      * over, name/brand/image stay blank for manual entry later. */
     fun skipProductPhoto() {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
-    }
-
-    // ----- New item type prompt (packaged product vs. raw ingredient) -----
-
-    fun choosePackagedProduct() {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO)
-    }
-
-    fun chooseRawIngredient() {
-        _uiState.value = _uiState.value.copy(phase = AddItemPhase.USDA_SEARCH)
     }
 
     fun updateUsdaQuery(query: String) {
@@ -398,7 +430,10 @@ class AddItemViewModel : ViewModel() {
                     saturatedFat100g = macros.saturatedFat100g ?: "",
                     // USDA reports sodium in mg too -- same conversion as
                     // OCR's prefill.
-                    sodiumG100g = macros.sodiumMg100g?.toDoubleOrNull()?.div(1000.0)?.toString() ?: ""
+                    // sodium (mg) -> salt (g): divide by 1000 for the
+                    // unit change, multiply by the salt:sodium ratio.
+                    saltG100g = macros.sodiumMg100g?.toDoubleOrNull()
+                        ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: ""
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(usdaError = e.message ?: "Couldn't load that food's details")
@@ -445,7 +480,10 @@ class AddItemViewModel : ViewModel() {
                     saturatedFat100g = macros.saturatedFat100g ?: "",
                     // OCR/backend reports sodium in mg -- convert to g
                     // for display, matching what's printed on the label.
-                    sodiumG100g = macros.sodiumMg100g?.toDoubleOrNull()?.div(1000.0)?.toString() ?: ""
+                    // sodium (mg) -> salt (g): divide by 1000 for the
+                    // unit change, multiply by the salt:sodium ratio.
+                    saltG100g = macros.sodiumMg100g?.toDoubleOrNull()
+                        ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: ""
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -483,7 +521,7 @@ class AddItemViewModel : ViewModel() {
     fun updateFiber(value: String) { _uiState.value = _uiState.value.copy(fiber100g = value) }
     fun updateSugar(value: String) { _uiState.value = _uiState.value.copy(sugar100g = value) }
     fun updateSaturatedFat(value: String) { _uiState.value = _uiState.value.copy(saturatedFat100g = value) }
-    fun updateSodium(value: String) { _uiState.value = _uiState.value.copy(sodiumG100g = value) }
+    fun updateSalt(value: String) { _uiState.value = _uiState.value.copy(saltG100g = value) }
 
     fun saveItem() {
         val state = _uiState.value
@@ -509,8 +547,11 @@ class AddItemViewModel : ViewModel() {
                         fiber100g = state.fiber100g.toDoubleOrNull(),
                         sugar100g = state.sugar100g.toDoubleOrNull(),
                         saturatedFat100g = state.saturatedFat100g.toDoubleOrNull(),
-                        // User-entered grams -> API expects mg.
-                        sodiumMg100g = state.sodiumG100g.toDoubleOrNull()?.times(1000.0),
+                        // User-entered SALT (g) -> API expects sodium (mg):
+                        // divide by the salt:sodium ratio, then by 1000
+                        // for the unit change to mg... equivalently,
+                        // multiply by 1000 and divide by the ratio.
+                        sodiumMg100g = state.saltG100g.toDoubleOrNull()?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO),
                         type = state.itemType,
                         origin = when {
                             state.usdaImportUsed -> "usda_import"
