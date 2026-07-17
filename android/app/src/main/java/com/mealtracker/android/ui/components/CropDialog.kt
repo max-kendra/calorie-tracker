@@ -2,6 +2,7 @@ package com.mealtracker.android.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -13,9 +14,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.RotateRight
@@ -26,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,10 +45,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -99,14 +105,44 @@ fun CropDialog(
 
     Dialog(
         onDismissRequest = onCancel,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            // decorFitsSystemWindows defaults to true, which was
+            // shrinking this dialog's usable window height and pushing
+            // the Cancel/Rotate/Crop row below the visible screen on
+            // some devices (see design discussion: "buttons missing").
+            // We want the image area to genuinely go full-bleed
+            // edge-to-edge anyway (it's a black background either way),
+            // so this is set false and the button row below gets its
+            // own navigationBarsPadding() instead, rather than trying to
+            // keep the whole dialog inset.
+            decorFitsSystemWindows = false
+        )
     ) {
+        // DialogProperties alone (usePlatformDefaultWidth/
+        // decorFitsSystemWindows) turned out not to reliably force this
+        // dialog's actual window height to the full screen on every
+        // device -- when it doesn't, the BoxWithConstraints below
+        // measures against a shorter-than-screen window, and the
+        // Cancel/Rotate/Crop row ends up pushed below the visible
+        // viewport entirely (reported: "button is literally not on the
+        // screen"). This directly sets the underlying Android Window's
+        // layout params to MATCH_PARENT/MATCH_PARENT, which is the
+        // well-established fix for Compose Dialogs not actually filling
+        // the screen, rather than continuing to rely on DialogProperties
+        // flags that behave inconsistently across OEMs/API levels.
+        val view = LocalView.current
+        SideEffect {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            window?.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -227,6 +263,7 @@ fun CropDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically

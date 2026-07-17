@@ -69,9 +69,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Log
-import com.mealtracker.android.ui.components.LiveBarcodeScannerView
+import com.mealtracker.android.ui.components.BarcodeScannerWithControls
 import com.mealtracker.android.ui.components.MacroRingsRow
 import com.mealtracker.android.ui.components.MealVisuals
+import com.mealtracker.android.ui.components.decodeBarcodeFromUri
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -241,7 +242,9 @@ fun MealDetailScreen(
                     AddItemSheetMode.BARCODE -> BarcodeSheetContent(
                         barcodeNotFound = state.barcodeNotFound,
                         onBarcodeDetected = { viewModel.onBarcodeScanned(it) },
-                        onUseFullScanFlow = onNavigateToAddItem
+                        onGalleryBarcodeResult = { viewModel.onGalleryBarcodeResult(it) },
+                        onUseFullScanFlow = onNavigateToAddItem,
+                        onBarcodeNotFoundHandled = { viewModel.clearBarcodeNotFound() }
                     )
                 }
 
@@ -540,14 +543,19 @@ private fun ItemResultsList(
 /** In-sheet barcode scanner -- same permission pattern as AddItemScreen's
  * full-screen version. Detected codes go straight to
  * MealDetailViewModel.onBarcodeScanned, which either quick-logs a match
- * or surfaces barcodeNotFound. */
+ * or sets barcodeNotFound -- see this composable's LaunchedEffect below
+ * for why that now auto-continues into the full flow instead of asking
+ * for confirmation (design discussion: "just keep going"). */
 @Composable
 private fun BarcodeSheetContent(
     barcodeNotFound: String?,
     onBarcodeDetected: (String) -> Unit,
-    onUseFullScanFlow: () -> Unit
+    onGalleryBarcodeResult: (String?) -> Unit,
+    onUseFullScanFlow: () -> Unit,
+    onBarcodeNotFoundHandled: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -558,8 +566,31 @@ private fun BarcodeSheetContent(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasCameraPermission = granted }
 
+    val galleryPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                onGalleryBarcodeResult(decodeBarcodeFromUri(context, uri))
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    // No confirmation tap -- a barcode we don't have a match for just
+    // means "this is a new item," so go straight into adding it, same
+    // as AddItemScreen's own barcode step already does (see that
+    // screen's AddItemViewModel.lookUpBarcode). onBarcodeNotFoundHandled
+    // clears the flag right after so it can't immediately re-fire if
+    // this composable is still alive when the user comes back.
+    LaunchedEffect(barcodeNotFound) {
+        if (barcodeNotFound != null) {
+            onUseFullScanFlow()
+            onBarcodeNotFoundHandled()
+        }
     }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -570,13 +601,20 @@ private fun BarcodeSheetContent(
                 Text("Grant Permission")
             }
         } else {
-            // Vertical rectangle (portrait aspect) rather than a fixed
-            // height -- spans most of the sheet's width/height
-            // proportionally regardless of screen size, per design
-            // discussion, instead of the previous fixed 240dp height
-            // (which read as a short, wide letterbox).
-            LiveBarcodeScannerView(
+            // Same camera UI as AddItemScreen's barcode step (torch +
+            // gallery picker) -- see BarcodeScannerWithControls' doc
+            // comment for why this used to be two different-feeling
+            // cameras depending on where you scanned from. Vertical
+            // rectangle (portrait aspect) rather than a fixed height --
+            // spans most of the sheet's width/height proportionally
+            // regardless of screen size.
+            BarcodeScannerWithControls(
                 onBarcodeDetected = onBarcodeDetected,
+                onPickFromGallery = {
+                    galleryPicker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(9f / 16f)
@@ -584,14 +622,9 @@ private fun BarcodeSheetContent(
             )
         }
 
-        if (barcodeNotFound != null) {
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-            Text(barcodeNotFound, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-            TextButton(onClick = onUseFullScanFlow) {
-                Text("Use the full scan/label flow instead")
-            }
-        }
+        // barcodeNotFound no longer renders anything here -- the
+        // LaunchedEffect above auto-navigates as soon as it's set,
+        // before there'd be a meaningful window to show/tap a message.
     }
 }
 

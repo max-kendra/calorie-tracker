@@ -160,14 +160,31 @@ async def scan_label(image: UploadFile = File(...)):
     aren't yet verified against real OCR output of either engine).
     """
     image_bytes = await image.read()
-    result = extract_label_from_image(image_bytes)
 
-    return OcrScanResult(
-        raw_text=result.raw_text,
-        detected_language=result.detected_language,
-        per_100g_confirmed=result.per_100g_confirmed,
-        macros=OcrMacros(**result.macros),
-    )
+    # Same reasoning as scan_product_photo's try/except -- OCR failing
+    # (EasyOCR/PyTorch issues, an unreadable/corrupted image, memory,
+    # etc.) should degrade to an empty draft the user fills in manually,
+    # not 500 the whole request. This endpoint never had that handling
+    # at all (unlike scan_product_photo, which was fixed earlier) --
+    # given this is the actual OCR-heavy step (reading a dense nutrition
+    # table, not just guessing a product name), it's the more likely
+    # place for OCR failures to actually surface in practice.
+    try:
+        result = extract_label_from_image(image_bytes)
+        return OcrScanResult(
+            raw_text=result.raw_text,
+            detected_language=result.detected_language,
+            per_100g_confirmed=result.per_100g_confirmed,
+            macros=OcrMacros(**result.macros),
+        )
+    except Exception:
+        logger.exception("OCR failed during scan_label")
+        return OcrScanResult(
+            raw_text="",
+            detected_language=None,
+            per_100g_confirmed=False,
+            macros=OcrMacros(),
+        )
 
 
 @router.get("/barcode/{barcode}", response_model=ItemOut)

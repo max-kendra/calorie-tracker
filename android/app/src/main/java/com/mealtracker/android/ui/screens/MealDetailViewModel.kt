@@ -80,9 +80,12 @@ data class MealDetailUiState(
     val quickLoggingItemId: Int? = null,
     val quickLogError: String? = null,
     // Barcode-in-sheet: set when a scanned barcode doesn't match any
-    // known item -- the sheet shows this + a way to fall back to the
-    // full scan/OCR flow (AddItemScreen), since that path isn't
-    // rebuilt inline yet.
+    // known item -- BarcodeSheetContent uses this to auto-navigate into
+    // the full scan/OCR flow (AddItemScreen) rather than asking the
+    // user to confirm (see design discussion: "just keep going, don't
+    // ask"). Still surfaced as a value (not just an event) so a genuine
+    // network/lookup error can also show something before the same
+    // auto-continue happens.
     val barcodeNotFound: String? = null
 )
 
@@ -243,6 +246,25 @@ class MealDetailViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(barcodeNotFound = e.message ?: "Lookup failed")
             }
         }
+    }
+
+    /** Gallery-picked photo of a barcode -- decodeBarcodeFromUri() runs
+     * in the Composable (needs Context), this just handles the result,
+     * same null-check pattern as AddItemViewModel.onGalleryBarcodeResult. */
+    fun onGalleryBarcodeResult(barcode: String?) {
+        if (barcode == null) {
+            _uiState.value = _uiState.value.copy(barcodeNotFound = "Couldn't find a barcode in that photo")
+            return
+        }
+        onBarcodeScanned(barcode)
+    }
+
+    /** Called once the "no match" auto-continue (see MealDetailScreen's
+     * BarcodeSheetContent) has actually navigated away, so the flag
+     * doesn't linger and immediately re-fire if the user comes back to
+     * this screen with the same composable still alive. */
+    fun clearBarcodeNotFound() {
+        _uiState.value = _uiState.value.copy(barcodeNotFound = null)
     }
 
     fun openSaveMealDialog() {
