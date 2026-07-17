@@ -9,6 +9,7 @@ import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.network.models.LogCreateRequest
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
 import com.mealtracker.android.network.models.OcrScanResult
 import com.mealtracker.android.network.models.ProductPhotoScanResult
@@ -64,6 +65,21 @@ interface ApiService {
         @Query("start_date") startDate: String,
         @Query("end_date") endDate: String
     ): List<Log>
+
+    // Backs the Add Item sheet's default "Saved" tab -- items sorted by
+    // most recently LOGGED, not most recently added to the catalog (see
+    // backend docstring). Recipes are not included, Items only.
+    @GET("logs/recent-items")
+    suspend fun getRecentItems(
+        @Query("meal_type") mealType: String? = null,
+        @Query("limit") limit: Int = 20
+    ): List<Item>
+
+    // Creates a log entry -- the actual "add this item to this meal"
+    // action. See LogCreateRequest's doc comment for the current 100g
+    // flat-default quantity simplification.
+    @POST("logs")
+    suspend fun createLog(@Body request: LogCreateRequest): Log
 
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --

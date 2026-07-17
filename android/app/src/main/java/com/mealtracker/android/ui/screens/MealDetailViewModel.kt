@@ -3,12 +3,15 @@ package com.mealtracker.android.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
+import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.network.models.LogCreateRequest
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -19,8 +22,33 @@ private val MEAL_DISPLAY_NAMES = mapOf(
     "snack" to "Snacks"
 )
 
+/** Which method the Add Item sheet is currently showing -- see
+ * MealDetailScreen's sheetContent. Search and "Saved" merged into one
+ * mode (SEARCH) per design discussion -- both showed a search bar and a
+ * results list, the only difference was what populated that list before
+ * you typed anything, so there's no reason for them to be separate
+ * screens. The search bar in SEARCH mode shows recentItems when the
+ * query is blank, searchResults once you type. */
+enum class AddItemSheetMode { SEARCH, BARCODE }
+
+/**
+ * Flat default for the sheet's "quick log" flows (tap a Saved/Search
+ * result, or a barcode match) -- no quantity/serving picker yet, so
+ * every quick-logged item is recorded as exactly 100g (grams directly,
+ * since no serving_size_id is sent -- see LoggableEntryBase's docstring
+ * on the backend). This is a genuine simplification, not a smart
+ * default: a "1 banana" item quick-logged this way will NOT come out to
+ * one banana's worth of calories. Users can still get an accurate
+ * amount via the full barcode/OCR flow (AddItemScreen), which asks for
+ * real quantities -- revisit this once a quantity-picker step exists
+ * for the quick-log paths too.
+ */
+private const val QUICK_LOG_QUANTITY_G = 100.0
+
 data class MealDetailUiState(
     val isLoading: Boolean = true,
+    val date: LocalDate? = null,
+    val mealType: String = "",
     val displayName: String = "",
     val logs: List<Log> = emptyList(),
     val eatenKcal: Int = 0,
@@ -39,7 +67,23 @@ data class MealDetailUiState(
     val mealNameInput: String = "",
     val isSavingMeal: Boolean = false,
     val saveMealError: String? = null,
-    val saveMealSuccess: Boolean = false
+    val saveMealSuccess: Boolean = false,
+    // Add Item sheet state
+    val sheetMode: AddItemSheetMode = AddItemSheetMode.SEARCH,
+    val recentItems: List<Item> = emptyList(),
+    val isLoadingRecentItems: Boolean = false,
+    val searchQuery: String = "",
+    val searchResults: List<Item> = emptyList(),
+    val isSearching: Boolean = false,
+    // Set while a quick-log request for THIS item id is in flight, so
+    // the UI can show a per-row spinner instead of a global one.
+    val quickLoggingItemId: Int? = null,
+    val quickLogError: String? = null,
+    // Barcode-in-sheet: set when a scanned barcode doesn't match any
+    // known item -- the sheet shows this + a way to fall back to the
+    // full scan/OCR flow (AddItemScreen), since that path isn't
+    // rebuilt inline yet.
+    val barcodeNotFound: String? = null
 )
 
 /**
@@ -55,7 +99,19 @@ class MealDetailViewModel : ViewModel() {
     val uiState: StateFlow<MealDetailUiState> = _uiState
 
     fun load(date: LocalDate, mealType: String) {
-        _uiState.value = MealDetailUiState(isLoading = true, displayName = MEAL_DISPLAY_NAMES[mealType] ?: mealType)
+        // Preserves sheet state (mode, search query/results, recent
+        // items) across this reset -- logItemQuickly() calls load()
+        // again afterward just to refresh totals/logs, and resetting the
+        // whole state back to MealDetailUiState() defaults there would
+        // jarringly snap the sheet back to its initial mode/empty state
+        // every time someone logs something.
+        _uiState.value = _uiState.value.copy(
+            isLoading = true,
+            date = date,
+            mealType = mealType,
+            displayName = MEAL_DISPLAY_NAMES[mealType] ?: mealType,
+            error = null
+        )
 
         viewModelScope.launch {
             try {
@@ -64,9 +120,8 @@ class MealDetailViewModel : ViewModel() {
                 val goal = ApiClient.service.getActiveGoal()
                 val goalTotals = goal.mealSplits.find { it.mealType == mealType }?.computedTotals
 
-                _uiState.value = MealDetailUiState(
+                _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    displayName = MEAL_DISPLAY_NAMES[mealType] ?: mealType,
                     logs = logs,
                     eatenKcal = logs.sumOf { it.kcalLogged },
                     goalKcal = goalTotals?.kcal ?: 0,
@@ -84,6 +139,108 @@ class MealDetailViewModel : ViewModel() {
                     isLoading = false,
                     error = e.message ?: "Unknown error"
                 )
+            }
+        }
+
+        loadRecentItems(mealType)
+    }
+
+    // ----- Add Item sheet -----
+
+    fun setSheetMode(mode: AddItemSheetMode) {
+        _uiState.value = _uiState.value.copy(sheetMode = mode, barcodeNotFound = null)
+    }
+
+    private fun loadRecentItems(mealType: String) {
+        _uiState.value = _uiState.value.copy(isLoadingRecentItems = true)
+        viewModelScope.launch {
+            try {
+                val items = ApiClient.service.getRecentItems(mealType = mealType)
+                _uiState.value = _uiState.value.copy(isLoadingRecentItems = false, recentItems = items)
+            } catch (e: Exception) {
+                // Not core functionality -- fails quietly to an empty
+                // list rather than blocking the sheet from working.
+                _uiState.value = _uiState.value.copy(isLoadingRecentItems = false)
+            }
+        }
+    }
+
+    fun updateSearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(searchResults = emptyList(), isSearching = false)
+            return
+        }
+        _uiState.value = _uiState.value.copy(isSearching = true)
+        viewModelScope.launch {
+            try {
+                val results = ApiClient.service.searchItems(query = query)
+                // Guard against a slower earlier search response landing
+                // after a newer one -- only apply if the query is still
+                // current.
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearching = false, searchResults = results)
+                }
+            } catch (e: Exception) {
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearching = false)
+                }
+            }
+        }
+    }
+
+    /** Tap-to-log from Saved or Search results -- see QUICK_LOG_QUANTITY_G
+     * for the flat-100g simplification this currently uses. */
+    fun logItemQuickly(itemId: Int) {
+        val state = _uiState.value
+        val date = state.date ?: return
+        if (state.mealType.isEmpty()) return
+
+        _uiState.value = state.copy(quickLoggingItemId = itemId, quickLogError = null)
+        viewModelScope.launch {
+            try {
+                ApiClient.service.createLog(
+                    LogCreateRequest(
+                        date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                        mealType = state.mealType,
+                        itemId = itemId,
+                        quantity = QUICK_LOG_QUANTITY_G
+                    )
+                )
+                _uiState.value = _uiState.value.copy(quickLoggingItemId = null)
+                // Refresh this meal's totals/logs AND the recent-items
+                // ordering (this item just became the most recent).
+                load(date, state.mealType)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    quickLoggingItemId = null,
+                    quickLogError = e.message ?: "Couldn't log that item"
+                )
+            }
+        }
+    }
+
+    /** Called when the in-sheet barcode scanner (LiveBarcodeScannerView)
+     * detects a code -- looks it up and quick-logs it if there's a
+     * match; otherwise surfaces barcodeNotFound so the sheet can offer
+     * the full scan/OCR flow as a fallback. */
+    fun onBarcodeScanned(barcode: String) {
+        viewModelScope.launch {
+            try {
+                val item = ApiClient.service.getItemByBarcode(barcode)
+                logItemQuickly(item.itemId)
+            } catch (e: HttpException) {
+                if (e.code() == 404) {
+                    _uiState.value = _uiState.value.copy(
+                        barcodeNotFound = "No item found for that barcode yet."
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        barcodeNotFound = e.message() ?: "Lookup failed"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(barcodeNotFound = e.message ?: "Lookup failed")
             }
         }
     }

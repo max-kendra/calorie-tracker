@@ -1,6 +1,7 @@
 package com.mealtracker.android.ui.components
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -16,12 +17,17 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,15 +65,14 @@ private const val HANDLE_TOUCH_SIZE_DP = 32
  *
  * Shows the source image fit-to-container with a draggable/resizable
  * crop rectangle on top -- drag inside the rectangle to move it, drag a
- * corner handle to resize it. "Crop" maps the on-screen rectangle back
- * to source-bitmap pixel coordinates and produces the cropped Bitmap via
+ * corner handle to resize it. A rotate button turns the image (and the
+ * crop rect resets to a centered inset of the new orientation) in 90-
+ * degree steps, for photos that come out sideways/upside-down (no EXIF-
+ * orientation auto-detection is attempted -- this is a manual fix
+ * instead, which also covers cases EXIF metadata gets wrong or lacks
+ * entirely). "Crop" maps the on-screen rectangle back to source-bitmap
+ * pixel coordinates (post-rotation) and produces the cropped Bitmap via
  * Bitmap.createBitmap.
- *
- * KNOWN SIMPLIFICATION: no EXIF-orientation correction is applied here
- * -- if a photo comes out sideways/upside-down on some device/camera
- * combination, that's the likely cause; revisit by reading the image's
- * EXIF orientation tag and pre-rotating sourceBitmap before display if
- * that turns out to matter in practice.
  */
 @Composable
 fun CropDialog(
@@ -75,8 +80,22 @@ fun CropDialog(
     onCropped: (Bitmap) -> Unit,
     onCancel: () -> Unit
 ) {
-    var imageBounds by remember(sourceBitmap) { mutableStateOf(Rect.Zero) }
-    var cropRect by remember(sourceBitmap) { mutableStateOf(Rect.Zero) }
+    var rotationDegrees by remember(sourceBitmap) { mutableIntStateOf(0) }
+    // Recomputed only when sourceBitmap or rotationDegrees actually
+    // change (remember, not derivedStateOf) -- rotating a large camera
+    // photo isn't free, so this shouldn't re-run on unrelated
+    // recompositions (e.g. while dragging the crop rect).
+    val displayBitmap = remember(sourceBitmap, rotationDegrees) {
+        if (rotationDegrees == 0) {
+            sourceBitmap
+        } else {
+            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+            Bitmap.createBitmap(sourceBitmap, 0, 0, sourceBitmap.width, sourceBitmap.height, matrix, true)
+        }
+    }
+
+    var imageBounds by remember(displayBitmap) { mutableStateOf(Rect.Zero) }
+    var cropRect by remember(displayBitmap) { mutableStateOf(Rect.Zero) }
 
     Dialog(
         onDismissRequest = onCancel,
@@ -101,10 +120,10 @@ fun CropDialog(
                     // recomposition -- also means dragging cropRect around
                     // doesn't get reset by unrelated recompositions, since
                     // this effect only re-runs when its keys actually change.
-                    LaunchedEffect(containerWidthPx, containerHeightPx, sourceBitmap) {
+                    LaunchedEffect(containerWidthPx, containerHeightPx, displayBitmap) {
                         if (containerWidthPx <= 0f || containerHeightPx <= 0f) return@LaunchedEffect
 
-                        val bitmapAspect = sourceBitmap.width.toFloat() / sourceBitmap.height.toFloat()
+                        val bitmapAspect = displayBitmap.width.toFloat() / displayBitmap.height.toFloat()
                         val containerAspect = containerWidthPx / containerHeightPx
 
                         val displayedWidth: Float
@@ -135,7 +154,7 @@ fun CropDialog(
 
                     if (imageBounds != Rect.Zero) {
                         Image(
-                            bitmap = sourceBitmap.asImageBitmap(),
+                            bitmap = displayBitmap.asImageBitmap(),
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -209,23 +228,27 @@ fun CropDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onCancel) {
                         Text("Cancel", color = Color.White)
                     }
+                    IconButton(onClick = { rotationDegrees = (rotationDegrees + 90) % 360 }) {
+                        Icon(Icons.Filled.RotateRight, contentDescription = "Rotate", tint = Color.White)
+                    }
                     Button(onClick = {
                         if (imageBounds == Rect.Zero) return@Button
-                        val scale = sourceBitmap.width / imageBounds.width
+                        val scale = displayBitmap.width / imageBounds.width
                         val srcLeft = ((cropRect.left - imageBounds.left) * scale).roundToInt()
-                            .coerceIn(0, sourceBitmap.width - 1)
+                            .coerceIn(0, displayBitmap.width - 1)
                         val srcTop = ((cropRect.top - imageBounds.top) * scale).roundToInt()
-                            .coerceIn(0, sourceBitmap.height - 1)
+                            .coerceIn(0, displayBitmap.height - 1)
                         val srcWidth = (cropRect.width * scale).roundToInt()
-                            .coerceIn(1, sourceBitmap.width - srcLeft)
+                            .coerceIn(1, displayBitmap.width - srcLeft)
                         val srcHeight = (cropRect.height * scale).roundToInt()
-                            .coerceIn(1, sourceBitmap.height - srcTop)
-                        onCropped(Bitmap.createBitmap(sourceBitmap, srcLeft, srcTop, srcWidth, srcHeight))
+                            .coerceIn(1, displayBitmap.height - srcTop)
+                        onCropped(Bitmap.createBitmap(displayBitmap, srcLeft, srcTop, srcWidth, srcHeight))
                     }) {
                         Text("Crop")
                     }

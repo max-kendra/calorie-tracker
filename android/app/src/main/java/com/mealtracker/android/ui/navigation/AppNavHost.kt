@@ -1,8 +1,13 @@
 package com.mealtracker.android.ui.navigation
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
@@ -65,7 +70,17 @@ private val bottomNavDestinations = listOf(
 // onboarding flow (and the brief gate check before it) is deliberately
 // full-screen, no tab-bar escape hatch, since the rest of the app
 // assumes a complete profile + active goal exist.
-private val routesWithoutBottomBar = setOf("gate", "onboarding")
+private val routesWithoutBottomBar = setOf("gate", "onboarding", "meal_detail/{date}/{mealType}")
+
+// Routes whose own hero background is meant to bleed up behind the
+// status bar (Journal's pastel kcal-ring section, Meal Detail's compact
+// header when its sheet is expanded) -- these get NO automatic
+// statusBarsPadding from AppNavHost, and are responsible for padding
+// their own readable content below the status bar themselves (see
+// JournalScreen's top spacer, MealDetailScreen's CompactMealHeader).
+// Every other route gets padded below the status bar automatically,
+// same as before.
+private val edgeToEdgeStatusBarRoutes = setOf("journal", "meal_detail/{date}/{mealType}")
 
 @Composable
 fun AppNavHost() {
@@ -74,9 +89,15 @@ fun AppNavHost() {
     val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
+        // Everywhere EXCEPT edgeToEdgeStatusBarRoutes still gets a
+        // status-bar-safe top inset -- just applied explicitly below via
+        // statusBarsPadding() instead of Scaffold's default, so the
+        // routes that want their own hero to bleed up behind the status
+        // bar (see that set's doc comment) can opt out of it.
+        contentWindowInsets = WindowInsets.safeDrawing.exclude(WindowInsets.statusBars),
         bottomBar = {
             if (currentRoute !in routesWithoutBottomBar) {
-                NavigationBar {
+                NavigationBar(containerColor = androidx.compose.ui.graphics.Color.White) {
                     val currentDestination = navBackStackEntry?.destination
 
                     bottomNavDestinations.forEach { destination ->
@@ -106,7 +127,9 @@ fun AppNavHost() {
         NavHost(
             navController = navController,
             startDestination = "gate",
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier
+                .padding(innerPadding)
+                .let { base -> if (currentRoute in edgeToEdgeStatusBarRoutes) base else base.statusBarsPadding() }
         ) {
             composable("gate") {
                 val gateViewModel: OnboardingGateViewModel = viewModel()

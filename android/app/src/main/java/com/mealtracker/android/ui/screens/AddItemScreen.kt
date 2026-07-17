@@ -54,8 +54,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mealtracker.android.ui.components.BarcodeScannerWithControls
 import com.mealtracker.android.ui.components.CropDialog
-import com.mealtracker.android.ui.components.LiveBarcodeScannerView
 import com.mealtracker.android.ui.components.LiveLabelCaptureView
 import com.mealtracker.android.ui.components.decodeBarcodeFromUri
 import kotlinx.coroutines.Dispatchers
@@ -68,7 +68,9 @@ import kotlinx.coroutines.withContext
 // printed badly, so this isn't a general "manual entry" escape hatch,
 // just a narrow fallback for when scanning genuinely can't read a
 // physically-present barcode.
-private const val BARCODE_TIMEOUT_MS = 8000L
+// Was 8s -- bumped up since that felt naggy/premature for a barcode
+// that just takes a little longer to line up (see design discussion).
+private const val BARCODE_TIMEOUT_MS = 20000L
 
 @Composable
 fun AddItemScreen(
@@ -278,7 +280,7 @@ fun AddItemScreen(
                     delay(BARCODE_TIMEOUT_MS)
                     viewModel.onBarcodeTimeout()
                 }
-                BarcodeScanContent(
+                BarcodeScannerWithControls(
                     scanError = state.scanError,
                     onBarcodeDetected = { viewModel.onLiveBarcodeDetected(it) },
                     onPickFromGallery = {
@@ -294,7 +296,6 @@ fun AddItemScreen(
                 decoderUsed = state.decoderUsed,
                 matchedItem = state.matchedItem,
                 onUseExisting = onDone,
-                onContinueToProductPhoto = { viewModel.proceedToCaptureProductPhoto() },
                 onRetry = { viewModel.retryBarcodeScan() }
             )
             AddItemPhase.MANUAL_BARCODE_ENTRY -> ManualBarcodeEntryContent(
@@ -350,63 +351,6 @@ private fun LoadingContent() {
 }
 
 @Composable
-private fun BarcodeScanContent(
-    scanError: String?,
-    onBarcodeDetected: (String) -> Unit,
-    onPickFromGallery: () -> Unit
-) {
-    var camera by remember { mutableStateOf<Camera?>(null) }
-    var isFlashOn by remember { mutableStateOf(false) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LiveBarcodeScannerView(
-            onBarcodeDetected = onBarcodeDetected,
-            onCameraReady = { camera = it },
-            modifier = Modifier.fillMaxSize()
-        )
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "Point the camera at a barcode",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White
-            )
-            if (scanError != null) {
-                Text(scanError, color = MaterialTheme.colorScheme.error)
-            }
-        }
-        IconButton(
-            onClick = {
-                isFlashOn = !isFlashOn
-                camera?.cameraControl?.enableTorch(isFlashOn)
-            },
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-        ) {
-            Icon(
-                if (isFlashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                contentDescription = "Toggle flash",
-                tint = Color.White
-            )
-        }
-        IconButton(
-            onClick = onPickFromGallery,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
-        ) {
-            Icon(
-                Icons.Filled.PhotoLibrary,
-                contentDescription = "Pick from gallery instead",
-                tint = Color.White,
-                modifier = Modifier.padding(4.dp)
-            )
-        }
-    }
-}
-
-@Composable
 private fun ManualBarcodeEntryContent(
     value: String,
     onValueChange: (String) -> Unit,
@@ -443,7 +387,6 @@ private fun BarcodeResultContent(
     decoderUsed: String?,
     matchedItem: com.mealtracker.android.network.models.Item?,
     onUseExisting: () -> Unit,
-    onContinueToProductPhoto: () -> Unit,
     onRetry: () -> Unit
 ) {
     Column(
@@ -472,21 +415,14 @@ private fun BarcodeResultContent(
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 
-        if (matchedItem != null) {
-            Text("Found an existing item: ${matchedItem.name}", style = MaterialTheme.typography.bodyLarge)
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-            Button(onClick = onUseExisting, modifier = Modifier.fillMaxWidth()) {
-                Text("Use This Item")
-            }
-        } else {
-            Text(
-                "No existing item has this barcode.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-            Button(onClick = onContinueToProductPhoto, modifier = Modifier.fillMaxWidth()) {
-                Text("Continue \u2192 Add Product Photo")
-            }
+        // Only ever reached with a match now -- a barcode with no match
+        // auto-continues straight into CAPTURE_PRODUCT_PHOTO instead of
+        // stopping here (see AddItemViewModel.lookUpBarcode's doc
+        // comment), so there's no "no existing item" branch to show.
+        Text("Found an existing item: ${matchedItem?.name}", style = MaterialTheme.typography.bodyLarge)
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+        Button(onClick = onUseExisting, modifier = Modifier.fillMaxWidth()) {
+            Text("Use This Item")
         }
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
         Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {

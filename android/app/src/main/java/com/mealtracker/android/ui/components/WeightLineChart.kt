@@ -1,11 +1,15 @@
 package com.mealtracker.android.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Simple line chart for the Profile screen's weight-trend graph --
@@ -71,46 +76,64 @@ fun WeightLineChart(
     val dateFormatter = remember(points) { DateTimeFormatter.ofPattern("dd/MM") }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(height)
-        ) {
-            fun xFor(time: Instant) = (time.epochSecond - minTime) / timeSpan * size.width
-            fun yFor(value: Double) = size.height - ((value.toFloat() - minValue) / valueSpan * size.height)
-
-            if (goalKg != null) {
-                val y = yFor(goalKg)
-                drawLine(
-                    color = goalLineColor,
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = 2f,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f))
-                )
+        Row(modifier = Modifier.fillMaxWidth().height(height)) {
+            // Y-axis labels -- max/mid/min of the padded value range
+            // (minValue/maxValue above), evenly spaced top-to-bottom to
+            // line up with where those values actually fall in the
+            // chart. Previously this chart had no Y-axis labels at all
+            // (only the X-axis start/end dates below), making the line's
+            // shape impossible to interpret in absolute terms.
+            Column(
+                modifier = Modifier.fillMaxHeight().width(44.dp).padding(end = 4.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(formatKg(maxValue), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatKg((maxValue + minValue) / 2f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatKg(minValue), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            for (i in 0 until points.size - 1) {
-                val (t1, v1) = points[i]
-                val (t2, v2) = points[i + 1]
-                drawLine(
-                    color = lineColor,
-                    start = Offset(xFor(t1), yFor(v1)),
-                    end = Offset(xFor(t2), yFor(v2)),
-                    strokeWidth = 5f
-                )
-            }
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                fun xFor(time: Instant) = (time.epochSecond - minTime) / timeSpan * size.width
+                fun yFor(value: Double) = size.height - ((value.toFloat() - minValue) / valueSpan * size.height)
 
-            for ((time, value) in points) {
-                drawCircle(
-                    color = lineColor,
-                    radius = 6f,
-                    center = Offset(xFor(time), yFor(value))
-                )
+                if (goalKg != null) {
+                    val y = yFor(goalKg)
+                    drawLine(
+                        color = goalLineColor,
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = 2f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f))
+                    )
+                }
+
+                for (i in 0 until points.size - 1) {
+                    val (t1, v1) = points[i]
+                    val (t2, v2) = points[i + 1]
+                    drawLine(
+                        color = lineColor,
+                        start = Offset(xFor(t1), yFor(v1)),
+                        end = Offset(xFor(t2), yFor(v2)),
+                        strokeWidth = 5f
+                    )
+                }
+
+                for ((time, value) in points) {
+                    drawCircle(
+                        color = lineColor,
+                        radius = 6f,
+                        center = Offset(xFor(time), yFor(value))
+                    )
+                }
             }
         }
 
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 48.dp)) {
             Text(
                 dateFormatter.format(points.first().first.atZone(ZoneId.systemDefault())),
                 style = MaterialTheme.typography.labelSmall,
@@ -128,3 +151,5 @@ fun WeightLineChart(
         }
     }
 }
+
+private fun formatKg(value: Float): String = String.format(Locale.getDefault(), "%.1f", value)

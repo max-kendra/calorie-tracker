@@ -332,3 +332,22 @@ data class ItemCreateRequest(
     val type: String = "product",
     val origin: String = "manual"
 )
+
+/**
+ * Request body for POST /logs. Mirrors LoggableEntryBase (backend) --
+ * exactly one of itemId/recipeId must be set. quantity semantics (see
+ * that schema's docstring): with no servingSizeId, quantity is grams
+ * directly. Used by MealDetailViewModel's "quick log" flow (Saved/
+ * Search/Barcode-match in the Add Item sheet), which currently always
+ * sends a flat 100g default rather than prompting for quantity -- see
+ * that ViewModel for why.
+ */
+@Serializable
+data class LogCreateRequest(
+    val date: String,
+    @SerialName("meal_type") val mealType: String,
+    @SerialName("item_id") val itemId: Int? = null,
+    @SerialName("recipe_id") val recipeId: Int? = null,
+    @SerialName("serving_size_id") val servingSizeId: Int? = null,
+    val quantity: Double
+)

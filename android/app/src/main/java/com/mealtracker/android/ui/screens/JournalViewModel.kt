@@ -126,7 +126,14 @@ class JournalViewModel : ViewModel() {
     }
 
     fun loadJournal(date: LocalDate) {
-        _uiState.value = JournalUiState.Loading
+        // Only show the full-screen spinner when there's nothing to
+        // show yet (first load, or recovering from an error) -- day-to-
+        // day navigation keeps the current content visible while the
+        // new date's data comes in, rather than blanking the whole
+        // screen to a spinner for a split second on every arrow tap.
+        if (_uiState.value !is JournalUiState.Success) {
+            _uiState.value = JournalUiState.Loading
+        }
         viewModelScope.launch {
             try {
                 val dateString = date.format(DateTimeFormatter.ISO_LOCAL_DATE)

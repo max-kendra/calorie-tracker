@@ -15,6 +15,11 @@
          (a smart scale's app, Health Connect's own UI, etc.). -->
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
 
+    <!-- Without this, Health Connect silently caps reads to the last 30
+         days regardless of what time range we query for - see
+         HealthConnectManager.PERMISSIONS' doc comment. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+
     <!-- Makes the Health Connect app visible to package-visibility
          queries (required on Android 11+ to check whether it's
          installed / launch its permission UI) on Android 9-13, where

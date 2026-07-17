@@ -3,13 +3,22 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import require_api_key
 from app.database import get_db
 from app.models import Item, Log, Recipe, ServingSize
 from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals_for_quantity, RawTotals
-from app.schemas import DailySummary, ExtendedNutritionTotals, LogCreate, LogOut, MealType, NutritionTotals
+from app.schemas import (
+    DailySummary,
+    ExtendedNutritionTotals,
+    ItemOut,
+    LogCreate,
+    LogOut,
+    MealType,
+    NutritionTotals,
+)
 
 router = APIRouter(
     prefix="/logs",
@@ -118,17 +127,6 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     return _log_to_out(log, item_name, recipe_name)
 
 
-@router.get("/{log_id}", response_model=LogOut)
-def get_log(log_id: int, db: Session = Depends(get_db)):
-    log = db.query(Log).filter(Log.id == log_id).first()
-    if not log:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log not found")
-
-    item_name = log.item_id and db.query(Item.name).filter(Item.item_id == log.item_id).scalar()
-    recipe_name = log.recipe_id and db.query(Recipe.name).filter(Recipe.recipe_id == log.recipe_id).scalar()
-    return _log_to_out(log, item_name, recipe_name)
-
-
 @router.get("", response_model=list[LogOut])
 def list_logs(
     date: Optional[date_type] = Query(None, description="Single day (Journal view)"),
@@ -166,6 +164,44 @@ def list_logs(
     return [
         _log_to_out(l, item_names.get(l.item_id), recipe_names.get(l.recipe_id)) for l in logs
     ]
+
+
+@router.get("/recent-items", response_model=list[ItemOut])
+def recent_items(
+    meal_type: Optional[MealType] = Query(None, description="Narrow to items logged for this meal type"),
+    limit: int = Query(20, le=50),
+    db: Session = Depends(get_db),
+):
+    """
+    Items sorted by most recently LOGGED (not most recently added to the
+    catalog) -- backs the Add Item sheet's default "Saved" view, so the
+    things you actually eat regularly float to the top rather than
+    whatever you happened to create first.
+
+    Recipe-based logs are excluded here -- this returns Items only, not
+    Recipes -- kept simple for the first version of this endpoint;
+    revisit if recipes need to show up in "recently logged" too.
+    """
+    last_logged_subq = (
+        db.query(Log.item_id, func.max(Log.logged_at).label("last_logged"))
+        .filter(Log.item_id.isnot(None))
+    )
+    if meal_type:
+        last_logged_subq = last_logged_subq.filter(Log.meal_type == meal_type)
+    last_logged_subq = (
+        last_logged_subq.group_by(Log.item_id)
+        .order_by(desc("last_logged"))
+        .limit(limit)
+        .subquery()
+    )
+
+    items = (
+        db.query(Item)
+        .join(last_logged_subq, Item.item_id == last_logged_subq.c.item_id)
+        .order_by(desc(last_logged_subq.c.last_logged))
+        .all()
+    )
+    return items
 
 
 @router.get("/summary/daily", response_model=list[DailySummary])
@@ -237,3 +273,20 @@ def delete_log(log_id: int, db: Session = Depends(get_db)):
     db.delete(log)
     db.commit()
     return None
+
+
+@router.get("/{log_id}", response_model=LogOut)
+def get_log(log_id: int, db: Session = Depends(get_db)):
+    # Registered LAST among the GET routes -- this is a catch-all path
+    # param, and FastAPI matches routes in registration order, so it
+    # must come after every fixed-path GET (/recent-items,
+    # /summary/daily, and the bare "" list route) or it'll shadow them,
+    # trying to parse e.g. "recent-items" as an int and 422ing instead
+    # of ever reaching those handlers.
+    log = db.query(Log).filter(Log.id == log_id).first()
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log not found")
+
+    item_name = log.item_id and db.query(Item.name).filter(Item.item_id == log.item_id).scalar()
+    recipe_name = log.recipe_id and db.query(Recipe.name).filter(Recipe.recipe_id == log.recipe_id).scalar()
+    return _log_to_out(log, item_name, recipe_name)

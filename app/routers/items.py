@@ -1,3 +1,4 @@
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,8 @@ router = APIRouter(
     tags=["items"],
     dependencies=[Depends(require_api_key)],
 )
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ItemOut, status_code=status.HTTP_201_CREATED)
@@ -121,8 +124,19 @@ async def scan_product_photo(image: UploadFile = File(...)):
     # /media -- e.g. "media/<filename>" is reachable at GET /media/<filename>.
     image_path = f"{settings.media_dir}/{filename}"
 
-    text = run_ocr(image_bytes)
-    guessed_name, guessed_brand = guess_name_and_brand(text)
+    # OCR is a best-effort pre-fill, NOT essential to this step succeeding
+    # -- the image is already safely saved above regardless of what
+    # happens here. Deliberately NOT letting an OCR failure (EasyOCR/
+    # PyTorch issues, out-of-memory, a corrupted/unreadable image, etc.)
+    # 500 the whole request and lose that saved image_path -- degrade to
+    # "no guess" instead, same as if OCR just didn't find any text.
+    try:
+        text = run_ocr(image_bytes)
+        guessed_name, guessed_brand = guess_name_and_brand(text)
+    except Exception as exc:
+        logger.exception("OCR failed during scan_product_photo (image still saved to %s)", image_path)
+        text = ""
+        guessed_name, guessed_brand = None, None
 
     return ProductPhotoScanResult(
         image_path=image_path,

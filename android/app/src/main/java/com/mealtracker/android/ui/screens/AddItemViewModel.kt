@@ -190,6 +190,24 @@ class AddItemViewModel : ViewModel() {
                 return@launch
             }
 
+            if (matched == null) {
+                // No existing item for this barcode -- per design
+                // discussion, don't stop and make the user tap a
+                // confirmation button to proceed; we already have the
+                // barcode captured, so just continue straight into
+                // adding a new item. BARCODE_RESULT is now ONLY used to
+                // show a matched item (see below), not as a "nothing
+                // found, continue?" prompt.
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
+                    scannedBarcode = barcode,
+                    decoderUsed = decoderUsed,
+                    matchedItem = null,
+                    barcode = barcode
+                )
+                return@launch
+            }
+
             _uiState.value = _uiState.value.copy(
                 phase = AddItemPhase.BARCODE_RESULT,
                 scannedBarcode = barcode,
@@ -197,17 +215,6 @@ class AddItemViewModel : ViewModel() {
                 matchedItem = matched
             )
         }
-    }
-
-    /** User confirmed no existing item matches and wants to continue --
-     * moves into the (mandatory, since we now have a barcode to attach)
-     * product photo step. */
-    fun proceedToCaptureProductPhoto() {
-        val state = _uiState.value
-        _uiState.value = state.copy(
-            phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
-            barcode = state.scannedBarcode ?: ""
-        )
     }
 
     fun retryBarcodeScan() {

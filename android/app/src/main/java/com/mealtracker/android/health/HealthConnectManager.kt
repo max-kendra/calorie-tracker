@@ -23,7 +23,17 @@ import java.time.Instant
  */
 object HealthConnectManager {
 
-    val PERMISSIONS: Set<String> = setOf(HealthPermission.getReadPermission(WeightRecord::class))
+    // READ_WEIGHT alone only gets us the last 30 days of data, no
+    // matter what time range we ask readWeightHistory() for -- that's a
+    // Health Connect platform restriction (default read window is 30
+    // days before permission was first granted), not a bug in our own
+    // query. PERMISSION_READ_HEALTH_DATA_HISTORY lifts that cap. Also
+    // needs the matching <uses-permission> in AndroidManifest.xml.
+    // See: https://developer.android.com/health-and-fitness/health-connect/read-data
+    val PERMISSIONS: Set<String> = setOf(
+        HealthPermission.getReadPermission(WeightRecord::class),
+        HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
+    )
 
     /**
      * True if the Health Connect app/framework module is present AND
