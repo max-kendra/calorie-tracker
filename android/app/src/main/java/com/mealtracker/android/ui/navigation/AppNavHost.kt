@@ -32,7 +32,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.mealtracker.android.ui.screens.AddItemScreen
 import com.mealtracker.android.ui.screens.CalorieGoalScreen
 import com.mealtracker.android.ui.screens.EditProfileScreen
 import com.mealtracker.android.ui.screens.HomeScreen
@@ -174,16 +173,15 @@ fun AppNavHost() {
                 MealDetailScreen(
                     date = java.time.LocalDate.parse(dateArg),
                     mealType = mealTypeArg,
-                    onBack = { navController.popBackStack() },
-                    onNavigateToAddItem = { navController.navigate("add_item") }
+                    onBack = { navController.popBackStack() }
                 )
             }
-            composable("add_item") {
-                AddItemScreen(
-                    onBack = { navController.popBackStack() },
-                    onDone = { navController.popBackStack() }
-                )
-            }
+            // "add_item" as its own standalone route is gone -- that
+            // flow (AddItemScreen) is now embedded directly inside
+            // MealDetailScreen's Add Item sheet instead of being
+            // navigated to (see design discussion: "we want it inside
+            // the card"). It was only ever reachable from there, so
+            // there's nothing else that needs this route.
             composable(Destination.MealPlan.route) { MealPlanScreen() }
             composable(Destination.Profile.route) {
                 ProfileScreen(

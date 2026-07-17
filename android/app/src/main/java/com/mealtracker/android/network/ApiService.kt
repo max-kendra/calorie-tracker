@@ -10,6 +10,7 @@ import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.LogCreateRequest
+import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
 import com.mealtracker.android.network.models.OcrScanResult
 import com.mealtracker.android.network.models.ProductPhotoScanResult
@@ -19,6 +20,7 @@ import com.mealtracker.android.network.models.UserProfile
 import com.mealtracker.android.network.models.UserProfileUpdateRequest
 import okhttp3.MultipartBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.PATCH
@@ -80,6 +82,13 @@ interface ApiService {
     // flat-default quantity simplification.
     @POST("logs")
     suspend fun createLog(@Body request: LogCreateRequest): Log
+
+    // Quantity-only edit -- backs the log detail/edit screen.
+    @PATCH("logs/{logId}")
+    suspend fun updateLog(@Path("logId") logId: Int, @Body request: LogUpdateRequest): Log
+
+    @DELETE("logs/{logId}")
+    suspend fun deleteLog(@Path("logId") logId: Int)
 
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --

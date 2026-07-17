@@ -321,6 +321,17 @@ class LogCreate(LoggableEntryBase):
     pass
 
 
+class LogUpdate(BaseModel):
+    """Quantity-only edit of an existing log -- item_id/recipe_id/date/
+    meal_type are NOT editable this way (that's "delete and re-log as
+    something else", not "edit"). serving_size_id can optionally change
+    too (e.g. switching from grams to "1 slice"), but at least one of
+    quantity/serving_size_id must be provided."""
+
+    quantity: Optional[Decimal] = None
+    serving_size_id: Optional[int] = None
+
+
 class LogOut(LoggableEntryBase):
     id: int
     logged_at: datetime

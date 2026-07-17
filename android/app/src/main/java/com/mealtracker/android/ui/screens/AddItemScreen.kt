@@ -295,7 +295,7 @@ fun AddItemScreen(
                 barcode = state.scannedBarcode,
                 decoderUsed = state.decoderUsed,
                 matchedItem = state.matchedItem,
-                onUseExisting = onDone,
+                onUseExisting = { viewModel.useMatchedItem() },
                 onRetry = { viewModel.retryBarcodeScan() }
             )
             AddItemPhase.MANUAL_BARCODE_ENTRY -> ManualBarcodeEntryContent(
@@ -337,6 +337,7 @@ fun AddItemScreen(
             )
             AddItemPhase.SAVED -> SavedContent(
                 itemName = state.createdItem?.name ?: "",
+                onAddAnother = { viewModel.resetToScanChoice() },
                 onDone = onDone
             )
         }
@@ -651,7 +652,7 @@ private fun NumberField(label: String, value: String, onValueChange: (String) ->
 }
 
 @Composable
-private fun SavedContent(itemName: String, onDone: () -> Unit) {
+private fun SavedContent(itemName: String, onAddAnother: () -> Unit, onDone: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -660,7 +661,15 @@ private fun SavedContent(itemName: String, onDone: () -> Unit) {
         Text("\u2705 Saved", style = MaterialTheme.typography.headlineMedium)
         Text(itemName, style = MaterialTheme.typography.titleMedium)
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
-        Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
+        // Ask rather than assume -- previously this just had "Done",
+        // closing the flow immediately after every single item. Adding
+        // several items in a row (a full plate, a multi-ingredient
+        // snack) meant re-opening the sheet from scratch each time.
+        Button(onClick = onAddAnother, modifier = Modifier.fillMaxWidth()) {
+            Text("Add Another Item")
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+        TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
             Text("Done")
         }
     }

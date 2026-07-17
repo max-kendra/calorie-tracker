@@ -351,3 +351,11 @@ data class LogCreateRequest(
     @SerialName("serving_size_id") val servingSizeId: Int? = null,
     val quantity: Double
 )
+
+/** Quantity-only edit of an existing log -- see backend LogUpdate's doc
+ * comment (item/recipe/date/meal_type aren't editable this way). */
+@Serializable
+data class LogUpdateRequest(
+    val quantity: Double? = null,
+    @SerialName("serving_size_id") val servingSizeId: Int? = null
+)

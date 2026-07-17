@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemCreateRequest
+import com.mealtracker.android.network.models.LogCreateRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -12,6 +13,16 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+// Flat default for logging whatever comes out of this flow (a newly
+// created item, or an existing one picked via barcode match) straight
+// to a meal -- no quantity/serving picker here yet, same simplification
+// as MealDetailViewModel's QUICK_LOG_QUANTITY_G, and for the same
+// reason: this is a fast-path convenience, not a substitute for
+// accurate quantity entry. Revisit once a quantity step exists.
+private const val MEAL_LOG_QUANTITY_G = 100.0
 
 /**
  * Barcode is now the mandatory first step -- there's no independent
@@ -104,8 +115,52 @@ class AddItemViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(AddItemUiState())
     val uiState: StateFlow<AddItemUiState> = _uiState
 
+    // Set once (see MealDetailScreen, which embeds this whole flow
+    // inline in its Add Item sheet) so saveItem()/useMatchedItem() know
+    // which meal to attach a log to. Null when this flow is reached any
+    // other way -- in that case it still creates/matches the Item, just
+    // without also logging it anywhere (which used to be the ONLY
+    // behavior, before this flow was embeddable in a meal's context).
+    private var mealContext: Pair<LocalDate, String>? = null
+
+    fun attachToMeal(date: LocalDate, mealType: String) {
+        mealContext = date to mealType
+    }
+
+    private suspend fun logToMealIfAttached(itemId: Int) {
+        val (date, mealType) = mealContext ?: return
+        ApiClient.service.createLog(
+            LogCreateRequest(
+                date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                mealType = mealType,
+                itemId = itemId,
+                quantity = MEAL_LOG_QUANTITY_G
+            )
+        )
+    }
+
     fun resetToScanChoice() {
         _uiState.value = AddItemUiState()
+    }
+
+    /** Matched an existing item via barcode (BARCODE_RESULT phase) --
+     * previously this just ended the flow with no further action; now
+     * logs it to the attached meal (if any) same as a newly-saved item
+     * does, then shows the same SAVED confirmation screen. */
+    fun useMatchedItem() {
+        val item = _uiState.value.matchedItem ?: return
+        viewModelScope.launch {
+            try {
+                logToMealIfAttached(item.itemId)
+            } catch (e: Exception) {
+                // Logging is the point of embedding this flow in a meal
+                // context, but the item match itself is still valid --
+                // don't block showing it as done over a logging hiccup,
+                // just surface the error alongside.
+                _uiState.value = _uiState.value.copy(saveError = e.message ?: "Couldn't log this item to the meal")
+            }
+            _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
+        }
     }
 
     private fun imageBytesToPart(bytes: ByteArray): MultipartBody.Part {
@@ -368,6 +423,14 @@ class AddItemViewModel : ViewModel() {
                         origin = if (state.ocrWasUsed) "ocr_assisted" else "manual"
                     )
                 )
+                try {
+                    logToMealIfAttached(item.itemId)
+                } catch (e: Exception) {
+                    // Same reasoning as useMatchedItem(): the item itself
+                    // saved fine, don't lose that over a logging hiccup.
+                    _uiState.value = _uiState.value.copy(saveError = e.message ?: "Couldn't log this item to the meal")
+                }
+
                 _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
             } catch (e: HttpException) {
                 val message = if (e.code() == 409) {

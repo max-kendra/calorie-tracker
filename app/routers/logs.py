@@ -16,6 +16,7 @@ from app.schemas import (
     ItemOut,
     LogCreate,
     LogOut,
+    LogUpdate,
     MealType,
     NutritionTotals,
 )
@@ -263,6 +264,49 @@ def daily_summary(
         )
         for d, totals in sorted(by_date.items())
     ]
+
+
+@router.patch("/{log_id}", response_model=LogOut)
+def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
+    """
+    Quantity-only edit -- item_id/recipe_id/date/meal_type stay fixed
+    (see LogUpdate's doc comment). Re-runs the same snapshot computation
+    create_log does, so the log's macros stay internally consistent with
+    its new quantity rather than going stale.
+    """
+    log = db.query(Log).filter(Log.id == log_id).first()
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log not found")
+
+    if payload.quantity is None and payload.serving_size_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide at least one of quantity or serving_size_id",
+        )
+
+    merged = LogCreate(
+        date=log.date,
+        meal_type=log.meal_type,
+        item_id=log.item_id,
+        recipe_id=log.recipe_id,
+        serving_size_id=payload.serving_size_id if payload.serving_size_id is not None else log.serving_size_id,
+        quantity=payload.quantity if payload.quantity is not None else log.quantity,
+    )
+    totals, item_name, recipe_name = _validate_and_compute(merged, db)
+
+    log.serving_size_id = merged.serving_size_id
+    log.quantity = merged.quantity
+    log.kcal_logged = totals.kcal
+    log.protein_g_logged = totals.protein_g
+    log.carbs_g_logged = totals.carbs_g
+    log.fat_g_logged = totals.fat_g
+    log.fiber_g_logged = totals.fiber_g
+    log.sugar_g_logged = totals.sugar_g
+    log.saturated_fat_g_logged = totals.saturated_fat_g
+    log.sodium_mg_logged = totals.sodium_mg
+    db.commit()
+    db.refresh(log)
+    return _log_to_out(log, item_name, recipe_name)
 
 
 @router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
