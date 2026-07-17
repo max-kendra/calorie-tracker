@@ -16,6 +16,8 @@ import com.mealtracker.android.network.models.OcrScanResult
 import com.mealtracker.android.network.models.ProductPhotoScanResult
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
+import com.mealtracker.android.network.models.UsdaFoodDetail
+import com.mealtracker.android.network.models.UsdaFoodSummary
 import com.mealtracker.android.network.models.UserProfile
 import com.mealtracker.android.network.models.UserProfileUpdateRequest
 import okhttp3.MultipartBody
@@ -89,6 +91,19 @@ interface ApiService {
 
     @DELETE("logs/{logId}")
     suspend fun deleteLog(@Path("logId") logId: Int)
+
+    // Raw-ingredient lookup -- backs the "is this a raw ingredient?"
+    // path in AddItemViewModel (see NEW_ITEM_TYPE_PROMPT/USDA_SEARCH
+    // phases). Defaults to Foundation+SR Legacy data types server-side
+    // (lab-analyzed, stable), not Branded.
+    @GET("usda/search")
+    suspend fun searchUsda(
+        @Query("query") query: String,
+        @Query("page_size") pageSize: Int = 15
+    ): List<UsdaFoodSummary>
+
+    @GET("usda/food/{fdcId}")
+    suspend fun getUsdaFood(@Path("fdcId") fdcId: Int): UsdaFoodDetail
 
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --

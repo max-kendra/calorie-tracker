@@ -183,51 +183,20 @@ fun MealDetailScreen(
 
     val selectedLog = state.selectedLog
     if (selectedLog != null) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissLogDetail() },
-            title = { Text(selectedLog.itemName ?: selectedLog.recipeName ?: "Item") },
-            text = {
-                Column {
-                    Text("${selectedLog.kcalLogged} Cal", style = MaterialTheme.typography.titleMedium)
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-                    Text(
-                        "Fat ${selectedLog.fatGLogged}g \u2022 Protein ${selectedLog.proteinGLogged}g \u2022 " +
-                            "Carbs ${selectedLog.carbsGLogged}g \u2022 Fiber ${selectedLog.fiberGLogged}g",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
-                    OutlinedTextField(
-                        value = state.editQuantityInput,
-                        onValueChange = { viewModel.updateEditQuantityInput(it) },
-                        label = { Text("Quantity (g)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true
-                    )
-                    if (state.logEditError != null) {
-                        Text(
-                            state.logEditError,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.saveLogQuantity() }, enabled = !state.isSavingLogEdit) {
-                    Text(if (state.isSavingLogEdit) "Saving..." else "Save")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { viewModel.deleteLog(selectedLog.id) }) {
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
-                    }
-                    TextButton(onClick = { viewModel.dismissLogDetail() }) {
-                        Text("Cancel")
-                    }
-                }
-            }
+        LogDetailDialog(
+            log = selectedLog,
+            goalKcal = state.goalKcal,
+            goalFat = state.goalFat,
+            goalProtein = state.goalProtein,
+            goalCarbs = state.goalCarbs,
+            goalFiber = state.goalFiber,
+            editQuantityInput = state.editQuantityInput,
+            isSaving = state.isSavingLogEdit,
+            error = state.logEditError,
+            onQuantityChange = { viewModel.updateEditQuantityInput(it) },
+            onSave = { viewModel.saveLogQuantity() },
+            onDelete = { viewModel.deleteLog(selectedLog.id) },
+            onDismiss = { viewModel.dismissLogDetail() }
         )
     }
 
@@ -615,6 +584,165 @@ private fun ItemResultsList(
     }
 }
 
+/**
+ * Full-screen log detail: hero image up top, scrollable card below with
+ * kcal for the CURRENTLY SAVED quantity, an editable quantity field, and
+ * macro progress bars shown as a fraction of the MEAL's goal (not the
+ * day's) -- matches design reference. Deliberately does not include
+ * "Customize" or "Input and benefits" sections from that reference, per
+ * design discussion ("ignore" those).
+ *
+ * KNOWN SIMPLIFICATION: the kcal/macro numbers shown reflect the log's
+ * last-SAVED snapshot, not a live recompute as you type a new quantity
+ * in the field below -- there's no client-side per-gram macro data to
+ * recompute against without a round-trip. They update once you tap Save
+ * and the meal reloads. A live preview would need either shipping the
+ * item's per-100g macros down to this dialog, or a debounced preview
+ * call to the backend -- not done here.
+ */
+@Composable
+private fun LogDetailDialog(
+    log: Log,
+    goalKcal: Int,
+    goalFat: Int,
+    goalProtein: Int,
+    goalCarbs: Int,
+    goalFiber: Int,
+    editQuantityInput: String,
+    isSaving: Boolean,
+    error: String?,
+    onQuantityChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        val view = LocalView.current
+        SideEffect {
+            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            window?.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
+            Box(modifier = Modifier.fillMaxWidth().height(240.dp)) {
+                if (log.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + log.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(8.dp)
+                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                ) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                Text(
+                    log.itemName ?: log.recipeName ?: "Item",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+
+                OutlinedTextField(
+                    value = editQuantityInput,
+                    onValueChange = onQuantityChange,
+                    label = { Text("Quantity (g)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                Text(
+                    "${log.kcalLogged} Cal for this quantity",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
+                Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                LogMacroBar("Fat", log.fatGLogged, goalFat, MacroColors.Fat)
+                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
+                LogMacroBar("Carbs", log.carbsGLogged, goalCarbs, MacroColors.Carbs)
+                LogMacroBar("Fiber", log.fiberGLogged, goalFiber, MacroColors.Fiber)
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
+
+                Button(onClick = onSave, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (isSaving) "Saving..." else "Save Quantity")
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                TextButton(
+                    onClick = onDelete,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogMacroBar(label: String, amountG: Int, goalG: Int, color: Color) {
+    val fraction = if (goalG > 0) (amountG.toFloat() / goalG.toFloat()).coerceIn(0f, 1f) else 0f
+    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "${amountG}g / ${goalG}g",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(color.copy(alpha = 0.25f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(color, RoundedCornerShape(4.dp))
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
@@ -653,9 +781,38 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
                 .background(Color.White)
                 .clickable(onClick = onClick)
                 .padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(log.itemName ?: log.recipeName ?: "Unknown", style = MaterialTheme.typography.bodyLarge)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (log.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + log.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(log.itemName ?: log.recipeName ?: "Unknown", style = MaterialTheme.typography.bodyLarge)
+                // Assumes grams -- true whenever serving_size_id is null,
+                // which is every logging path this app currently has (all
+                // go through quick-log or the item form, never a serving-
+                // size picker). If a serving-size UI gets added later,
+                // this needs to become serving-aware (see
+                // LoggableEntryBase's quantity-semantics doc comment).
+                Text(
+                    "${log.quantity}g",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text("${log.kcalLogged} Cal", style = MaterialTheme.typography.bodyLarge)
         }
     }

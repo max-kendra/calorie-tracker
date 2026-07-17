@@ -347,6 +347,9 @@ class LogOut(LoggableEntryBase):
     # Denormalized for convenient display, not stored on the row itself.
     item_name: Optional[str] = None
     recipe_name: Optional[str] = None
+    # Same denormalization -- lets the client show a thumbnail in the
+    # logged-items list without a separate GET /items/{id} per row.
+    image_path: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

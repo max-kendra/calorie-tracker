@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -303,6 +304,18 @@ fun AddItemScreen(
                 onValueChange = { viewModel.updateManualBarcodeInput(it) },
                 onSubmit = { viewModel.submitManualBarcode() }
             )
+            AddItemPhase.NEW_ITEM_TYPE_PROMPT -> NewItemTypePromptContent(
+                onPackagedProduct = { viewModel.choosePackagedProduct() },
+                onRawIngredient = { viewModel.chooseRawIngredient() }
+            )
+            AddItemPhase.USDA_SEARCH -> UsdaSearchContent(
+                query = state.usdaQuery,
+                results = state.usdaResults,
+                isSearching = state.isSearchingUsda,
+                error = state.usdaError,
+                onQueryChange = { viewModel.updateUsdaQuery(it) },
+                onResultClick = { fdcId -> viewModel.selectUsdaFood(fdcId) }
+            )
             AddItemPhase.CAPTURE_PRODUCT_PHOTO -> CaptureLabelContent(
                 instructionText = "Frame the product package",
                 scanError = state.scanError,
@@ -378,6 +391,106 @@ private fun ManualBarcodeEntryContent(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Continue")
+        }
+    }
+}
+
+/** Shown on a no-match barcode -- see AddItemPhase.NEW_ITEM_TYPE_PROMPT's
+ * doc comment for why this asks rather than assumes "packaged product". */
+@Composable
+private fun NewItemTypePromptContent(
+    onPackagedProduct: () -> Unit,
+    onRawIngredient: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("What kind of item is this?", style = MaterialTheme.typography.titleMedium)
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+        Text(
+            "This helps us find the right nutrition info.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(16.dp))
+        Button(onClick = onRawIngredient, modifier = Modifier.fillMaxWidth()) {
+            Text("Raw ingredient (e.g. a banana, an onion)")
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+        Button(onClick = onPackagedProduct, modifier = Modifier.fillMaxWidth()) {
+            Text("Packaged product (has a label)")
+        }
+    }
+}
+
+/** Raw-ingredient lookup against USDA FoodData Central -- picking a
+ * result pre-fills the item form (see AddItemViewModel.selectUsdaFood),
+ * same review-before-save pattern as OCR and barcode matching. */
+@Composable
+private fun UsdaSearchContent(
+    query: String,
+    results: List<com.mealtracker.android.network.models.UsdaFoodSummary>,
+    isSearching: Boolean,
+    error: String?,
+    onQueryChange: (String) -> Unit,
+    onResultClick: (Int) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Search for a raw ingredient", style = MaterialTheme.typography.titleMedium)
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            label = { Text("e.g. \"banana, raw\"") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+
+        when {
+            isSearching -> {
+                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            error != null -> {
+                Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            results.isEmpty() -> {
+                Text(
+                    if (query.isBlank()) "Start typing to search USDA" else "No matches",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            else -> {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    results.forEach { food ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onResultClick(food.fdcId) }
+                                .padding(vertical = 12.dp)
+                        ) {
+                            Text(food.description, style = MaterialTheme.typography.bodyLarge)
+                            val subtitle = listOfNotNull(
+                                food.brandOwner,
+                                food.macros.kcal100g?.let { "$it kcal/100g" }
+                            ).joinToString(" \u00b7 ")
+                            if (subtitle.isNotEmpty()) {
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
         }
     }
 }
@@ -619,7 +732,7 @@ private fun ItemFormContent(state: AddItemUiState, isSaving: Boolean, viewModel:
         NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
         NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
         NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
-        NumberField("Sodium (mg)", state.sodiumMg100g, viewModel::updateSodium)
+        NumberField("Sodium (g)", state.sodiumG100g, viewModel::updateSodium)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 

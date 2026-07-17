@@ -6,6 +6,7 @@ import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.LogCreateRequest
+import com.mealtracker.android.network.models.UsdaFoodSummary
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -53,6 +54,11 @@ private const val MEAL_LOG_QUANTITY_G = 100.0
  */
 enum class AddItemPhase {
     SCAN_BARCODE, BARCODE_LOOKUP, BARCODE_RESULT, MANUAL_BARCODE_ENTRY,
+    // Shown on a no-match barcode instead of jumping straight to product
+    // photo -- packaged products and raw/whole ingredients (a banana, an
+    // onion) need very different next steps (photo+OCR vs. USDA lookup),
+    // and we have no way to guess which just from a barcode.
+    NEW_ITEM_TYPE_PROMPT, USDA_SEARCH,
     CAPTURE_PRODUCT_PHOTO, PROCESSING_PRODUCT_PHOTO,
     CAPTURE_LABEL, PROCESSING_LABEL, ITEM_FORM, SAVING, SAVED
 }
@@ -76,6 +82,14 @@ data class AddItemUiState(
     val ocrDetectedLanguage: String? = null,
     val ocrPer100gConfirmed: Boolean = true,
     val ocrWasUsed: Boolean = false,
+    val usdaImportUsed: Boolean = false,
+
+    // Raw-ingredient (USDA) search -- see NEW_ITEM_TYPE_PROMPT/
+    // USDA_SEARCH phases.
+    val usdaQuery: String = "",
+    val usdaResults: List<UsdaFoodSummary> = emptyList(),
+    val isSearchingUsda: Boolean = false,
+    val usdaError: String? = null,
 
     // Product photo step -- image_path comes back from the backend once
     // uploaded (see scanProductPhoto()) and is carried through to the
@@ -104,7 +118,13 @@ data class AddItemUiState(
     val fiber100g: String = "",
     val sugar100g: String = "",
     val saturatedFat100g: String = "",
-    val sodiumMg100g: String = "",
+    // Displayed/entered in GRAMS, not mg -- food labels universally show
+    // sodium in g (e.g. "0.5 g"), so asking for mg here was a mismatch
+    // with what the user is actually reading off the package. Backend
+    // still stores/logs sodium in mg (ItemCreateRequest.sodiumMg100g) --
+    // conversion happens at the boundaries (see prefillFromOcr and
+    // saveItem below), this field itself always holds grams.
+    val sodiumG100g: String = "",
 
     val saveError: String? = null,
     val createdItem: Item? = null
@@ -246,15 +266,18 @@ class AddItemViewModel : ViewModel() {
             }
 
             if (matched == null) {
-                // No existing item for this barcode -- per design
+                // No existing item for this barcode -- per earlier design
                 // discussion, don't stop and make the user tap a
-                // confirmation button to proceed; we already have the
-                // barcode captured, so just continue straight into
-                // adding a new item. BARCODE_RESULT is now ONLY used to
-                // show a matched item (see below), not as a "nothing
-                // found, continue?" prompt.
+                // confirmation button just to proceed; we already have
+                // the barcode captured. But packaged products and raw
+                // ingredients need different next steps, so ask which
+                // this is rather than assuming "packaged" (see
+                // NEW_ITEM_TYPE_PROMPT's doc comment on the enum).
+                // BARCODE_RESULT itself is now ONLY used to show a
+                // matched item (see below), never a "nothing found,
+                // continue?" prompt.
                 _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
+                    phase = AddItemPhase.NEW_ITEM_TYPE_PROMPT,
                     scannedBarcode = barcode,
                     decoderUsed = decoderUsed,
                     matchedItem = null,
@@ -317,6 +340,72 @@ class AddItemViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
     }
 
+    // ----- New item type prompt (packaged product vs. raw ingredient) -----
+
+    fun choosePackagedProduct() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO)
+    }
+
+    fun chooseRawIngredient() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.USDA_SEARCH)
+    }
+
+    fun updateUsdaQuery(query: String) {
+        _uiState.value = _uiState.value.copy(usdaQuery = query)
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(usdaResults = emptyList(), isSearchingUsda = false)
+            return
+        }
+        _uiState.value = _uiState.value.copy(isSearchingUsda = true, usdaError = null)
+        viewModelScope.launch {
+            try {
+                val results = ApiClient.service.searchUsda(query = query)
+                // Guard against a slower earlier search landing after a
+                // newer one, same pattern as MealDetailViewModel's item
+                // search.
+                if (_uiState.value.usdaQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearchingUsda = false, usdaResults = results)
+                }
+            } catch (e: Exception) {
+                if (_uiState.value.usdaQuery == query) {
+                    _uiState.value = _uiState.value.copy(
+                        isSearchingUsda = false,
+                        usdaError = e.message ?: "Search failed"
+                    )
+                }
+            }
+        }
+    }
+
+    /** Picked a USDA result -- fetches full detail and pre-fills the
+     * item form, same pattern as scanLabel()'s OCR prefill below. */
+    fun selectUsdaFood(fdcId: Int) {
+        viewModelScope.launch {
+            try {
+                val detail = ApiClient.service.getUsdaFood(fdcId)
+                val macros = detail.macros
+                _uiState.value = _uiState.value.copy(
+                    phase = AddItemPhase.ITEM_FORM,
+                    name = detail.description,
+                    itemType = "ingredient",
+                    usdaImportUsed = true,
+                    kcal100g = macros.kcal100g ?: "",
+                    protein100g = macros.protein100g ?: "",
+                    carbs100g = macros.carbs100g ?: "",
+                    fat100g = macros.fat100g ?: "",
+                    fiber100g = macros.fiber100g ?: "",
+                    sugar100g = macros.sugar100g ?: "",
+                    saturatedFat100g = macros.saturatedFat100g ?: "",
+                    // USDA reports sodium in mg too -- same conversion as
+                    // OCR's prefill.
+                    sodiumG100g = macros.sodiumMg100g?.toDoubleOrNull()?.div(1000.0)?.toString() ?: ""
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(usdaError = e.message ?: "Couldn't load that food's details")
+            }
+        }
+    }
+
     // ----- Label step -----
 
     fun scanLabel(imageBytes: ByteArray) {
@@ -354,7 +443,9 @@ class AddItemViewModel : ViewModel() {
                     fiber100g = macros.fiber100g ?: "",
                     sugar100g = macros.sugar100g ?: "",
                     saturatedFat100g = macros.saturatedFat100g ?: "",
-                    sodiumMg100g = macros.sodiumMg100g ?: ""
+                    // OCR/backend reports sodium in mg -- convert to g
+                    // for display, matching what's printed on the label.
+                    sodiumG100g = macros.sodiumMg100g?.toDoubleOrNull()?.div(1000.0)?.toString() ?: ""
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -392,7 +483,7 @@ class AddItemViewModel : ViewModel() {
     fun updateFiber(value: String) { _uiState.value = _uiState.value.copy(fiber100g = value) }
     fun updateSugar(value: String) { _uiState.value = _uiState.value.copy(sugar100g = value) }
     fun updateSaturatedFat(value: String) { _uiState.value = _uiState.value.copy(saturatedFat100g = value) }
-    fun updateSodium(value: String) { _uiState.value = _uiState.value.copy(sodiumMg100g = value) }
+    fun updateSodium(value: String) { _uiState.value = _uiState.value.copy(sodiumG100g = value) }
 
     fun saveItem() {
         val state = _uiState.value
@@ -418,9 +509,14 @@ class AddItemViewModel : ViewModel() {
                         fiber100g = state.fiber100g.toDoubleOrNull(),
                         sugar100g = state.sugar100g.toDoubleOrNull(),
                         saturatedFat100g = state.saturatedFat100g.toDoubleOrNull(),
-                        sodiumMg100g = state.sodiumMg100g.toDoubleOrNull(),
+                        // User-entered grams -> API expects mg.
+                        sodiumMg100g = state.sodiumG100g.toDoubleOrNull()?.times(1000.0),
                         type = state.itemType,
-                        origin = if (state.ocrWasUsed) "ocr_assisted" else "manual"
+                        origin = when {
+                            state.usdaImportUsed -> "usda_import"
+                            state.ocrWasUsed -> "ocr_assisted"
+                            else -> "manual"
+                        }
                     )
                 )
                 try {

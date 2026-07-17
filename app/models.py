@@ -1,361 +1,359 @@
-package com.mealtracker.android.network.models
+"""
+SQLAlchemy models — mirrors the schema in the design doc
+(meal-tracker-design-doc.md, section 3). Keep these two in sync;
+the design doc is the readable reference, this is the source of truth
+Alembic diffs against.
+"""
 
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class HealthResponse(
-    val status: String
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
-/**
- * Mirrors ServingSizeOut from app/schemas.py.
- */
-@Serializable
-data class ServingSize(
-    val id: Int,
-    @SerialName("item_id") val itemId: Int,
-    val name: String,
-    @SerialName("weight_g") val weightG: String // Decimal comes over the wire as a string
-)
+from app.database import Base
 
-/**
- * Mirrors ItemOut from app/schemas.py. Nutrition fields are nullable
- * Strings (not Double) because:
- *   1. FastAPI serializes Decimal as a JSON string by default, not a
- *      float -- keeps precision exact, no floating-point surprises.
- *   2. Fields are genuinely optional (an item might not have every
- *      macro filled in).
- * Parse to a real number only where you need to do math with it.
- */
-@Serializable
-data class Item(
-    @SerialName("item_id") val itemId: Int,
-    val name: String,
-    val barcode: String? = null,
-    val brand: String? = null,
-    @SerialName("image_path") val imagePath: String? = null,
-    @SerialName("kcal_100g") val kcal100g: String? = null,
-    @SerialName("protein_100g") val protein100g: String? = null,
-    @SerialName("carbs_100g") val carbs100g: String? = null,
-    @SerialName("fat_100g") val fat100g: String? = null,
-    @SerialName("fiber_100g") val fiber100g: String? = null,
-    @SerialName("sugar_100g") val sugar100g: String? = null,
-    @SerialName("saturated_fat_100g") val saturatedFat100g: String? = null,
-    @SerialName("sodium_mg_100g") val sodiumMg100g: String? = null,
-    val type: String,
-    val origin: String,
-    @SerialName("created_at") val createdAt: String,
-    @SerialName("updated_at") val updatedAt: String,
-    @SerialName("serving_sizes") val servingSizes: List<ServingSize> = emptyList()
-)
 
-/**
- * Mirrors LogOut from app/schemas.py. IMPORTANT: kcal_logged/protein_g_logged/
- * etc are already rounded integers on the backend (see the rounding policy
- * in the backend's app/nutrition.py) -- these are the FROZEN snapshot
- * values from when the item was logged, not live-recomputed. Exactly one
- * of itemId/recipeId will be non-null (matches the backend's CHECK
- * constraint), with itemName/recipeName correspondingly set for display.
- */
-@Serializable
-data class Log(
-    val id: Int,
-    val date: String, // ISO date string, e.g. "2026-07-13"
-    @SerialName("meal_type") val mealType: String,
-    @SerialName("item_id") val itemId: Int? = null,
-    @SerialName("recipe_id") val recipeId: Int? = null,
-    @SerialName("serving_size_id") val servingSizeId: Int? = null,
-    val quantity: String,
-    @SerialName("logged_at") val loggedAt: String,
-    @SerialName("kcal_logged") val kcalLogged: Int,
-    @SerialName("protein_g_logged") val proteinGLogged: Int,
-    @SerialName("carbs_g_logged") val carbsGLogged: Int,
-    @SerialName("fat_g_logged") val fatGLogged: Int,
-    @SerialName("fiber_g_logged") val fiberGLogged: Int,
-    @SerialName("item_name") val itemName: String? = null,
-    @SerialName("recipe_name") val recipeName: String? = null
-)
+class Item(Base):
+    """
+    Covers both 'product' and 'ingredient' types (see `type` column).
+    Fully self-managed — nothing auto-populated from external sources
+    without explicit user review (see `origin`).
+    """
 
-/**
- * Mirrors NutritionTotals from app/schemas.py -- always whole numbers,
- * rounded UP for display on the backend already (see the backend's
- * rounding policy). Never re-round these client-side.
- */
-@Serializable
-data class NutritionTotals(
-    val kcal: Int,
-    @SerialName("protein_g") val proteinG: Int,
-    @SerialName("carbs_g") val carbsG: Int,
-    @SerialName("fat_g") val fatG: Int,
-    @SerialName("fiber_g") val fiberG: Int
-)
+    __tablename__ = "items"
 
-/**
- * Mirrors MealGoalSplitOut from app/schemas.py. pctOfKcal is the stored
- * percentage (e.g. "25.0" for 25%); computedTotals is derived server-side
- * from the parent goal's targets x this percentage, already rounded.
- */
-@Serializable
-data class MealGoalSplit(
-    @SerialName("meal_type") val mealType: String,
-    @SerialName("pct_of_kcal") val pctOfKcal: String,
-    @SerialName("computed_totals") val computedTotals: NutritionTotals
-)
+    item_id = Column(Integer, primary_key=True)
+    barcode = Column(String, unique=True, nullable=True)
+    name = Column(String, nullable=False)
+    brand = Column(String, nullable=True)
+    image_path = Column(String, nullable=True)
 
-/**
- * Mirrors GoalOut from app/schemas.py. Fetch via GET /goals/active to get
- * whatever goal is currently in effect (end_date IS NULL on the backend).
- */
-@Serializable
-data class Goal(
-    val id: Int,
-    @SerialName("start_date") val startDate: String,
-    @SerialName("end_date") val endDate: String? = null,
-    @SerialName("kcal_target") val kcalTarget: String,
-    @SerialName("protein_g_target") val proteinGTarget: String,
-    @SerialName("carbs_g_target") val carbsGTarget: String,
-    @SerialName("fat_g_target") val fatGTarget: String,
-    @SerialName("fiber_g_target") val fiberGTarget: String,
-    @SerialName("meal_splits") val mealSplits: List<MealGoalSplit> = emptyList()
-)
+    kcal_100g = Column(Numeric, nullable=True)
+    protein_100g = Column(Numeric, nullable=True)
+    carbs_100g = Column(Numeric, nullable=True)
+    fat_100g = Column(Numeric, nullable=True)
+    fiber_100g = Column(Numeric, nullable=True)
+    # Tracked for daily/weekly summaries only -- deliberately NOT surfaced
+    # in the compact per-item/meal/recipe nutrition displays (NutritionTotals),
+    # to avoid crowding the main tracker UI. See ExtendedNutritionTotals.
+    sugar_100g = Column(Numeric, nullable=True)
+    saturated_fat_100g = Column(Numeric, nullable=True)
+    # Canonical unit is mg per 100g (matches USDA FoodData Central and
+    # gives sensible precision for small amounts). EU labels show "salt"
+    # in grams instead of sodium -- conversion is salt(g) = sodium(g) x
+    # 2.5, so sodium_mg_100g = salt_g_100g x 400. Handle that conversion
+    # at data-entry time in the UI (e.g. an "enter as salt" toggle); not
+    # done in the API.
+    sodium_mg_100g = Column(Numeric, nullable=True)
 
-/**
- * Request body for POST /goals. Unlike the response models above, this
- * sends plain JSON numbers (Double), not Decimal-as-string -- FastAPI's
- * Pydantic Decimal fields accept a numeric JSON value fine on the way
- * in; the string-encoding behavior is only how Decimal comes back OUT
- * in a response, to preserve precision for display.
- */
-@Serializable
-data class GoalCreateRequest(
-    @SerialName("start_date") val startDate: String,
-    @SerialName("kcal_target") val kcalTarget: Double,
-    @SerialName("protein_g_target") val proteinGTarget: Double,
-    @SerialName("carbs_g_target") val carbsGTarget: Double,
-    @SerialName("fat_g_target") val fatGTarget: Double,
-    @SerialName("fiber_g_target") val fiberGTarget: Double
-    // meal_splits omitted -- backend defaults to an even 25/25/25/25
-    // split when not provided (see backend app/routers/goals.py).
-)
+    # 'product' | 'ingredient' — filter tag only, same fields either way.
+    type = Column(String, nullable=False, default="product")
+    # 'manual' | 'usda_import' | 'ocr_assisted' — provenance, always
+    # user-reviewed before save regardless of origin.
+    origin = Column(String, nullable=False, default="manual")
 
-/**
- * Request body for PATCH /goals/{id}. All fields optional, matching the
- * backend's GoalUpdate schema -- send only what actually changed.
- */
-@Serializable
-data class GoalUpdateRequest(
-    @SerialName("kcal_target") val kcalTarget: Double? = null,
-    @SerialName("protein_g_target") val proteinGTarget: Double? = null,
-    @SerialName("carbs_g_target") val carbsGTarget: Double? = null,
-    @SerialName("fat_g_target") val fatGTarget: Double? = null,
-    @SerialName("fiber_g_target") val fiberGTarget: Double? = null
-)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-/**
- * One entry in the bulk meal-splits replace request (PUT
- * /goals/{id}/meal-splits). pctOfKcal sent as a plain number, same
- * "requests send numbers, responses send Decimal-as-string" rule as
- * GoalCreateRequest/GoalUpdateRequest above.
- */
-@Serializable
-data class MealGoalSplitRequest(
-    @SerialName("meal_type") val mealType: String,
-    @SerialName("pct_of_kcal") val pctOfKcal: Double
-)
+    serving_sizes = relationship("ServingSize", back_populates="item", cascade="all, delete-orphan")
 
-@Serializable
-data class MealGoalSplitsUpdateRequest(
-    val splits: List<MealGoalSplitRequest>
-)
+    __table_args__ = (
+        CheckConstraint("type IN ('product', 'ingredient')", name="ck_items_type"),
+        CheckConstraint(
+            "origin IN ('manual', 'usda_import', 'ocr_assisted')", name="ck_items_origin"
+        ),
+    )
 
-/**
- * Request body for POST /recipes -- used for the "star icon: save this
- * meal" feature. A saved Meal is just a Recipe with recipeType="meal"
- * and servings=1 (see backend design doc).
- */
-@Serializable
-data class RecipeIngredientCreateRequest(
-    @SerialName("item_id") val itemId: Int,
-    @SerialName("quantity_g") val quantityG: Double
-)
 
-@Serializable
-data class RecipeCreateRequest(
-    val name: String,
-    @SerialName("recipe_type") val recipeType: String = "meal",
-    val servings: Double = 1.0,
-    val ingredients: List<RecipeIngredientCreateRequest> = emptyList()
-)
+class ServingSize(Base):
+    """
+    An item's list of named serving sizes (e.g. "slice" -> 37.5g).
+    Modeled as a child table rather than an array column so it stays
+    queryable/joinable normally.
+    """
 
-/** Minimal response model -- we only need to confirm success, extra
- * fields in the real response are ignored (ignoreUnknownKeys=true). */
-@Serializable
-data class Recipe(
-    @SerialName("recipe_id") val recipeId: Int,
-    val name: String
-)
+    __tablename__ = "serving_sizes"
 
-/**
- * Mirrors UserProfileOut from app/schemas.py. All fields nullable/optional
- * since a fresh profile starts empty (auto-created on first GET /profile).
- */
-@Serializable
-data class UserProfile(
-    val id: Int,
-    val name: String? = null,
-    @SerialName("profile_pic_path") val profilePicPath: String? = null,
-    @SerialName("height_cm") val heightCm: Int? = null,
-    val age: Int? = null,
-    @SerialName("weight_kg") val weightKg: String? = null,
-    @SerialName("starting_weight_kg") val startingWeightKg: String? = null,
-    @SerialName("goal_weight_kg") val goalWeightKg: String? = null,
-    @SerialName("primary_hormone") val primaryHormone: String? = null,
-    @SerialName("activity_level") val activityLevel: String? = null,
-    @SerialName("goal_type") val goalType: String? = null,
-    val timezone: String,
-    @SerialName("updated_at") val updatedAt: String
-)
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.item_id"), nullable=False)
+    name = Column(String, nullable=False)  # e.g. "slice", "cup", "label serving"
+    weight_g = Column(Numeric, nullable=False)
 
-/**
- * Request body for PATCH /profile. Sends plain numbers (not
- * Decimal-as-string), same rule as the other *Request models above.
- */
-@Serializable
-data class UserProfileUpdateRequest(
-    val name: String? = null,
-    @SerialName("height_cm") val heightCm: Int? = null,
-    val age: Int? = null,
-    @SerialName("weight_kg") val weightKg: Double? = null,
-    @SerialName("starting_weight_kg") val startingWeightKg: Double? = null,
-    @SerialName("goal_weight_kg") val goalWeightKg: Double? = null,
-    @SerialName("primary_hormone") val primaryHormone: String? = null,
-    @SerialName("activity_level") val activityLevel: String? = null,
-    @SerialName("goal_type") val goalType: String? = null
-)
+    item = relationship("Item", back_populates="serving_sizes")
 
-/**
- * Mirrors KcalGoalCalculationResult from app/schemas.py. All values are
- * whole integers now (rounded to the nearest 25 for
- * recommended/low/high on the backend) -- no fractional-calorie parsing
- * needed here.
- */
-@Serializable
-data class KcalGoalCalculationResult(
-    val bmr: Int,
-    val tdee: Int,
-    @SerialName("recommended_kcal") val recommendedKcal: Int,
-    @SerialName("kcal_low") val kcalLow: Int,
-    @SerialName("kcal_high") val kcalHigh: Int,
-    @SerialName("floor_applied") val floorApplied: Boolean
-)
 
-/**
- * Mirrors BarcodeScanResult from app/schemas.py.
- *
- * IMPORTANT (per real-world testing, see backend README): a decoded
- * barcode is NOT guaranteed correct even if `checksumValid` is true --
- * the client MUST show `barcode` to the user for visual confirmation
- * against the physical package before using it, never auto-proceed.
- */
-@Serializable
-data class BarcodeScanResult(
-    val barcode: String? = null,
-    @SerialName("decoder_used") val decoderUsed: String? = null,
-    @SerialName("checksum_valid") val checksumValid: Boolean? = null,
-    val item: Item? = null
-)
+class RawIngredientReference(Base):
+    """
+    Local cache of USDA FoodData Central lookups. Never joined directly
+    into logs/recipes/meal_plans — selecting a result IMPORTS it into
+    `items` (origin='usda_import'), which is what actually gets referenced
+    elsewhere.
+    """
 
-/**
- * Mirrors OcrMacros from app/schemas.py -- fields absent (not zero) when
- * OCR didn't confidently extract them.
- */
-@Serializable
-data class OcrMacros(
-    @SerialName("kcal_100g") val kcal100g: String? = null,
-    @SerialName("protein_100g") val protein100g: String? = null,
-    @SerialName("carbs_100g") val carbs100g: String? = null,
-    @SerialName("fat_100g") val fat100g: String? = null,
-    @SerialName("fiber_100g") val fiber100g: String? = null,
-    @SerialName("sugar_100g") val sugar100g: String? = null,
-    @SerialName("saturated_fat_100g") val saturatedFat100g: String? = null,
-    @SerialName("sodium_mg_100g") val sodiumMg100g: String? = null
-)
+    __tablename__ = "raw_ingredient_reference"
 
-/**
- * Mirrors ProductPhotoScanResult from app/schemas.py. guessedName/
- * guessedBrand are rough heuristics (NOT a confident extraction the way
- * OcrMacros is for nutrition labels) -- always show these as pre-filled
- * but clearly editable text, never as if they're confirmed correct. See
- * the backend schema's docstring for why this heuristic is inherently
- * weaker than the label OCR.
- */
-@Serializable
-data class ProductPhotoScanResult(
-    @SerialName("image_path") val imagePath: String,
-    @SerialName("raw_text") val rawText: String,
-    @SerialName("guessed_name") val guessedName: String? = null,
-    @SerialName("guessed_brand") val guessedBrand: String? = null
-)
+    id = Column(Integer, primary_key=True)
+    fdc_id = Column(String, nullable=True)  # USDA FoodData Central ID
+    name = Column(String, nullable=False)
+    kcal_100g = Column(Numeric, nullable=True)
+    protein_100g = Column(Numeric, nullable=True)
+    carbs_100g = Column(Numeric, nullable=True)
+    fat_100g = Column(Numeric, nullable=True)
+    fiber_100g = Column(Numeric, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now())
 
-/**
- * Mirrors OcrScanResult from app/schemas.py. per100gConfirmed being false
- * means the label's values might be per-serving, not per-100g -- the
- * client should surface that as a visible warning (see backend README).
- */
-@Serializable
-data class OcrScanResult(
-    @SerialName("raw_text") val rawText: String,
-    @SerialName("detected_language") val detectedLanguage: String? = null,
-    @SerialName("per_100g_confirmed") val per100gConfirmed: Boolean = false,
-    val macros: OcrMacros
-)
 
-/**
- * Request body for POST /items. Sends plain numbers (not
- * Decimal-as-string), same rule as the other *Request models.
- */
-@Serializable
-data class ItemCreateRequest(
-    val name: String,
-    val barcode: String? = null,
-    val brand: String? = null,
-    @SerialName("image_path") val imagePath: String? = null,
-    @SerialName("kcal_100g") val kcal100g: Double? = null,
-    @SerialName("protein_100g") val protein100g: Double? = null,
-    @SerialName("carbs_100g") val carbs100g: Double? = null,
-    @SerialName("fat_100g") val fat100g: Double? = null,
-    @SerialName("fiber_100g") val fiber100g: Double? = null,
-    @SerialName("sugar_100g") val sugar100g: Double? = null,
-    @SerialName("saturated_fat_100g") val saturatedFat100g: Double? = null,
-    @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null,
-    val type: String = "product",
-    val origin: String = "manual"
-)
+class Recipe(Base):
+    """
+    Covers both 'recipe' and 'meal' types (see `recipe_type`). A Meal is
+    a recipe with recipe_type='meal' and servings=1, created via the star
+    icon on a Journal meal card — snapshotting the currently-logged items
+    into recipe_ingredients, so it stays editable afterward like any recipe.
+    """
 
-/**
- * Request body for POST /logs. Mirrors LoggableEntryBase (backend) --
- * exactly one of itemId/recipeId must be set. quantity semantics (see
- * that schema's docstring): with no servingSizeId, quantity is grams
- * directly. Used by MealDetailViewModel's "quick log" flow (Saved/
- * Search/Barcode-match in the Add Item sheet), which currently always
- * sends a flat 100g default rather than prompting for quantity -- see
- * that ViewModel for why.
- */
-@Serializable
-data class LogCreateRequest(
-    val date: String,
-    @SerialName("meal_type") val mealType: String,
-    @SerialName("item_id") val itemId: Int? = null,
-    @SerialName("recipe_id") val recipeId: Int? = null,
-    @SerialName("serving_size_id") val servingSizeId: Int? = null,
-    val quantity: Double
-)
+    __tablename__ = "recipes"
 
-/** Quantity-only edit of an existing log -- see backend LogUpdate's doc
- * comment (item/recipe/date/meal_type aren't editable this way). */
-@Serializable
-data class LogUpdateRequest(
-    val quantity: Double? = null,
-    @SerialName("serving_size_id") val servingSizeId: Int? = null
-)
+    recipe_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    recipe_type = Column(String, nullable=False, default="recipe")  # 'recipe' | 'meal'
+    instructions = Column(Text, nullable=True)  # typically unused for 'meal' type
+    image_path = Column(String, nullable=True)
+    servings = Column(Numeric, nullable=False, default=1)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    ingredients = relationship(
+        "RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("recipe_type IN ('recipe', 'meal')", name="ck_recipes_type"),
+    )
+
+
+class RecipeIngredient(Base):
+    """
+    Links a recipe to the items it's made of. Recipe totals are always
+    computed live (SUM of item macros x quantity) — never denormalized —
+    so editing an item's macros automatically flows through to every
+    recipe/meal using it.
+    """
+
+    __tablename__ = "recipe_ingredients"
+
+    recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.item_id"), primary_key=True)
+    quantity_g = Column(Numeric, nullable=False)
+
+    recipe = relationship("Recipe", back_populates="ingredients")
+    item = relationship("Item")
+
+
+class Log(Base):
+    """
+    Actual, committed food log entries.
+
+    IMPORTANT: macros are SNAPSHOTTED at write time (kcal_logged etc).
+    If an item/recipe's macros are edited later, past logs must NOT
+    change — historical days/weekly summaries reflect what was actually
+    counted at the time. item_id/recipe_id are kept for traceability and
+    re-logging, but the numbers that counted toward that day are frozen.
+    """
+
+    __tablename__ = "logs"
+
+    id = Column(Integer, primary_key=True)
+
+    # Plain DATE (no tz) — resolved from logged_at + user's local timezone
+    # at write time. This is what daily/weekly summaries group by.
+    date = Column(Date, nullable=False)
+    meal_type = Column(String, nullable=False)  # 'breakfast' | 'lunch' | 'dinner' | 'snack'
+
+    item_id = Column(Integer, ForeignKey("items.item_id"), nullable=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), nullable=True)
+    serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
+    quantity = Column(Numeric, nullable=False)
+
+    kcal_logged = Column(Numeric, nullable=False)
+    protein_g_logged = Column(Numeric, nullable=False)
+    carbs_g_logged = Column(Numeric, nullable=False)
+    fat_g_logged = Column(Numeric, nullable=False)
+    fiber_g_logged = Column(Numeric, nullable=False)
+    # Same snapshot-at-write-time integrity rule as the other macros --
+    # frozen even if the source item is edited later. Not exposed in the
+    # per-log API response (LogOut) to avoid crowding the tracker UI, but
+    # summed for daily/weekly summaries (ExtendedNutritionTotals).
+    sugar_g_logged = Column(Numeric, nullable=False, default=0)
+    saturated_fat_g_logged = Column(Numeric, nullable=False, default=0)
+    sodium_mg_logged = Column(Numeric, nullable=False, default=0)
+
+    # Precise moment, for ordering/audit purposes.
+    logged_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "(item_id IS NOT NULL AND recipe_id IS NULL) OR "
+            "(item_id IS NULL AND recipe_id IS NOT NULL)",
+            name="ck_logs_item_or_recipe",
+        ),
+        CheckConstraint(
+            "meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')",
+            name="ck_logs_meal_type",
+        ),
+    )
+
+
+class MealPlan(Base):
+    """
+    Planned, not-yet-committed meals. NO macro snapshot — always reflects
+    current item/recipe data until committed. The "commit to tracker"
+    action copies matching rows into `logs`, computing + freezing the
+    macro snapshot at that exact moment.
+    """
+
+    __tablename__ = "meal_plans"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    meal_type = Column(String, nullable=False)
+
+    item_id = Column(Integer, ForeignKey("items.item_id"), nullable=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), nullable=True)
+    serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
+    quantity = Column(Numeric, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(item_id IS NOT NULL AND recipe_id IS NULL) OR "
+            "(item_id IS NULL AND recipe_id IS NOT NULL)",
+            name="ck_meal_plans_item_or_recipe",
+        ),
+        CheckConstraint(
+            "meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')",
+            name="ck_meal_plans_meal_type",
+        ),
+    )
+
+
+class Goal(Base):
+    """
+    Overall caloric/macro targets. Dated rather than a single row, so
+    history of changing goals (cutting/bulking/maintenance) is preserved
+    and weekly summaries can reference the goal that was active at the time.
+    """
+
+    __tablename__ = "goals"
+
+    id = Column(Integer, primary_key=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)  # NULL = currently active
+
+    kcal_target = Column(Numeric, nullable=False)
+    protein_g_target = Column(Numeric, nullable=False)
+    carbs_g_target = Column(Numeric, nullable=False)
+    fat_g_target = Column(Numeric, nullable=False)
+    fiber_g_target = Column(Numeric, nullable=False)
+
+    meal_splits = relationship(
+        "MealGoalSplit", back_populates="goal", cascade="all, delete-orphan"
+    )
+
+
+class MealGoalSplit(Base):
+    """
+    Per-meal targets are NEVER stored as absolute numbers — always a
+    percentage of the overall goal, computed at read time and rounded to
+    int for display. UI enforces all splits for a goal sum to 100%; that's
+    an application-layer validation, not a DB constraint (a partial edit
+    mid-save shouldn't be rejected by the database itself).
+    """
+
+    __tablename__ = "meal_goal_splits"
+
+    id = Column(Integer, primary_key=True)
+    goal_id = Column(Integer, ForeignKey("goals.id"), nullable=False)
+    meal_type = Column(String, nullable=False)
+    pct_of_kcal = Column(Numeric, nullable=False)  # e.g. 25.0 for 25%; macros follow same pct
+
+    goal = relationship("Goal", back_populates="meal_splits")
+
+    __table_args__ = (
+        CheckConstraint(
+            "meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')",
+            name="ck_meal_goal_splits_meal_type",
+        ),
+        UniqueConstraint("goal_id", "meal_type", name="uq_meal_goal_splits_goal_meal"),
+    )
+
+
+class PhysiologicalGuideline(Base):
+    """
+    Population-level reference points (e.g. "protein 0.8-2.2 g/kg
+    bodyweight"), kept separate from `goals`. The warning system compares
+    the active goal against these ranges — not the daily log directly, to
+    avoid false warnings on days the user simply ate less than their goal.
+    """
+
+    __tablename__ = "physiological_guidelines"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)  # e.g. "protein_per_kg_bodyweight"
+    min_value = Column(Numeric, nullable=True)
+    recommended_value = Column(Numeric, nullable=True)
+    max_value = Column(Numeric, nullable=True)
+    unit = Column(String, nullable=False)  # "g/kg", "g/kcal", etc.
+    basis = Column(Text, nullable=True)  # source/reasoning, for traceability
+
+
+class UserProfile(Base):
+    """
+    NOTE: bodyweight is a manual stopgap here (weight_kg) until Health
+    Connect integration is built on the Android side -- at that point,
+    this field should be treated as a fallback/cache, with Health
+    Connect's latest reading preferred when available (see design doc's
+    original intent for bodyweight sourcing).
+    """
+
+    __tablename__ = "user_profile"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=True)
+    profile_pic_path = Column(String, nullable=True)
+    height_cm = Column(Integer, nullable=True)
+    age = Column(Integer, nullable=True)
+    # Manual stopgap -- see class docstring. Nullable since not every
+    # user will have entered it yet, especially before this existed.
+    weight_kg = Column(Numeric, nullable=True)
+    # Weight goal -- purely user-entered reference points for the
+    # Profile screen's "start -> current -> goal" summary and the weight
+    # graph's goal line. Unlike weight_kg above, these are NOT meant to
+    # be superseded by Health Connect -- "starting weight" in particular
+    # is inherently a fixed historical value (whatever it was when the
+    # user set this goal), not a live reading. current weight for that
+    # same summary comes from Health Connect at read time, not from a
+    # stored column.
+    starting_weight_kg = Column(Numeric, nullable=True)
+    goal_weight_kg = Column(Numeric, nullable=True)
+    # 'estrogen' | 'testosterone' | 'other' | NULL — used only where
+    # relevant for guideline calculations, not as a demographic label.
+    primary_hormone = Column(String, nullable=True)
+    activity_level = Column(String, nullable=True)
+    # 'lose' | 'maintain' | 'gain' -- drives the kcal goal calculation
+    # (see routers/user_profile.py). Stored on the profile since it's a
+    # standing orientation, not a one-off calculation parameter.
+    goal_type = Column(String, nullable=True)
+    # e.g. "Europe/Copenhagen" — used to resolve local `date` on logs
+    timezone = Column(String, nullable=False, default="Europe/Copenhagen")
+
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
