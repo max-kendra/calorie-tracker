@@ -45,6 +45,7 @@ languages.
 """
 
 import re
+import logging
 import threading
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -56,6 +57,8 @@ import numpy as np
 from PIL import Image
 
 from app.nutrition import salt_g_to_sodium_mg
+
+logger = logging.getLogger(__name__)
 
 # EasyOCR language codes for the 9 languages we support -- these are NOT
 # the same codes Tesseract used (e.g. "dan" -> "da", "deu" -> "de"). The
@@ -76,45 +79,50 @@ _EASYOCR_LANG_CODES = {
 }
 
 # EasyOCR's Reader is expensive to construct (loads model weights from
-# disk/downloads them on first run) -- build each one once lazily and
-# reuse across requests rather than per-call. Guarded with a lock since
-# FastAPI may serve requests concurrently and Reader construction isn't
-# meant to be called from multiple threads at once.
+# disk/downloads them on first run) -- build it once lazily and reuse it
+# across requests rather than per-call. Guarded with a lock since FastAPI
+# may serve requests concurrently and Reader construction isn't meant to
+# be called from multiple threads at once.
 #
-# IMPORTANT: this used to be ONE Reader built with ALL 9 languages at
-# once (easyocr.Reader(list(_EASYOCR_LANG_CODES.values()), gpu=False)).
-# That doesn't work -- EasyOCR does NOT support arbitrary language
-# combinations ("not all languages can be used together... English is
-# compatible with every language and languages that share common
-# characters are usually compatible with each other" -- EasyOCR's own
-# docs). 9 unrelated European languages combined is very likely an
-# unsupported combination, and EasyOCR raises at Reader construction
-# time when it is. THIS WAS THE ACTUAL BUG behind OCR "never returning
-# results, no matter what": the Reader failed to construct on every
-# single call, the exception propagated up through run_ocr() ->
-# extract_label_from_image(), and got silently swallowed by
-# scan_label's try/except in app/routers/items.py (added earlier to
-# stop that from 500ing the request) -- which correctly stopped the
-# crash, but also hid the fact that OCR was never actually running at
-# all. Fixed properly here: one Reader PER language, each paired with
-# English specifically because English is documented as compatible with
-# everything -- see run_ocr() for how results across languages get
-# combined.
-_reader_cache: dict[str, easyocr.Reader] = {}
-_reader_cache_lock = threading.Lock()
+# CORRECTED (reverting a wrong "fix" from earlier): this was briefly
+# changed to build a SEPARATE Reader per language (each paired with
+# English), on the assumption that EasyOCR can't combine unrelated
+# languages into one Reader. That assumption was wrong for this case --
+# EasyOCR groups languages by SCRIPT, and every language on our list
+# (English, Danish, Norwegian, Swedish, Finnish, Slovak, Czech, Polish,
+# French, Spanish) shares the same Latin-script model; combining them
+# loads ONE model with the union of each language's diacritics, not 9
+# incompatible ones. Running 8-9 SEPARATE Readers instead was
+# significantly heavier (multiple full model loads + multiple inference
+# passes per request) than the original single combined Reader ever
+# was, and that's what was actually behind the new OCR/product-photo-
+# scan timeouts and 500s/502s -- not a language-compatibility bug at
+# all. Reverted to a single combined Reader, which is both simpler and
+# correct.
+#
+# If Reader construction ever does fail for a genuinely bad reason, this
+# now logs the real exception instead of silently swallowing it (that
+# silent-swallow behavior in the caller -- see scan_label's try/except
+# in app/routers/items.py -- is what let the previous, wrong diagnosis
+# go unnoticed for as long as it did).
+_reader: Optional[easyocr.Reader] = None
+_reader_lock = threading.Lock()
 
 
-def _get_reader(lang_code: str) -> easyocr.Reader:
-    """lang_code is one of our Tesseract-style keys (LANGUAGE_CONFIGS'
-    keys), NOT an EasyOCR code directly."""
-    easyocr_code = _EASYOCR_LANG_CODES[lang_code]
-    langs = [easyocr_code] if easyocr_code == "en" else sorted([easyocr_code, "en"])
-    cache_key = ",".join(langs)
-    if cache_key not in _reader_cache:
-        with _reader_cache_lock:
-            if cache_key not in _reader_cache:  # re-check inside the lock
-                _reader_cache[cache_key] = easyocr.Reader(langs, gpu=False)
-    return _reader_cache[cache_key]
+def _get_reader() -> easyocr.Reader:
+    global _reader
+    if _reader is None:
+        with _reader_lock:
+            if _reader is None:  # re-check inside the lock
+                try:
+                    _reader = easyocr.Reader(list(_EASYOCR_LANG_CODES.values()), gpu=False)
+                except Exception:
+                    logger.exception(
+                        "EasyOCR Reader construction failed for languages: %s",
+                        list(_EASYOCR_LANG_CODES.values()),
+                    )
+                    raise
+    return _reader
 
 
 @dataclass
@@ -267,10 +275,9 @@ class OcrExtractionResult:
 
 
 def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> int:
-    """Extracted out of detect_language() so run_ocr() can score each
-    per-language OCR pass the same way, not just a single shared text
-    afterward -- see run_ocr()'s doc comment for why there's no longer
-    just one OCR pass to score."""
+    """How many of this language's macro keywords show up in the text --
+    used by detect_language() below to pick the best-matching language
+    for a single shared OCR pass."""
     keywords = [
         config.energy_keyword,
         config.fat_keyword,
@@ -287,47 +294,26 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> 
 
 def run_ocr(image_bytes: bytes) -> str:
     """
-    Runs EasyOCR once PER supported language (each paired with English --
-    see _get_reader()'s doc comment for why there's no single combined
-    Reader anymore) and returns whichever pass's text scores best against
-    our keyword dictionaries. This folds "which language is this" into
-    running OCR itself now, rather than running OCR once and guessing the
-    language from that one result afterward (which is still what
-    detect_language() does when called elsewhere, e.g. on already-known
-    text -- see extract_label_from_image()).
-
-    PERFORMANCE NOTE, not yet benchmarked on real Pi hardware: this runs
-    OCR up to 9 times per request instead of once, which is meaningfully
-    slower/heavier than before. If that turns out too slow in practice,
-    the better fix is narrowing which languages get tried at all (e.g.
-    from a user-set locale preference, which doesn't exist yet) rather
-    than always trying all 9 -- not done here.
+    Runs EasyOCR ONCE, combined across all supported languages (see
+    _get_reader()'s doc comment for why one combined Reader is correct
+    here, not one per language), and returns the recognized text as one
+    line per detected text region (newline-joined) -- matching the
+    line-oriented shape the parsing functions below expect, same shape
+    pytesseract.image_to_string used to produce. Which language the text
+    is actually in gets figured out afterward by detect_language() (see
+    extract_label_from_image()), via the same keyword-scoring approach
+    that used to also run once per language here -- now it only needs to
+    run once, since there's only one OCR pass to score.
     """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    image_array = np.array(image)
-
-    best_text = ""
-    best_score = -1
-    for lang_code, config in LANGUAGE_CONFIGS.items():
-        try:
-            reader = _get_reader(lang_code)
-        except Exception:
-            # One language's model failing to load/run shouldn't take
-            # down the others -- skip it and keep trying the rest.
-            continue
-        # detail=0 -> just the recognized strings (no bounding boxes/
-        # confidence); paragraph=False -> keep individual detected lines
-        # separate rather than merging into paragraphs, since the
-        # per-line keyword matching below relies on each nutrition-label
-        # row being its own line.
-        lines = reader.readtext(image_array, detail=0, paragraph=False)
-        text = "\n".join(lines)
-        score = _score_text_for_language(text.lower(), config)
-        if score > best_score:
-            best_score = score
-            best_text = text
-
-    return best_text
+    reader = _get_reader()
+    # detail=0 -> just the recognized strings (no bounding boxes/
+    # confidence); paragraph=False -> keep individual detected lines
+    # separate rather than merging into paragraphs, since the per-line
+    # keyword matching below relies on each nutrition-label row being
+    # its own line.
+    lines = reader.readtext(np.array(image), detail=0, paragraph=False)
+    return "\n".join(lines)
 
 
 def detect_language(text: str) -> Optional[str]:
@@ -336,9 +322,8 @@ def detect_language(text: str) -> Optional[str]:
     detection here, since it directly measures "which dictionary would
     actually let us extract fields" rather than guessing at prose language,
     which is unreliable against text that's mostly numbers and labels.
-    Shares its scoring logic with run_ocr() (see _score_text_for_language)
-    but is still used standalone here, on text whose OCR pass is already
-    decided (see extract_label_from_image)."""
+    Uses _score_text_for_language() above for the actual keyword
+    counting."""
     text_lower = text.lower()
     best_lang = None
     best_score = 0
