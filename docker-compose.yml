@@ -2,45 +2,49 @@ services:
   api:
     build: .
     restart: unless-stopped
-    # Host networking - simplest option for a single-Pi setup where
+    # Host networking -- simplest option for a single-Pi setup where
     # Postgres is already installed natively (not containerized) and
     # listening on localhost:5432. This lets the container reach it via
     # `localhost` exactly like `poetry run uvicorn` did, no bridge
     # networking or port-mapping juggling needed.
     network_mode: host
     env_file: .env
-    # No `ports:` needed under host networking - the container shares
+    # No `ports:` needed under host networking -- the container shares
     # the Pi's network stack directly, so port 8000 is already exposed
     # on the Pi itself once the container is running.
     # Persists uploaded product photos (see POST /items/scan-product-photo)
-    # on the host, outside the container's filesystem - otherwise they'd
+    # on the host, outside the container's filesystem -- otherwise they'd
     # vanish on every rebuild/recreate. Left-hand side is a path on the
     # Pi; right-hand side must match Settings.media_dir resolved against
     # the container's WORKDIR (/app), i.e. media_dir="media" -> /app/media.
     #
-    # No easyocr_models mount on THIS branch - that existed specifically
-    # to persist EasyOCR's runtime-downloaded model weights across
-    # rebuilds. Tesseract's language data is installed via apt at
-    # image-build time instead (see Dockerfile), already baked into the
-    # image with nothing to download or persist separately. If you
-    # switch back to the EasyOCR branch, that mount comes back too.
+    # easyocr_models: same reasoning, for EasyOCR's downloaded model
+    # weights (see app/ocr.py's _get_reader -- model_storage_directory
+    # points at /app/easyocr_models specifically so this mount has a
+    # predictable, explicit target). Without this, every rebuild wiped
+    # the container's filesystem and re-triggered EasyOCR's ~20-40s
+    # model download on whichever request happened to be the first to
+    # touch OCR after that rebuild (see design discussion -- this was
+    # part of what caused the OCR timeout bug). With it, the download
+    # only ever happens once per Pi, not once per rebuild.
     volumes:
       - ./media:/app/media
-      # OCR scan metrics (timing, memory) for comparing OCR engines -
+      - ./easyocr_models:/app/easyocr_models
+      # OCR scan metrics (timing, memory) for comparing OCR engines --
       # see app/ocr_metrics.py. Same persistence reasoning as media/
-      # above. Point this at an external drive instead of the SD card
-      # if you have one mounted and want to spare the SD card the write
-      # volume, e.g.:
+      # easyocr_models above. Point this at an external drive instead
+      # of the SD card if you have one mounted and want to spare the SD
+      # card the write volume, e.g.:
       #   - /mnt/external-hdd/ocr_metrics:/app/ocr_metrics
       - ./ocr_metrics:/app/ocr_metrics
     # Caps the CONTAINER's own stdout/stderr logs (everything
     # logging.basicConfig writes, in app/main.py) at 30MB total across 3
     # rotated files. Docker's default json-file driver has NO size limit
-    # or rotation at all otherwise - it just grows forever on the SD
+    # or rotation at all otherwise -- it just grows forever on the SD
     # card, which is a real, easy-to-miss way to slowly run out of disk
     # space (the exact problem already hit once with unpruned build
     # cache, just in a different place). Separate from and much smaller
-    # than the dedicated OCR metrics file above - that one's meant to
+    # than the dedicated OCR metrics file above -- that one's meant to
     # be kept and analyzed; these are just routine app logs, fine to
     # lose the oldest ones once they roll over.
     logging:
