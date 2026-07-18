@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import kotlin.math.roundToInt
 
-// Fixed order/display names -- matches the Journal screen and the design
+// Fixed order/display names - matches the Journal screen and the design
 // doc's meal card order.
 private val MEAL_TYPES = listOf(
     "breakfast" to "Breakfast",
@@ -22,7 +22,7 @@ private val MEAL_TYPES = listOf(
 
 /**
  * Percentages are whole Ints, adjusted in single-percentage-point steps
- * (see the Slider's `steps` config in MealCalorieGoalScreen) -- same
+ * (see the Slider's `steps` config in MealCalorieGoalScreen) - same
  * reasoning as MacronutrientsUiState: storing the value itself as an Int
  * means there's no hidden fractional drift between what's displayed and
  * what's actually sent to the backend, which requires an exact 100% sum.
@@ -37,7 +37,7 @@ data class MealSplitRow(
 
 data class MealCalorieGoalUiState(
     val isLoading: Boolean = true,
-    // Null goalId means no active goal exists yet -- there's nothing to
+    // Null goalId means no active goal exists yet - there's nothing to
     // attach meal splits to, so the screen shows a "set up your calorie
     // goal first" message instead of sliders.
     val goalId: Int? = null,
@@ -85,7 +85,7 @@ class MealCalorieGoalViewModel : ViewModel() {
                 )
             } catch (e: HttpException) {
                 if (e.code() == 404) {
-                    // No goal yet -- the screen will prompt the user to
+                    // No goal yet - the screen will prompt the user to
                     // set one up first (see MealCalorieGoalScreen).
                     _uiState.value = _uiState.value.copy(isLoading = false, goalId = null)
                 } else {

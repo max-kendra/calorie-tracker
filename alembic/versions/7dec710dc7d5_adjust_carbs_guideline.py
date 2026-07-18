@@ -5,7 +5,7 @@ Revises: 824c17bcbba4
 Create Date: 2026-07-12 15:45:13.041043
 
 The standard AMDR carbohydrate range (45-65% of calories) refers to
-TOTAL carbohydrate, which by nutritional definition includes fiber --
+TOTAL carbohydrate, which by nutritional definition includes fiber -
 fiber is a subset of carbohydrate, not a separate macro.
 
 However, this app's goal-setting model (meal_goal_splits, and the
@@ -19,12 +19,12 @@ double-count fiber's calories once under Carbs and again under Fiber.
 Fix: subtract fiber's typical caloric contribution from the AMDR range.
 Using the fiber_per_1000kcal guideline (14g/1000kcal) at 2 kcal/g (the
 standard nutrition-labeling convention for fiber) works out to ~2.8% of
-calories -- consistent with the ~3% shown for fiber in the app's own
+calories - consistent with the ~3% shown for fiber in the app's own
 Macronutrients UI. Subtracting ~2.8 percentage points from each AMDR
 bound:
-  - min: 45 -> 42
-  - recommended: 55 -> 52
-  - max: 65 -> 62
+  - min: 45 --> 42
+  - recommended: 55 --> 52
+  - max: 65 --> 62
 
 This is a deliberate modeling adjustment to match how the app actually
 splits these two macros, not a correction of the underlying AMDR source
@@ -50,7 +50,7 @@ NEW_BASIS = (
     "carbohydrate is 45-65% of calories (US/Canadian Dietary Reference "
     "Intakes). This app tracks Carbs and Fiber as independent goal "
     "slices (see meal_goal_splits / Macronutrients screen), so this "
-    "app's 'carbs' value excludes fiber -- adjusted down by ~2.8 "
+    "app's 'carbs' value excludes fiber - adjusted down by ~2.8 "
     "percentage points (fiber_per_1000kcal's 14g/1000kcal at 2 kcal/g) "
     "to avoid double-counting fiber's calories in both slices."
 )
@@ -61,7 +61,7 @@ OLD_BASIS = (
 )
 
 
-def upgrade() -> None:
+def upgrade() --> None:
     op.execute(
         sa.text(
             "UPDATE physiological_guidelines "
@@ -72,7 +72,7 @@ def upgrade() -> None:
     )
 
 
-def downgrade() -> None:
+def downgrade() --> None:
     op.execute(
         sa.text(
             "UPDATE physiological_guidelines "

@@ -8,14 +8,14 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 
 /**
- * Best-effort status bar tinting -- sets `window.statusBarColor` for as
+ * Best-effort status bar tinting - sets `window.statusBarColor` for as
  * long as this is composed, restoring whatever it was before on
  * dispose (so leaving the screen doesn't leave other screens tinted).
  *
  * KNOWN LIMITATION: this uses the classic (deprecated but still
  * functional on most currently-shipping Android versions)
  * `Window.statusBarColor` API. On Android 15+, the platform increasingly
- * enforces true edge-to-edge and may ignore this -- the fully correct
+ * enforces true edge-to-edge and may ignore this - the fully correct
  * fix there is to stop consuming the top system-bar inset in this
  * screen and let its own background Composable paint through into that
  * area instead. Not done here to keep this change self-contained;

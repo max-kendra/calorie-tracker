@@ -14,7 +14,7 @@ import retrofit2.HttpException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-// Standard nutrition-labeling kcal-per-gram conversion factors -- needed
+// Standard nutrition-labeling kcal-per-gram conversion factors - needed
 // to preserve a goal's macro RATIO when its kcal_target changes (see
 // saveAsGoal()).
 private const val KCAL_PER_G_PROTEIN = 4.0
@@ -23,7 +23,7 @@ private const val KCAL_PER_G_FAT = 9.0
 private const val KCAL_PER_G_FIBER = 2.0
 
 // Default macro split used only when creating a BRAND NEW goal (no
-// existing ratio to preserve) -- matches MacronutrientsViewModel's defaults.
+// existing ratio to preserve) - matches MacronutrientsViewModel's defaults.
 private const val DEFAULT_FAT_PCT = 25.0
 private const val DEFAULT_PROTEIN_PCT = 25.0
 private const val DEFAULT_CARBS_PCT = 47.0
@@ -37,7 +37,7 @@ data class CalorieGoalUiState(
     val loadError: String? = null,
 
     // TDEE-calculation inputs, stored on the profile (weight_kg,
-    // activity_level, goal_type) -- height/age come from the profile
+    // activity_level, goal_type) - height/age come from the profile
     // too but are edited on the separate Edit Profile screen, not here.
     val weightKg: String = "",
     val activityLevel: String? = null,
@@ -110,7 +110,7 @@ class CalorieGoalViewModel : ViewModel() {
     fun updateActivityLevel(value: String) { _uiState.value = _uiState.value.copy(activityLevel = value) }
     fun updateGoalType(value: String) { _uiState.value = _uiState.value.copy(goalType = value) }
 
-    /** Saves weight/activity/goal_type to the profile -- must happen
+    /** Saves weight/activity/goal_type to the profile - must happen
      * before calculate(), since the backend's calculate-kcal-goal
      * endpoint reads these from the STORED profile, not from a request
      * body (see backend docstring). */
@@ -164,7 +164,7 @@ class CalorieGoalViewModel : ViewModel() {
      * If a goal already exists, its current macro RATIO (not absolute
      * grams) is preserved. If no goal exists yet, sensible defaults are
      * used. See ProfileViewModel's (now removed) original version of
-     * this function for the same logic -- unchanged, just relocated.
+     * this function for the same logic - unchanged, just relocated.
      */
     fun saveAsGoal() {
         val state = _uiState.value

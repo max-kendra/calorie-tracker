@@ -16,6 +16,7 @@ import com.mealtracker.android.network.models.LogFromMealRequest
 import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
 import com.mealtracker.android.network.models.OcrScanResult
+import com.mealtracker.android.network.models.PhysiologicalGuideline
 import com.mealtracker.android.network.models.ProductPhotoScanResult
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
@@ -239,4 +240,12 @@ interface ApiService {
 
     @POST("recipes")
     suspend fun createRecipe(@Body request: RecipeCreateRequest): Recipe
+
+    // Population-level reference ranges backing the Home screen's
+    // sodium/added-sugar/saturated-fat threshold card -- static/seeded
+    // data (see backend's app/routers/guidelines.py), fetched once and
+    // used both to compute the weekly ceilings and to show WHERE each
+    // number comes from via `basis`.
+    @GET("guidelines")
+    suspend fun getGuidelines(): List<PhysiologicalGuideline>
 }

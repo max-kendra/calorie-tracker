@@ -170,7 +170,7 @@ fun MealDetailScreen(
     LaunchedEffect(state.logs, date, mealType) {
         if (!HealthConnectPreferences.isNutritionExportEnabled(healthConnectContext)) return@LaunchedEffect
         if (!HealthConnectManager.isAvailable(healthConnectContext)) return@LaunchedEffect
-        if (!HealthConnectManager.hasAllPermissions(healthConnectContext)) return@LaunchedEffect
+        if (!HealthConnectManager.hasNutritionPermission(healthConnectContext)) return@LaunchedEffect
 
         try {
             if (state.logs.isEmpty()) {
@@ -318,7 +318,21 @@ fun MealDetailScreen(
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
 
-                when (state.sheetMode) {
+                // Same K2 compiler workaround as AddItemScreen.kt's
+                // when(state.phase) -- "PostponedLambdaExitNode not
+                // initialized" is a known K2 frontend bug triggered by
+                // large when expressions containing nested lambdas,
+                // especially (as here) when the whole thing sits inside
+                // ANOTHER lambda argument (sheetContent's lambda, itself
+                // passed to BottomSheetScaffold). Isolating it in its
+                // own local function body works around it without
+                // changing any logic -- a local function still captures
+                // everything from the enclosing scope (state, viewModel,
+                // selectMethod, coroutineScope, scaffoldState, date,
+                // mealType, etc.) by closure exactly as before.
+                @Composable
+                fun SheetModeContent() {
+                    when (state.sheetMode) {
                     AddItemSheetMode.SEARCH -> {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                         OutlinedTextField(
@@ -432,6 +446,8 @@ fun MealDetailScreen(
                         )
                     }
                 }
+                }
+                SheetModeContent()
 
                 if (state.quickLogError != null) {
                     Text(

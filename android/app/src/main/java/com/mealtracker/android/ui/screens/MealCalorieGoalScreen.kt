@@ -18,8 +18,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import com.mealtracker.android.ui.components.PercentSliderRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,7 +53,7 @@ private fun colorFor(mealType: String): Color = when (mealType) {
 
 /**
  * Lets the user split their daily calorie goal across Breakfast/Lunch/
- * Dinner/Snacks -- matches the design doc's Meal Calorie Goal screen.
+ * Dinner/Snacks - matches the design doc's Meal Calorie Goal screen.
  * Same hard-gate-at-100% pattern, donut visualization, reset, and
  * discard-changes confirmation as the Macronutrients screen. Requires
  * an active Goal to already exist (set one up via Macronutrients first,
@@ -176,9 +175,10 @@ fun MealCalorieGoalScreen(
             }
 
             state.rows.forEach { row ->
-                MealSliderRow(
-                    row = row,
-                    kcalTarget = state.kcalTarget,
+                PercentSliderRow(
+                    label = row.displayName,
+                    valueText = "${row.kcal(state.kcalTarget)} Cal",
+                    percent = row.percent,
                     color = colorFor(row.mealType),
                     onValueChange = { viewModel.updatePercent(row.mealType, it) }
                 )
@@ -218,35 +218,5 @@ fun MealCalorieGoalScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun MealSliderRow(row: MealSplitRow, kcalTarget: Int, color: Color, onValueChange: (Int) -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "${row.displayName} \u00b7 ${row.kcal(kcalTarget)} Cal",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                text = "${row.percent}%",
-                style = MaterialTheme.typography.bodyLarge,
-                color = color
-            )
-        }
-        Slider(
-            value = row.percent.toFloat(),
-            onValueChange = { onValueChange(it.roundToInt()) },
-            valueRange = 0f..100f,
-            steps = 99,
-            colors = SliderDefaults.colors(
-                thumbColor = color,
-                activeTrackColor = color
-            )
-        )
     }
 }

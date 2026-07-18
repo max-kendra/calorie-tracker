@@ -15,7 +15,7 @@ too.
    `python -c "import secrets; print(secrets.token_urlsafe(32))"`).
 4. Start Postgres: `docker-compose up -d postgres`
 5. Apply migrations: `poetry run alembic upgrade head`
-6. Run the API: `poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+6. Run the API: `poetry run uvicorn app.main:app -reload -host 0.0.0.0 -port 8000`
 7. Visit `http://localhost:8000/docs` for interactive API docs (Swagger UI)
    — click "Authorize" and enter your API key to try authenticated endpoints.
 
@@ -187,8 +187,8 @@ FoodData Central). EU nutrition labels (Lidl-DK included) show *salt* in
 grams instead of sodium — the conversion is `salt(g) = sodium(g) x 2.5`,
 i.e. `sodium_mg_100g = salt_g_100g x 400`. This is implemented as
 `salt_g_to_sodium_mg()` (and the inverse, `sodium_mg_to_salt_g()`) in
-`app/nutrition.py`, verified against known values (1.2g salt -> 480mg
-sodium, 0.5g salt -> 200mg sodium, and the round trip back to salt).
+`app/nutrition.py`, verified against known values (1.2g salt --> 480mg
+sodium, 0.5g salt --> 200mg sodium, and the round trip back to salt).
 **Whatever builds the OCR pipeline must call this conversion on any
 salt value extracted from a label before it goes into an
 ItemCreate/ItemUpdate payload — the DB only ever stores sodium, never a
@@ -452,7 +452,7 @@ Pi over Tailscale.
 ## Making schema changes going forward
 
 1. Edit the relevant model(s) in `app/models.py`
-2. `poetry run alembic revision --autogenerate -m "describe the change"`
+2. `poetry run alembic revision -autogenerate -m "describe the change"`
 3. **Read the generated migration file** in `alembic/versions/` before
    applying — autogenerate is good but not infallible (e.g. it won't
    always detect a column rename correctly, may see it as drop+add)

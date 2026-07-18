@@ -1,4 +1,4 @@
-// Top-level build file -- declares plugins used by sub-projects (just
+// Top-level build file - declares plugins used by sub-projects (just
 // :app here) without applying them at the root level. This is the
 // standard modern Gradle pattern (matches what Android Studio's project
 // wizard generates).

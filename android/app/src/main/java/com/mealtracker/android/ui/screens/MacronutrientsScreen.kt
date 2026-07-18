@@ -18,8 +18,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import com.mealtracker.android.ui.components.PercentSliderRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -185,10 +184,10 @@ fun MacronutrientsScreen(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
             }
 
-            MacroSliderRow("Protein", state.protein, viewModel::updateProteinPct, ProteinColor)
-            MacroSliderRow("Fat", state.fat, viewModel::updateFatPct, FatColor)
-            MacroSliderRow("Carbs", state.carbs, viewModel::updateCarbsPct, CarbsColor)
-            MacroSliderRow("Fiber", state.fiber, viewModel::updateFiberPct, FiberColor)
+            PercentSliderRow("Protein", "${state.protein.grams}g \u00b7 ${state.protein.kcal} Cal", state.protein.percent, ProteinColor, viewModel::updateProteinPct)
+            PercentSliderRow("Fat", "${state.fat.grams}g \u00b7 ${state.fat.kcal} Cal", state.fat.percent, FatColor, viewModel::updateFatPct)
+            PercentSliderRow("Carbs", "${state.carbs.grams}g \u00b7 ${state.carbs.kcal} Cal", state.carbs.percent, CarbsColor, viewModel::updateCarbsPct)
+            PercentSliderRow("Fiber", "${state.fiber.grams}g \u00b7 ${state.fiber.kcal} Cal", state.fiber.percent, FiberColor, viewModel::updateFiberPct)
 
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 
@@ -224,35 +223,5 @@ fun MacronutrientsScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun MacroSliderRow(name: String, row: MacroRow, onValueChange: (Int) -> Unit, color: Color) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "$name \u00b7 ${row.grams}g \u00b7 ${row.kcal} Cal",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                text = "${row.percent}%",
-                style = MaterialTheme.typography.bodyLarge,
-                color = color
-            )
-        }
-        Slider(
-            value = row.percent.toFloat(),
-            onValueChange = { onValueChange(it.roundToInt()) },
-            valueRange = 0f..100f,
-            steps = 99,
-            colors = SliderDefaults.colors(
-                thumbColor = color,
-                activeTrackColor = color
-            )
-        )
     }
 }

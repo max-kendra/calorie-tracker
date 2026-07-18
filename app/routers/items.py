@@ -62,13 +62,13 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
 @router.post("/scan-barcode", response_model=BarcodeScanResult)
 async def scan_barcode(image: UploadFile = File(...), db: Session = Depends(get_db)):
     """
-    Upload a photo of a barcode -- tries pyzbar first, falls back to
+    Upload a photo of a barcode - tries pyzbar first, falls back to
     zxing-cpp if that finds nothing (see app/barcode.py for why both).
     If the decoded barcode matches an existing item, that item is
     returned. If the barcode decodes but doesn't match anything, `item`
     is null and the client should pre-fill the Add Item form with the
     decoded barcode. If nothing could be decoded at all, both `barcode`
-    and `item` are null -- client should offer manual barcode entry.
+    and `item` are null - client should offer manual barcode entry.
     """
     image_bytes = await image.read()
 
@@ -90,34 +90,34 @@ async def scan_barcode(image: UploadFile = File(...), db: Session = Depends(get_
 async def scan_product_photo(image: UploadFile = File(...)):
     """
     Second step of the Add Item flow (between barcode scan and nutrition
-    label scan) -- upload a (client-cropped) photo of the product
+    label scan) - upload a (client-cropped) photo of the product
     package itself, saved to disk under `settings.media_dir` and
     returned as `image_path` for the client to carry through into the
     eventual POST /items call, so the photo gets attached to the item
     (e.g. shown later in My Foods).
 
-    Purely visual now -- no OCR runs against this endpoint at all. It
+    Purely visual now - no OCR runs against this endpoint at all. It
     used to also run OCR here for a best-effort name/brand guess
     (guess_name_and_brand), but that guessing was unreliable in general
     and especially hopeless for non-Latin packaging (e.g. Japanese/
     Korean/Chinese), since EasyOCR here only knows Latin-script
     languages. The Add Item flow now asks the user for name/brand
-    directly instead (see design discussion) -- the client has never
+    directly instead (see design discussion) - the client has never
     read guessed_name/guessed_brand since that redesign, making this
     endpoint's OCR pass pure wasted work. Worse: it was also the source
     of confusing OCR errors showing up in the logs for a step that
     doesn't OCR anything from the client's point of view (see design
     discussion: "I wasn't even OCR'ing anything... I thought we took the
-    OCR out from there?") -- removing it fixes both the waste and the
+    OCR out from there?") - removing it fixes both the waste and the
     confusion at once.
 
-    Like scan-label, this NEVER writes to our DB directly -- saving the
+    Like scan-label, this NEVER writes to our DB directly - saving the
     image file to disk is the one exception (needed so we have something
     for `image_path` to point at), but no Item row is touched.
     """
     image_bytes = await image.read()
 
-    # Save first, with a random filename -- collisions are practically
+    # Save first, with a random filename - collisions are practically
     # impossible with uuid4, and using the original client filename
     # would risk path-traversal or overwrite issues if we ever pass it
     # through unsanitized. Always .jpg since the client always sends a
@@ -129,7 +129,7 @@ async def scan_product_photo(image: UploadFile = File(...)):
     media_dir.mkdir(parents=True, exist_ok=True)
     (media_dir / filename).write_bytes(image_bytes)
     # Relative path matching how app/main.py mounts StaticFiles at
-    # /media -- e.g. "media/<filename>" is reachable at GET /media/<filename>.
+    # /media - e.g. "media/<filename>" is reachable at GET /media/<filename>.
     image_path = f"{settings.media_dir}/{filename}"
 
     return ProductPhotoScanResult(
@@ -143,9 +143,9 @@ async def scan_product_photo(image: UploadFile = File(...)):
 @router.post("/scan-label", response_model=OcrScanResult)
 async def scan_label(image: UploadFile = File(...)):
     """
-    Upload a photo of a nutrition label -- OCR extracts serving size +
+    Upload a photo of a nutrition label - OCR extracts serving size +
     macros, best-effort, in whichever of our 9 supported languages it
-    detects. NEVER writes to our DB -- returns a draft for the client to
+    detects. NEVER writes to our DB - returns a draft for the client to
     pre-fill the Add Item form, which the user reviews/corrects before
     actually saving via POST /items. See app/ocr.py for what's been
     tested and what hasn't (Danish/German/English verified against real
@@ -155,11 +155,11 @@ async def scan_label(image: UploadFile = File(...)):
     """
     image_bytes = await image.read()
 
-    # Same reasoning as scan_product_photo's try/except -- OCR failing
+    # Same reasoning as scan_product_photo's try/except - OCR failing
     # (EasyOCR/PyTorch issues, an unreadable/corrupted image, memory,
     # etc.) should degrade to an empty draft the user fills in manually,
     # not 500 the whole request. This endpoint never had that handling
-    # at all (unlike scan_product_photo, which was fixed earlier) --
+    # at all (unlike scan_product_photo, which was fixed earlier) -
     # given this is the actual OCR-heavy step (reading a dense nutrition
     # table, not just guessing a product name), it's the more likely
     # place for OCR failures to actually surface in practice.
@@ -170,7 +170,7 @@ async def scan_label(image: UploadFile = File(...)):
             metrics["per_100g_confirmed"] = result.per_100g_confirmed
             metrics["macros_found"] = bool(result.macros)
             metrics["raw_text_length"] = len(result.raw_text)
-        # Logged on EVERY call now, not just a crash -- a clean label
+        # Logged on EVERY call now, not just a crash - a clean label
         # that still fails to parse (no exception, just insufficient/
         # garbled recognized text or a language that didn't hit the
         # keyword-match threshold) previously left zero trace anywhere,
@@ -273,7 +273,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
     # Note: FK constraints (no ON DELETE CASCADE configured on
-    # recipe_ingredients/logs/meal_plans -> items) will reject this if the
+    # recipe_ingredients/logs/meal_plans --> items) will reject this if the
     # item is still referenced anywhere — that's deliberate for now, so we
     # don't silently orphan historical logs. Revisit if this becomes
     # annoying in practice.

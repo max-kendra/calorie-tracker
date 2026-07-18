@@ -15,25 +15,25 @@ router = APIRouter(
 )
 
 
-def _get_client() -> UsdaClient:
+def _get_client() --> UsdaClient:
     return UsdaClient(api_key=settings.usda_api_key)
 
 
-def _usda_error_detail(e: Exception) -> str:
-    """Distinguishes a 429 (rate limit) from other failures -- the
+def _usda_error_detail(e: Exception) --> str:
+    """Distinguishes a 429 (rate limit) from other failures - the
     default usda_api_key is the public DEMO_KEY, which is limited to
     30 requests/hour and 50/day AND SHARED across every DEMO_KEY user
-    globally, not just this app -- trivially easy to exceed, and the
+    globally, not just this app - trivially easy to exceed, and the
     resulting error otherwise looks identical to a genuine bug ("500's
     and 502's with usda", reported without an obvious cause). Get a
     free personal key at https://fdc.nal.usda.gov/api-key-signup and
-    set USDA_API_KEY -- personal keys get a much higher limit (1000/
+    set USDA_API_KEY - personal keys get a much higher limit (1000/
     hour) and aren't shared with other users."""
     if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
         return (
             "USDA FoodData Central rate limit exceeded. If you're using the default "
             "DEMO_KEY, it's limited to 30 requests/hour and shared globally with every "
-            "other DEMO_KEY user -- get a free personal key at "
+            "other DEMO_KEY user - get a free personal key at "
             "https://fdc.nal.usda.gov/api-key-signup and set it as USDA_API_KEY."
         )
     return f"USDA FoodData Central request failed: {e}"
@@ -45,13 +45,13 @@ def search_usda(
     data_type: Optional[str] = Query(
         "Foundation,SR Legacy",
         description="Comma-separated FDC data types. Defaults to Foundation+SR Legacy "
-        "(lab-analyzed, stable -- best for raw/whole ingredients). Pass 'Branded' "
+        "(lab-analyzed, stable - best for raw/whole ingredients). Pass 'Branded' "
         "explicitly if searching packaged products by name.",
     ),
     page_size: int = Query(10, le=50),
 ):
     """
-    Search USDA FoodData Central. Results are NOT written to our DB --
+    Search USDA FoodData Central. Results are NOT written to our DB -
     this is purely a lookup for the client to show a result list. Picking
     a result and creating an item from it happens via the normal
     POST /items call, with the user reviewing/editing the pre-filled
@@ -80,7 +80,7 @@ def search_usda(
 @router.get("/food/{fdc_id}", response_model=UsdaFoodDetailOut)
 def get_usda_food(fdc_id: int):
     """
-    Full detail for one food by FDC ID -- used once the user picks a
+    Full detail for one food by FDC ID - used once the user picks a
     search result, to get the complete normalized macro set for
     pre-filling the Add Item review form.
     """

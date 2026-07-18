@@ -23,12 +23,12 @@ import coil3.compose.AsyncImage
 import com.mealtracker.android.BuildConfig
 
 /**
- * Circular avatar -- shows the profile picture if `imagePath` is set
+ * Circular avatar - shows the profile picture if `imagePath` is set
  * (relative path like "media/xxx.jpg" as returned by
  * POST /profile/picture, resolved against BuildConfig.BASE_URL the same
  * way any other media path in this app is), otherwise a placeholder
  * person icon. Pass `onClick` to make it tappable with a small camera
- * badge hinting it can be changed -- omit it (leave null) for a purely
+ * badge hinting it can be changed - omit it (leave null) for a purely
  * read-only display.
  */
 @Composable

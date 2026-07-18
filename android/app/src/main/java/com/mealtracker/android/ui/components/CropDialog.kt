@@ -53,7 +53,7 @@ private const val MIN_CROP_SIZE_PX = 60f
 private const val HANDLE_TOUCH_SIZE_DP = 32
 
 /**
- * Self-contained freeform image cropper -- home-grown rather than a
+ * Self-contained freeform image cropper - home-grown rather than a
  * third-party library, after TWO separate third-party croppers caused
  * real build breakage in this project: UCrop's transitive
  * androidx.transition dependency didn't resolve correctly at runtime,
@@ -64,26 +64,26 @@ private const val HANDLE_TOUCH_SIZE_DP = 32
  * against a future Compose upgrade.
  *
  * IMPORTANT: this is a plain composable, NOT wrapped in
- * androidx.compose.ui.window.Dialog. It used to be -- but Dialog's
+ * androidx.compose.ui.window.Dialog. It used to be - but Dialog's
  * separate Android Window kept NOT actually sizing to the full screen
  * reliably (DialogProperties flags, then forcing the underlying
  * Window's LayoutParams to MATCH_PARENT via a SideEffect, both still
  * left the Cancel/Rotate/Crop row missing/barely-visible on some
- * devices -- reported multiple times). Rendering inline in the CALLER's
+ * devices - reported multiple times). Rendering inline in the CALLER's
  * own window sidesteps that whole class of bug, since that window's
  * insets/sizing are already known to work correctly (same one Journal/
  * MealDetail etc. use). Callers are responsible for layering this on
  * top of their other content themselves (e.g. as a later sibling in an
  * outer Box) so it visually overlays rather than pushing content down
- * in normal Column/Row flow -- see AddItemScreen.kt or
+ * in normal Column/Row flow - see AddItemScreen.kt or
  * MealDetailScreen.kt's ItemLogPageDialog for the pattern.
  *
  * Shows the source image fit-to-container with a draggable/resizable
- * crop rectangle on top -- drag inside the rectangle to move it, drag a
+ * crop rectangle on top - drag inside the rectangle to move it, drag a
  * corner handle to resize it. A rotate button turns the image (and the
  * crop rect resets to a centered inset of the new orientation) in 90-
  * degree steps, for photos that come out sideways/upside-down (no EXIF-
- * orientation auto-detection is attempted -- this is a manual fix
+ * orientation auto-detection is attempted - this is a manual fix
  * instead, which also covers cases EXIF metadata gets wrong or lacks
  * entirely). "Crop" maps the on-screen rectangle back to source-bitmap
  * pixel coordinates (post-rotation) and produces the cropped Bitmap via
@@ -97,7 +97,7 @@ fun CropDialog(
 ) {
     var rotationDegrees by remember(sourceBitmap) { mutableIntStateOf(0) }
     // Recomputed only when sourceBitmap or rotationDegrees actually
-    // change (remember, not derivedStateOf) -- rotating a large camera
+    // change (remember, not derivedStateOf) - rotating a large camera
     // photo isn't free, so this shouldn't re-run on unrelated
     // recompositions (e.g. while dragging the crop rect).
     val displayBitmap = remember(sourceBitmap, rotationDegrees) {
@@ -128,7 +128,7 @@ fun CropDialog(
 
                 // Derives imageBounds/cropRect once per container size
                 // (or when the bitmap changes) rather than every
-                // recomposition -- also means dragging cropRect around
+                // recomposition - also means dragging cropRect around
                 // doesn't get reset by unrelated recompositions, since
                 // this effect only re-runs when its keys actually change.
                 LaunchedEffect(containerWidthPx, containerHeightPx, displayBitmap) {
@@ -151,14 +151,14 @@ fun CropDialog(
                     val bounds = Rect(offsetX, offsetY, offsetX + displayedWidth, offsetY + displayedHeight)
                     imageBounds = bounds
 
-                    // Defaults to the FULL image now, not an inset --
+                    // Defaults to the FULL image now, not an inset -
                     // per design discussion, most photos here (already
                     // framed by the camera/gallery picker) don't need
                     // cropping at all, and a dedicated "Full Image"
                     // button asking the user to opt into that on every
                     // single capture was one extra tap for what's now
                     // the common case. The corner handles sit exactly
-                    // on the image edges as a result -- still draggable
+                    // on the image edges as a result - still draggable
                     // (each has a 32dp touch target centered on its
                     // position, same as before), just no longer inset
                     // in from the edge by default. Manually cropping

@@ -27,7 +27,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Simple line chart for the Profile screen's weight-trend graph --
+ * Simple line chart for the Profile screen's weight-trend graph -
  * hand-rolled Canvas drawing, same approach as DonutChart, rather than
  * pulling in a charting library for what's fundamentally one polyline.
  *
@@ -77,7 +77,7 @@ fun WeightLineChart(
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth().height(height)) {
-            // Y-axis labels -- max/mid/min of the padded value range
+            // Y-axis labels - max/mid/min of the padded value range
             // (minValue/maxValue above), evenly spaced top-to-bottom to
             // line up with where those values actually fall in the
             // chart. Previously this chart had no Y-axis labels at all

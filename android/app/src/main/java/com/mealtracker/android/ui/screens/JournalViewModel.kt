@@ -12,11 +12,11 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 /**
- * One meal's worth of data for the Journal screen -- the logged items
+ * One meal's worth of data for the Journal screen - the logged items
  * for that meal_type, and both kcal AND per-macro eaten/goal figures
  * (goal figures come from the active Goal's meal_splits[].computed_totals,
  * which the backend already derives as overall-goal-macros x this
- * meal's percentage -- see design doc).
+ * meal's percentage - see design doc).
  */
 data class MealBucket(
     val mealType: String,
@@ -34,7 +34,7 @@ data class MealBucket(
     val goalFiber: Int
 )
 
-/** Whole-day totals -- sum of all meals' eaten values, compared against
+/** Whole-day totals - sum of all meals' eaten values, compared against
  * the active Goal's own top-level targets (not derived from meal_splits,
  * since those are just a slice of the same overall targets). */
 data class DailyTotals(
@@ -61,10 +61,10 @@ sealed class JournalUiState {
 }
 
 /**
- * Backs the calendar date-picker dialog -- `mealTypesLoggedByDay` is how
+ * Backs the calendar date-picker dialog - `mealTypesLoggedByDay` is how
  * many DISTINCT meal types (of the 4: breakfast/lunch/dinner/snack) got
  * at least one log on that day, 0-4. This is deliberately NOT a raw log
- * count (someone could log 5 separate snacks and 0 of anything else --
+ * count (someone could log 5 separate snacks and 0 of anything else -
  * that's still "1" for coloring purposes, matching the intent of
  * "how much of the day did you track", not "how many items did you eat").
  */
@@ -74,7 +74,7 @@ data class CalendarMonthState(
     val mealTypesLoggedByDay: Map<LocalDate, Int> = emptyMap()
 )
 
-// Fixed order/display names -- matches the design doc's meal card order.
+// Fixed order/display names - matches the design doc's meal card order.
 private val MEAL_TYPES = listOf(
     "breakfast" to "Breakfast",
     "lunch" to "Lunch",
@@ -95,7 +95,7 @@ class JournalViewModel : ViewModel() {
     }
 
     /** Loads (or reloads) the tracked-day coloring for one month at a
-     * time -- called when the calendar dialog opens and again whenever
+     * time - called when the calendar dialog opens and again whenever
      * the user navigates to a different month within it. */
     fun loadCalendarMonth(yearMonth: YearMonth) {
         _calendarState.value = CalendarMonthState(yearMonth, isLoading = true)
@@ -113,7 +113,7 @@ class JournalViewModel : ViewModel() {
                 _calendarState.value = CalendarMonthState(yearMonth, isLoading = false, mealTypesLoggedByDay = counts)
             } catch (e: Exception) {
                 // Calendar coloring is a nice-to-have, not core
-                // functionality -- on failure just show an empty (all
+                // functionality - on failure just show an empty (all
                 // gray) month rather than blocking the date picker
                 // itself from working.
                 _calendarState.value = CalendarMonthState(yearMonth, isLoading = false)
@@ -127,7 +127,7 @@ class JournalViewModel : ViewModel() {
 
     fun loadJournal(date: LocalDate) {
         // Only show the full-screen spinner when there's nothing to
-        // show yet (first load, or recovering from an error) -- day-to-
+        // show yet (first load, or recovering from an error) - day-to-
         // day navigation keeps the current content visible while the
         // new date's data comes in, rather than blanking the whole
         // screen to a spinner for a split second on every arrow tap.

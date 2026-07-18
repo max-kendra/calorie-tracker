@@ -10,13 +10,13 @@ import androidx.exifinterface.media.ExifInterface
 /**
  * Decodes the image at [uri] and rotates/flips it according to its
  * embedded EXIF orientation tag, if any. BitmapFactory.decodeStream() on
- * its own ignores that tag entirely -- camera JPEGs are typically saved
+ * its own ignores that tag entirely - camera JPEGs are typically saved
  * in the sensor's native (landscape) pixel layout with an EXIF tag
  * saying how to rotate for display, rather than physically rotating the
  * pixel data itself (cheaper for the camera to write). Skipping this
  * step is exactly why a photo taken with the phone held vertically kept
  * showing up sideways in the crop screen, needing a manual rotate every
- * time (see design discussion) -- it was never a bug in the crop/rotate
+ * time (see design discussion) - it was never a bug in the crop/rotate
  * logic itself, just a step nothing was doing at all.
  *
  * Used everywhere a picked/captured photo gets decoded before cropping
@@ -38,7 +38,7 @@ fun decodeBitmapWithCorrectOrientation(context: Context, uri: Uri): Bitmap? {
         } ?: ExifInterface.ORIENTATION_NORMAL
     } catch (e: Exception) {
         // Not every image has readable EXIF (some gallery picks,
-        // already-cropped/re-saved files) -- treat as "no rotation
+        // already-cropped/re-saved files) - treat as "no rotation
         // needed" rather than failing the whole decode over it.
         ExifInterface.ORIENTATION_NORMAL
     }
@@ -50,7 +50,7 @@ fun decodeBitmapWithCorrectOrientation(context: Context, uri: Uri): Bitmap? {
         ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
         ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
         ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-        // ORIENTATION_NORMAL or ORIENTATION_UNDEFINED -- nothing to do.
+        // ORIENTATION_NORMAL or ORIENTATION_UNDEFINED - nothing to do.
         else -> return bitmap
     }
 

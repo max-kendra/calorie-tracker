@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * A single small progress ring for one macro -- eaten/goal shown in the
+ * A single small progress ring for one macro - eaten/goal shown in the
  * center, colored per macro. Reused on the Journal screen's daily
  * summary panel and the Meal Detail screen's per-meal breakdown, so the
  * two screens look visually consistent (same rings, different scope of
@@ -38,7 +38,7 @@ fun MacroProgressRing(
             segments = listOf(fraction to color),
             diameter = diameter,
             strokeWidth = strokeWidth,
-            // Faded version of the SAME color, not a generic gray -- the
+            // Faded version of the SAME color, not a generic gray - the
             // unfilled track is a pale tint of the macro's own color, so
             // it visually "fills up" with a more vibrant version of
             // itself as eaten approaches goal, rather than the ring
@@ -79,7 +79,7 @@ fun MacroRingsRow(
     }
 }
 
-/** Single source of truth for macro colors -- matches the Macronutrients
+/** Single source of truth for macro colors - matches the Macronutrients
  * screen's palette, reused here so rings look consistent app-wide. */
 object MacroColors {
     val Fat = Color(0xFFE6B800)

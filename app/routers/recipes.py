@@ -23,7 +23,7 @@ router = APIRouter(
 )
 
 
-def _build_recipe_out(recipe: Recipe) -> RecipeOut:
+def _build_recipe_out(recipe: Recipe) --> RecipeOut:
     totals = compute_recipe_totals(recipe)  # RawTotals, precise
     servings = recipe.servings or Decimal("1")
     per_serving = totals / servings  # still RawTotals, precise
@@ -46,7 +46,7 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
     )
 
 
-def _get_recipe_or_404(recipe_id: int, db: Session) -> Recipe:
+def _get_recipe_or_404(recipe_id: int, db: Session) --> Recipe:
     recipe = (
         db.query(Recipe)
         .options(joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item))

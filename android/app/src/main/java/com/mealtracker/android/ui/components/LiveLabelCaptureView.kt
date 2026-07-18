@@ -14,13 +14,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 
 /**
- * Live in-app camera preview for capturing a nutrition label photo --
+ * Live in-app camera preview for capturing a nutrition label photo -
  * deliberately our OWN camera UI (CameraX Preview + ImageCapture bound
  * together) rather than launching the system camera app, so there's no
  * jarring app-switch transition when adding an item (see design doc).
  *
  * This component only binds the camera and hands the resulting
- * ImageCapture use case back via `onImageCaptureReady` -- the actual
+ * ImageCapture use case back via `onImageCaptureReady` - the actual
  * "take the photo" button lives in the calling screen (AddItemScreen),
  * which holds onto that ImageCapture reference and calls
  * `.takePicture(...)` on it directly when the user taps capture. This
@@ -62,7 +62,7 @@ fun LiveLabelCaptureView(
                     onImageCaptureReady(imageCapture)
                     onCameraReady(camera)
                 } catch (e: Exception) {
-                    // Camera unavailable/binding failed -- the preview
+                    // Camera unavailable/binding failed - the preview
                     // just won't show; permission is already checked
                     // before this Composable is shown.
                 }
@@ -71,7 +71,7 @@ fun LiveLabelCaptureView(
             previewView
         },
         onRelease = {
-            // Composable left composition (navigated away, disposed, etc.) --
+            // Composable left composition (navigated away, disposed, etc.) -
             // unbind so we don't leave a dangling camera session bound to a
             // PreviewView that's about to be destroyed.
             ProcessCameraProvider.getInstance(context).get().unbindAll()

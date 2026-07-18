@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Reached from the settings-gear icon on the main Profile screen. Every
- * goal-related setting each gets its own screen (see design discussion) --
+ * goal-related setting each gets its own screen (see design discussion) -
  * this is purely a navigation hub, no editable state of its own.
  */
 @Composable

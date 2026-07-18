@@ -313,7 +313,24 @@ fun AddItemScreen(
             return
         }
 
-        when (state.phase) {
+        // Wrapped in its own local composable function -- NOT just
+        // inlined here -- to work around a Kotlin K2 compiler crash
+        // ("PostponedLambdaExitNode not initialized - traversing nodes
+        // in wrong order?", a FIR flow-analysis internal error). This
+        // when expression has grown to 12+ branches, many containing
+        // their own lambda arguments (LaunchedEffect blocks, onClick
+        // handlers, etc.) -- that's a known trigger shape for this K2
+        // bug category: the frontend's control-flow analysis can choke
+        // on a single large expression with many nested lambdas. Giving
+        // it its own function body isolates that analysis without
+        // needing to pass every enclosing launcher/lambda (there are
+        // many: galleryPickerForProductPhoto, startCrop, etc.) as
+        // explicit parameters -- a LOCAL function still captures all of
+        // those by closure exactly as before; only the when expression
+        // itself is isolated, nothing about its logic changed.
+        @Composable
+        fun PhaseContent() {
+            when (state.phase) {
             AddItemPhase.SCAN_BARCODE -> {
                 LaunchedEffect(state.phase, state.scanError) {
                     delay(BARCODE_TIMEOUT_MS)
@@ -419,6 +436,8 @@ fun AddItemScreen(
                 onDone = onDone
             )
         }
+        }
+        PhaseContent()
     }
 
     // Rendered as a Box sibling AFTER the main Column above, so it

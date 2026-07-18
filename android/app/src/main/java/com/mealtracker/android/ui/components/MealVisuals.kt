@@ -17,7 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * construction rather than needing two copies of the same `when`
  * kept manually consistent.
  *
- * backgroundFor/iconTint are @Composable now (were plain functions) --
+ * backgroundFor/iconTint are @Composable now (were plain functions) -
  * dark mode uses darker, desaturated versions of the same hue rather
  * than the literal light-mode pastel, per design discussion ("the
  * pastel hero card colors do have to be a little different [in dark

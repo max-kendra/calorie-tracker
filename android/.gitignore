@@ -1,4 +1,4 @@
-# Contains your real API key and BASE_URL -- see local.properties.example
+# Contains your real API key and BASE_URL - see local.properties.example
 local.properties
 
 # Build outputs

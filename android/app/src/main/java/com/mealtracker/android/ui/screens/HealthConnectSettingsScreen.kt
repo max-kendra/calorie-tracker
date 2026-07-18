@@ -37,12 +37,12 @@ import kotlinx.coroutines.launch
 
 /**
  * Separate tab for both Health Connect toggles (weight import, nutrition
- * export) -- previously weight-import permission was only requestable
+ * export) - previously weight-import permission was only requestable
  * from the main Profile screen with no way to turn it back off, and
  * nutrition export didn't exist at all. Both permissions are still
  * requested TOGETHER in one combined prompt (same as onboarding's
  * HealthConnectOnboardingStep) if either toggle is turned on and that
- * permission hasn't been granted yet -- turning a toggle OFF here just
+ * permission hasn't been granted yet - turning a toggle OFF here just
  * flips the local preference (see HealthConnectPreferences), it does
  * NOT revoke the underlying OS permission, which the user can only do
  * from Android's own Health Connect app/settings.
@@ -53,13 +53,20 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
 
     var healthConnectAvailable by remember { mutableStateOf(true) }
-    var hasAllPermissions by remember { mutableStateOf(false) }
+    var hasWeightPermission by remember { mutableStateOf(false) }
+    var hasNutritionPermission by remember { mutableStateOf(false) }
     var weightImportEnabled by remember { mutableStateOf(HealthConnectPreferences.isWeightImportEnabled(context)) }
     var nutritionExportEnabled by remember { mutableStateOf(HealthConnectPreferences.isNutritionExportEnabled(context)) }
 
     suspend fun refreshPermissionState() {
         healthConnectAvailable = HealthConnectManager.isAvailable(context)
-        hasAllPermissions = healthConnectAvailable && HealthConnectManager.hasAllPermissions(context)
+        // Checked separately, not as one combined hasAllPermissions
+        // flag -- otherwise granting weight alone (e.g. before
+        // nutrition export existed) would make the weight toggle think
+        // it still needs permission just because nutrition hasn't been
+        // granted too, and vice versa.
+        hasWeightPermission = healthConnectAvailable && HealthConnectManager.hasWeightPermissions(context)
+        hasNutritionPermission = healthConnectAvailable && HealthConnectManager.hasNutritionPermission(context)
     }
 
     LaunchedEffect(Unit) { refreshPermissionState() }
@@ -106,7 +113,7 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
                 subtitle = "Show your weight history from Health Connect on your profile",
                 checked = weightImportEnabled,
                 onCheckedChange = { checked ->
-                    if (checked && !hasAllPermissions) {
+                    if (checked && !hasWeightPermission) {
                         permissionLauncher.launch(HealthConnectManager.PERMISSIONS)
                     } else {
                         weightImportEnabled = checked
@@ -121,7 +128,7 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
                 subtitle = "Send the meals you log here to Health Connect, one entry per meal",
                 checked = nutritionExportEnabled,
                 onCheckedChange = { checked ->
-                    if (checked && !hasAllPermissions) {
+                    if (checked && !hasNutritionPermission) {
                         permissionLauncher.launch(HealthConnectManager.PERMISSIONS)
                     } else {
                         nutritionExportEnabled = checked

@@ -18,13 +18,13 @@ python-dotenv = "^1.0.1"
 
 python-multipart = "^0.0.12"  # required for FastAPI file uploads (barcode scan endpoint)
 pyzbar = "^0.1.9"           # server-side barcode decoding (primary)
-zxing-cpp = "^2.2.0"        # server-side barcode decoding (fallback -- see app/barcode.py)
+zxing-cpp = "^2.2.0"        # server-side barcode decoding (fallback - see app/barcode.py)
 httpx = "^0.27.2"           # USDA FoodData Central API calls
-pillow = "^10.4.0"          # image downscaling before OCR (see app/ocr.py's run_ocr) -- was pulled in
+pillow = "^10.4.0"          # image downscaling before OCR (see app/ocr.py's run_ocr) - was pulled in
                              # transitively via easyocr before; pinned directly now that easyocr's gone
-pytesseract = "^0.3.13"     # OCR for nutrition labels -- back on this branch to compare against
+pytesseract = "^0.3.13"     # OCR for nutrition labels - back on this branch to compare against
                              # EasyOCR (see design discussion). Thin wrapper around the `tesseract`
-                             # CLI binary, which is installed via apt in the Dockerfile, NOT pip --
+                             # CLI binary, which is installed via apt in the Dockerfile, NOT pip -
                              # this package alone does nothing without that binary + its per-language
                              # traineddata files present on the system.
 

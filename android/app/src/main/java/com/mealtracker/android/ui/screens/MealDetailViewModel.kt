@@ -27,9 +27,9 @@ private val MEAL_DISPLAY_NAMES = mapOf(
     "snack" to "Snacks"
 )
 
-/** Which method the Add Item sheet is currently showing -- see
+/** Which method the Add Item sheet is currently showing - see
  * MealDetailScreen's sheetContent. Search and "Saved" merged into one
- * mode (SEARCH) per earlier design discussion -- both showed a search
+ * mode (SEARCH) per earlier design discussion - both showed a search
  * bar and a results list, the only difference was what populated that
  * list before you typed anything, so there's no reason for them to be
  * separate screens. The search bar in SEARCH mode shows recentItems
@@ -37,7 +37,7 @@ private val MEAL_DISPLAY_NAMES = mapOf(
  *
  * BARCODE now embeds the FULL AddItemScreen flow directly (camera scan
  * -> match/no-match -> product photo -> crop -> label -> form -> save),
- * not a separate simplified quick-scan -- that simplified version used
+ * not a separate simplified quick-scan - that simplified version used
  * to live here (onBarcodeScanned/onGalleryBarcodeResult/
  * barcodeNotFound, now removed) but was fully superseded once the whole
  * flow could be embedded inline (see design discussion: "we want it
@@ -46,45 +46,45 @@ enum class AddItemSheetMode { SEARCH, BARCODE }
 
 /**
  * Flat default for the sheet's "quick log" flows (tap a Saved/Search
- * result, or a barcode match) -- no quantity/serving picker yet, so
+ * result, or a barcode match) - no quantity/serving picker yet, so
  * every quick-logged item is recorded as exactly 100g (grams directly,
- * since no serving_size_id is sent -- see LoggableEntryBase's docstring
+ * since no serving_size_id is sent - see LoggableEntryBase's docstring
  * on the backend). This is a genuine simplification, not a smart
  * default: a "1 banana" item quick-logged this way will NOT come out to
  * one banana's worth of calories. Users can still get an accurate
  * amount via the full barcode/OCR flow (AddItemScreen), which asks for
- * real quantities -- revisit this once a quantity-picker step exists
+ * real quantities - revisit this once a quantity-picker step exists
  * for the quick-log paths too.
  */
 private const val QUICK_LOG_QUANTITY_G = 100.0
 
 // How long to wait after the last keystroke before actually firing a
-// search request -- see updateSearchQuery's doc comment.
+// search request - see updateSearchQuery's doc comment.
 private const val SEARCH_DEBOUNCE_MS = 350L
 
 // Same conversion AddItemViewModel uses (EU labels round salt = sodium
 // x 2.5). Kept as a separate constant here rather than sharing
 // AddItemViewModel's private one since these are two different files/
-// ViewModels -- see saveItemEdit()'s doc comment.
+// ViewModels - see saveItemEdit()'s doc comment.
 private const val SALT_TO_SODIUM_RATIO = 2.5
 
 /** "200" instead of "200.0" for whole numbers, but still shows real
- * decimals (e.g. "37.5") when the value actually has one -- used
+ * decimals (e.g. "37.5") when the value actually has one - used
  * anywhere a quantity gets shown/pre-filled as text, per design
- * discussion ("only show whole grams, not fractions"). Not private --
+ * discussion ("only show whole grams, not fractions"). Not private -
  * MealDetailScreen's logged-items row list uses it too. */
 fun formatQuantity(value: Double): String =
     if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
 
 /** Remembers what quantity/serving was last used to log a given item,
- * in-memory only (per app session, not persisted) -- backs both the
+ * in-memory only (per app session, not persisted) - backs both the
  * "X Cal, Yg" preview in the search list and what the "+" quick-add
  * button actually logs, so the two stay consistent with each other (see
  * design discussion: "we should display kcal and g that would be added
  * if the user pressed plus"). Falls back to 100g/no-serving the first
  * time an item is logged, same as the old flat QUICK_LOG_QUANTITY_G
  * default. */
-/** Which kind of thing the search tab is filtering to -- see
+/** Which kind of thing the search tab is filtering to - see
  * MealDetailUiState.searchFilter's doc comment for why RECIPE/MEAL take
  * a completely different query/results path than ALL/PRODUCT/
  * INGREDIENT. */
@@ -125,10 +125,10 @@ data class MealDetailUiState(
     val requestedUsdaSearchQuery: String? = null,
     // Entering the embedded AddItemScreen via "Search USDA" reuses the
     // BARCODE sheetMode slot to render it (see that mode's doc comment)
-    // -- but that made the Barcode icon incorrectly look "selected" even
+    // - but that made the Barcode icon incorrectly look "selected" even
     // though the user came from Search, not by tapping Barcode
     // themselves (see design discussion). This tracks that distinction
-    // separately, for icon highlighting ONLY -- content rendering still
+    // separately, for icon highlighting ONLY - content rendering still
     // goes purely off sheetMode.
     val enteredAddFlowViaUsdaLink: Boolean = false,
     val recentItems: List<Item> = emptyList(),
@@ -136,7 +136,7 @@ data class MealDetailUiState(
     val searchQuery: String = "",
     val searchResults: List<Item> = emptyList(),
     val isSearching: Boolean = false,
-    // Filter chips above the search results -- ALL/PRODUCT/INGREDIENT
+    // Filter chips above the search results - ALL/PRODUCT/INGREDIENT
     // search Items (with an optional type= param); RECIPE/MEAL search
     // Recipes instead (recipe_type= param), a completely different
     // result list/quick-log path since Recipes don't have per-100g
@@ -151,7 +151,7 @@ data class MealDetailUiState(
     // the UI can show a per-row spinner instead of a global one.
     val quickLoggingItemId: Int? = null,
     val quickLogError: String? = null,
-    // Log detail/edit sheet -- fallback for RECIPE-based logs only (see
+    // Log detail/edit sheet - fallback for RECIPE-based logs only (see
     // openLogDetail's doc comment for why item-based logs go through
     // itemToLog/ItemLogPageDialog instead, same screen as logging a new
     // item).
@@ -160,7 +160,7 @@ data class MealDetailUiState(
     val isSavingLogEdit: Boolean = false,
     val logEditError: String? = null,
 
-    // Opens ItemLogPageDialog -- used for BOTH logging a new item
+    // Opens ItemLogPageDialog - used for BOTH logging a new item
     // (tapping a search result) AND editing an already-logged item
     // (tapping a row in "Logged items"), same screen either way. Which
     // mode it's in is just whether editingLogId is set.
@@ -171,14 +171,14 @@ data class MealDetailUiState(
     val logQuantityInput: String = "1",
     // null = raw grams; otherwise the chosen ServingSize's id. The
     // dropdown always has "g" as an option alongside whatever named
-    // servings the item has (see ServingSize.name -- e.g. "slice").
+    // servings the item has (see ServingSize.name - e.g. "slice").
     val logServingSizeId: Int? = null,
     val isLoggingItem: Boolean = false,
     val logItemError: String? = null,
     // See LoggedAmount's doc comment.
     val lastLoggedAmounts: Map<Int, LoggedAmount> = emptyMap(),
 
-    // "Create new serving" -- reached from the unit/serving dropdown on
+    // "Create new serving" - reached from the unit/serving dropdown on
     // the item log page. Nested under itemToLog (only relevant while
     // that page is open).
     val showCreateServingDialog: Boolean = false,
@@ -187,7 +187,7 @@ data class MealDetailUiState(
     val isCreatingServing: Boolean = false,
     val createServingError: String? = null,
 
-    // Edit (pencil) button on the item info page -- name + macros only.
+    // Edit (pencil) button on the item info page - name + macros only.
     // Nested under itemToLog same as the serving-creation state above.
     val showEditItemDialog: Boolean = false,
     val editItemName: String = "",
@@ -198,7 +198,7 @@ data class MealDetailUiState(
     val editItemFiber: String = "",
     val editItemSugar: String = "",
     val editItemSaturatedFat: String = "",
-    // Grams, not mg -- same reasoning as AddItemViewModel's saltG100g
+    // Grams, not mg - same reasoning as AddItemViewModel's saltG100g
     // (food labels show salt, not sodium; converted at the boundary,
     // see saveItemEdit()).
     val editItemSaltG: String = "",
@@ -209,7 +209,7 @@ data class MealDetailUiState(
 /**
  * Fetches independently from JournalViewModel (its own /logs +
  * /goals/active calls, scoped to just this one meal/date) rather than
- * receiving data passed through navigation -- simpler than threading
+ * receiving data passed through navigation - simpler than threading
  * complex state through nav arguments, and keeps this screen's data
  * fresh if the user navigates back and forth.
  */
@@ -220,11 +220,11 @@ class MealDetailViewModel : ViewModel() {
 
     /** Called after something gets ADDED to this meal (quick-add, the
      * quantity picker's confirm, a recipe/meal, or finishing the
-     * embedded AddItemScreen flow) -- resets the search box and
+     * embedded AddItemScreen flow) - resets the search box and
      * refetches "recent" so the just-added/just-updated item shows up
      * there too (recent items are ordered by updated_at server-side).
      * Previously the search query/results were deliberately preserved
-     * across a plain load() (see that function's own doc comment) --
+     * across a plain load() (see that function's own doc comment) -
      * that's still correct for load() itself, but specifically after an
      * ADD, per design discussion, the search field should reset and
      * "recent" should reflect the new item, not just stay stale. */
@@ -239,14 +239,14 @@ class MealDetailViewModel : ViewModel() {
 
     fun load(date: LocalDate, mealType: String) {
         // Preserves sheet state (mode, search query/results, recent
-        // items) across this reset -- logItemQuickly() calls load()
+        // items) across this reset - logItemQuickly() calls load()
         // again afterward just to refresh totals/logs, and resetting the
         // whole state back to MealDetailUiState() defaults there would
         // jarringly snap the sheet back to its initial mode/empty state
         // every time someone logs something.
         //
         // isLoading only flips to true when there's nothing on screen
-        // yet (first load, or recovering from an error) -- otherwise
+        // yet (first load, or recovering from an error) - otherwise
         // adding/removing/editing an item would blank the whole screen
         // to a spinner for a split second on every single change, since
         // this function gets called again after each of those to
@@ -293,11 +293,11 @@ class MealDetailViewModel : ViewModel() {
         loadRecentItems()
     }
 
-    // ----- Add Item sheet -----
+    // --- Add Item sheet ---
 
     fun setSheetMode(mode: AddItemSheetMode) {
         // A deliberate tap on either icon means the user is explicitly
-        // choosing that mode -- clears the "came from the USDA link"
+        // choosing that mode - clears the "came from the USDA link"
         // distinction so Barcode's highlight goes back to reflecting
         // sheetMode normally (see enteredAddFlowViaUsdaLink's doc
         // comment).
@@ -305,7 +305,7 @@ class MealDetailViewModel : ViewModel() {
     }
 
     /** "Can't find it? Search USDA" link at the bottom of the text
-     * Search tab -- switches to the embedded add-item flow (BARCODE
+     * Search tab - switches to the embedded add-item flow (BARCODE
      * mode/AddItemScreen) and requests it jump straight to USDA_SEARCH
      * rather than starting at SCAN_BARCODE. See design discussion:
      * USDA lookup should be reachable ONLY from text search, not
@@ -326,26 +326,26 @@ class MealDetailViewModel : ViewModel() {
 
     /** "Recent" here means recently added/updated in the catalog (GET
      * /items with no query is already ordered by updated_at desc
-     * server-side -- see design discussion), NOT recently logged. Was
+     * server-side - see design discussion), NOT recently logged. Was
      * previously /logs/recent-items (recency of LOGGING); switched
      * because the search tab is about finding an item to log, and what
      * you just created/edited is more relevant there than what you
      * happened to eat most recently. */
     /** "Recent" here means recently added/updated in the catalog (GET
      * /items with no query is already ordered by updated_at desc
-     * server-side -- see design discussion), NOT recently logged. Loads
+     * server-side - see design discussion), NOT recently logged. Loads
      * BOTH items and recipes up front (cheap, both lists are small/
      * capped) so switching filters doesn't need a fresh network call
      * just to show the blank-query state. */
     /** "Recent" here means recently added/updated in the catalog (GET
      * /items with no query is already ordered by updated_at desc
-     * server-side -- see design discussion), NOT recently logged. Now
-     * respects the current filter (type=/recipe_type=) -- it used to
+     * server-side - see design discussion), NOT recently logged. Now
+     * respects the current filter (type=/recipe_type=) - it used to
      * always fetch everything regardless of which filter chip was
      * selected, which is why switching filters while the search box was
      * blank appeared to do nothing (see design discussion: "if I have a
      * list with products and ingredients and select ingredient,
-     * everything stays the same" -- that's this blank-query "recent"
+     * everything stays the same" - that's this blank-query "recent"
      * state specifically, non-blank search already filtered correctly). */
     private fun loadRecentItems() {
         val filter = _uiState.value.searchFilter
@@ -357,7 +357,7 @@ class MealDetailViewModel : ViewModel() {
                     val recipes = ApiClient.service.searchRecipes(query = null, recipeType = recipeType)
                     _uiState.value = _uiState.value.copy(recentRecipes = recipes)
                 } catch (e: Exception) {
-                    // Not core functionality -- fails quietly.
+                    // Not core functionality - fails quietly.
                 }
             }
             return
@@ -374,7 +374,7 @@ class MealDetailViewModel : ViewModel() {
                 val items = ApiClient.service.searchItems(query = null, type = itemType)
                 _uiState.value = _uiState.value.copy(isLoadingRecentItems = false, recentItems = items)
             } catch (e: Exception) {
-                // Not core functionality -- fails quietly to an empty
+                // Not core functionality - fails quietly to an empty
                 // list rather than blocking the sheet from working.
                 _uiState.value = _uiState.value.copy(isLoadingRecentItems = false)
             }
@@ -386,7 +386,7 @@ class MealDetailViewModel : ViewModel() {
      * RECIPES instead via recipe_type=, a completely different
      * endpoint/result list (see MealDetailUiState.searchFilter's doc
      * comment). Re-runs whatever query is currently typed against the
-     * newly-selected filter -- or, if the query is blank, refetches
+     * newly-selected filter - or, if the query is blank, refetches
      * "recent" instead (loadRecentItems is filter-aware now too, see
      * its own doc comment for why that refetch didn't used to happen
      * at all). */
@@ -399,13 +399,13 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    // Cancelled and relaunched on every keystroke -- see updateSearchQuery's
+    // Cancelled and relaunched on every keystroke - see updateSearchQuery's
     // debounce below.
     private var searchJob: Job? = null
 
-    /** Debounced now -- previously fired a request on EVERY keystroke
+    /** Debounced now - previously fired a request on EVERY keystroke
      * (see design discussion: "we send a request every single stroke",
-     * observed hammering USDA search this way too -- see
+     * observed hammering USDA search this way too - see
      * AddItemViewModel.updateUsdaQuery for that side). Cancels any
      * still-pending search and waits SEARCH_DEBOUNCE_MS of no further
      * typing before actually querying, same debounce pattern in both
@@ -459,7 +459,7 @@ class MealDetailViewModel : ViewModel() {
             try {
                 val results = ApiClient.service.searchItems(query = query, type = itemType)
                 // Guard against a slower earlier search response landing
-                // after a newer one -- only apply if the query is still
+                // after a newer one - only apply if the query is still
                 // current.
                 if (_uiState.value.searchQuery == query) {
                     _uiState.value = _uiState.value.copy(isSearching = false, searchResults = results)
@@ -472,15 +472,15 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    /** Recipes/meals log by recipe_id with a flat 1-serving default --
+    /** Recipes/meals log by recipe_id with a flat 1-serving default -
      * same "quick add, not precise" tradeoff as logItemQuickly's flat
      * 100g for items (see QUICK_LOG_QUANTITY_G's doc comment). Recipe
      * quantity semantics are "number of servings consumed", so 1 here
      * means one full recipe serving, not "the whole recipe". */
     /** Recipes log atomically (one log entry referencing recipe_id, flat
-     * 1-serving default -- same "quick add, not precise" tradeoff as
+     * 1-serving default - same "quick add, not precise" tradeoff as
      * logItemQuickly's flat 100g). Meals expand into one log PER
-     * INGREDIENT instead (see LogFromMealRequest's doc comment) -- each
+     * INGREDIENT instead (see LogFromMealRequest's doc comment) - each
      * lands individually editable/removable, which is the whole
      * functional distinction between the two (see design discussion). */
     fun logRecipeQuickly(recipe: Recipe) {
@@ -521,11 +521,11 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    /** Tap-to-log from Saved or Search results -- see QUICK_LOG_QUANTITY_G
+    /** Tap-to-log from Saved or Search results - see QUICK_LOG_QUANTITY_G
      * for the flat-100g simplification this currently uses. */
     /** Uses whatever quantity/serving was last used for THIS item (see
      * LoggedAmount), defaulting to 100g the first time. This is what the
-     * "+" button in the search list actually logs -- kept consistent
+     * "+" button in the search list actually logs - kept consistent
      * with the preview text shown next to it (see ItemResultsList). */
     fun logItemQuickly(itemId: Int) {
         val state = _uiState.value
@@ -555,7 +555,7 @@ class MealDetailViewModel : ViewModel() {
                 )
                 // Refresh this meal's totals/logs, reset search, and
                 // refetch recent items (this item just became the most
-                // recent) -- see refreshSearchAfterAdd's doc comment.
+                // recent) - see refreshSearchAfterAdd's doc comment.
                 load(date, state.mealType)
                 refreshSearchAfterAdd()
             } catch (e: Exception) {
@@ -567,12 +567,12 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    // ----- Quantity/serving picker (tapping a search result, not its "+") -----
+    // --- Quantity/serving picker (tapping a search result, not its "+") ---
 
     /** Called after ItemLogPageDialog's long-press image-change flow
      * (retake/gallery + crop + upload) succeeds. Swaps in the updated
      * Item so the open dialog's hero image refreshes immediately, AND
-     * reloads the meal -- without that reload, the change genuinely did
+     * reloads the meal - without that reload, the change genuinely did
      * save (PATCH /items/{id} succeeded), but the "Logged items" list's
      * thumbnails are denormalized onto each Log at fetch time and
      * wouldn't pick up the new image_path until the next unrelated
@@ -607,13 +607,13 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(logServingSizeId = servingSizeId)
     }
 
-    /** Confirms ItemLogPageDialog -- POSTs a new log, or PATCHes an
+    /** Confirms ItemLogPageDialog - POSTs a new log, or PATCHes an
      * existing one if editingLogId is set (see that field's doc
      * comment). Either way, unlike logItemQuickly's flat 100g, this
      * sends whatever quantity+unit the user actually chose. With a
      * serving selected, quantity is a MULTIPLIER of that serving's
      * weight_g (e.g. serving="slice" @ 37.5g, quantity=2 -> the backend
-     * computes 75g worth of macros) -- see LoggableEntryBase's
+     * computes 75g worth of macros) - see LoggableEntryBase's
      * quantity-semantics doc comment on the backend for why this isn't
      * grams in that case. */
     fun confirmLogItemQuantity() {
@@ -654,7 +654,7 @@ class MealDetailViewModel : ViewModel() {
                         (item.itemId to LoggedAmount(quantity, state.logServingSizeId))
                 )
                 load(date, state.mealType)
-                // Only for the new-log case -- editing an existing log's
+                // Only for the new-log case - editing an existing log's
                 // quantity isn't "adding" (see refreshSearchAfterAdd's
                 // doc comment).
                 if (editingLogId == null) refreshSearchAfterAdd()
@@ -667,7 +667,7 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    // ----- Create new serving (from the item log page's unit dropdown) -----
+    // --- Create new serving (from the item log page's unit dropdown) ---
 
     fun openCreateServingDialog() {
         _uiState.value = _uiState.value.copy(
@@ -692,7 +692,7 @@ class MealDetailViewModel : ViewModel() {
 
     /** Creates the serving, then updates itemToLog with the returned
      * Item (which includes the new serving in serving_sizes) and
-     * selects it -- so the log page's dropdown immediately reflects it
+     * selects it - so the log page's dropdown immediately reflects it
      * without a separate reload. */
     fun createNewServing() {
         val state = _uiState.value
@@ -728,7 +728,7 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    // ----- Edit item (pencil button on the item info page) -----
+    // --- Edit item (pencil button on the item info page) ---
 
     fun openEditItemDialog() {
         val item = _uiState.value.itemToLog ?: return
@@ -742,7 +742,7 @@ class MealDetailViewModel : ViewModel() {
             editItemFiber = item.fiber100g ?: "",
             editItemSugar = item.sugar100g ?: "",
             editItemSaturatedFat = item.saturatedFat100g ?: "",
-            // Item stores sodium (mg) -- show as salt (g), same
+            // Item stores sodium (mg) - show as salt (g), same
             // conversion/reasoning as AddItemViewModel's form.
             editItemSaltG = item.sodiumMg100g?.toDoubleOrNull()
                 ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: "",
@@ -810,17 +810,17 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    // ----- Log detail / edit / delete -----
+    // --- Log detail / edit / delete ---
 
     /** Item-based logs open the SAME page used to log a new item
-     * (ItemLogPageDialog) -- fetches the full Item (Log itself only has
+     * (ItemLogPageDialog) - fetches the full Item (Log itself only has
      * denormalized name/image, not per-100g macros or serving_sizes)
      * and pre-fills quantity/serving from what's already saved on the
      * log, with editingLogId set so confirming PATCHes instead of
      * POSTing a new one.
      *
      * Recipe-based logs (log.itemId == null) fall back to the simpler
-     * selectedLog/AlertDialog flow below -- recipes don't have
+     * selectedLog/AlertDialog flow below - recipes don't have
      * per-100g macros or serving sizes the same way items do, so the
      * unified page doesn't apply to them. Not extended to cover recipes
      * in this pass. */
@@ -887,7 +887,7 @@ class MealDetailViewModel : ViewModel() {
     }
 
     /** Used both by the detail sheet's Delete button AND by swiping a
-     * row left in the logged-items list -- same action either way. */
+     * row left in the logged-items list - same action either way. */
     fun deleteLog(logId: Int) {
         val state = _uiState.value
         val date = state.date ?: return
@@ -922,11 +922,11 @@ class MealDetailViewModel : ViewModel() {
      * recipe with servings=1, editable afterward like any recipe).
      *
      * LIMITATION: only logs that reference a real item AND were logged
-     * directly in grams (no serving_size_id) are included -- converting
+     * directly in grams (no serving_size_id) are included - converting
      * a serving-size-based quantity to grams needs an extra lookup
      * (the ServingSize's weight_g) that isn't fetched here. Recipe-based
      * logs are also skipped, since recipe_ingredients can only reference
-     * items, not other recipes. Both are real gaps, not silent bugs --
+     * items, not other recipes. Both are real gaps, not silent bugs -
      * worth fixing if this turns out to matter in practice once logging
      * itself is built (this screen currently has no way to create logs
      * yet, so `logs` will typically be empty regardless).

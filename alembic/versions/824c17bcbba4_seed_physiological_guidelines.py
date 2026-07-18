@@ -6,7 +6,7 @@ Create Date: 2026-07-12 15:39:29.822117
 
 Seeds population-level reference ranges for the macros we track, used
 by the (future) warning system that compares an active GOAL against
-these ranges -- not the daily log directly (see design doc: avoids false
+these ranges - not the daily log directly (see design doc: avoids false
 warnings on days the user simply ate less than their goal).
 
 Sources (checked against current guidance, not just recalled from
@@ -14,11 +14,11 @@ training data):
   - 2025-2030 Dietary Guidelines for Americans (protein, saturated fat,
     added sugar, fiber, sodium upper limit)
   - WHO guidance (added sugar conditional recommendation, sodium)
-  - U.S./Canadian Dietary Reference Intakes -- Acceptable Macronutrient
+  - U.S./Canadian Dietary Reference Intakes - Acceptable Macronutrient
     Distribution Range, AMDR (fat and carbohydrate as % of calories)
   - Institute of Medicine adequate-intake benchmark (fiber per 1000 kcal)
 
-These are POPULATION-LEVEL reference ranges, not personalized advice --
+These are POPULATION-LEVEL reference ranges, not personalized advice -
 they're a sanity-check backdrop for a user's own goals, not a substitute
 for professional guidance. Adding a unique constraint on `name` since
 this table should have exactly one row per guideline; also makes this
@@ -139,14 +139,14 @@ GUIDELINES = [
 ]
 
 
-def upgrade() -> None:
+def upgrade() --> None:
     op.create_unique_constraint(
         "uq_physiological_guidelines_name", "physiological_guidelines", ["name"]
     )
     op.bulk_insert(guidelines_table, GUIDELINES)
 
 
-def downgrade() -> None:
+def downgrade() --> None:
     op.execute(
         "DELETE FROM physiological_guidelines WHERE name IN ("
         + ",".join(f"'{g['name']}'" for g in GUIDELINES)

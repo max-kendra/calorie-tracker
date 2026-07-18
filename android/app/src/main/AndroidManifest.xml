@@ -21,10 +21,10 @@
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
 
     <!-- Write access for exporting logged meals as NutritionRecord
-         entries (see design discussion, HealthConnectManager.
-         writeMealNutrition/deleteMealNutrition) -- unlike weight, this
-         app IS a source of nutrition data, so a write permission is
-         genuinely needed here, not just read. -->
+         entries (see HealthConnectManager.writeMealNutrition /
+         deleteMealNutrition). Unlike weight, this app IS a source of
+         nutrition data, so a write permission is genuinely needed here,
+         not just read. -->
     <uses-permission android:name="android.permission.health.WRITE_NUTRITION" />
 
     <!-- Makes the Health Connect app visible to package-visibility

@@ -69,7 +69,7 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 // Macro card collapses between these two heights (never all the way to
-// 0) -- below MIN it would clip the compact bar view too, and the
+// 0) - below MIN it would clip the compact bar view too, and the
 // point of the bar view is that it stays visible while collapsed, not
 // that it also disappears.
 private val MACRO_CARD_MAX_HEIGHT = 150.dp
@@ -81,12 +81,12 @@ private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containe
  * Journal screen. Layout, top to bottom:
  *   - pastel hero (status bar tinted to match): kcal ring (pinned,
  *     never collapses) + macro card (collapses on scroll between rings
- *     and a compact bar view -- see MacroBarsRow). Both live inside a
- *     bounded, non-scrolling pastel Box -- NOT the whole screen, so
+ *     and a compact bar view - see MacroBarsRow). Both live inside a
+ *     bounded, non-scrolling pastel Box - NOT the whole screen, so
  *     there's nothing pastel left over below the meal list.
  *   - meal list: a plain white Card, full-bleed (no side margins,
  *     rounded top corners only), independently scrollable, no dividers
- *     between rows -- sits directly on the app's default white
+ *     between rows - sits directly on the app's default white
  *     background so it visually merges into the bottom nav bar with no
  *     visible seam.
  */
@@ -101,7 +101,7 @@ fun JournalScreen(
     var pickerMonth by remember { mutableStateOf(YearMonth.now()) }
 
     // Reload whenever this screen comes back into view (e.g. returning
-    // from Meal Detail after logging something) -- previously this only
+    // from Meal Detail after logging something) - previously this only
     // ever loaded once via JournalViewModel's init{}, so anything logged
     // elsewhere never showed up here until a manual date-nav tap forced
     // a reload. loadJournal() itself already avoids a full-screen
@@ -172,7 +172,7 @@ fun JournalScreen(
         }
         is JournalUiState.Success -> {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Bounded pastel region -- kcal ring + macro card ONLY.
+                // Bounded pastel region - kcal ring + macro card ONLY.
                 // Deliberately not fillMaxSize/weight(1f): its height is
                 // just "however tall its content is", so nothing pastel
                 // is left over below the meal list.
@@ -183,7 +183,7 @@ fun JournalScreen(
                 ) {
                     // The pastel background itself extends all the way
                     // to y=0 (this Column has no top padding/inset
-                    // handling) -- this spacer just pushes the readable
+                    // handling) - this spacer just pushes the readable
                     // content (kcal ring etc.) down below the status bar
                     // icons, without clipping the color itself. See
                     // AppNavHost's edgeToEdgeStatusBarRoutes for why this
@@ -255,7 +255,7 @@ fun JournalScreen(
 
                             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
-                            // No dividers between rows per design discussion --
+                            // No dividers between rows per design discussion -
                             // MealRow's own internal padding provides the
                             // separation instead.
                             state.buckets.forEach { bucket ->
@@ -333,7 +333,7 @@ private fun KcalHeroSection(totals: DailyTotals) {
     }
 }
 
-/** Compact collapsed-state stand-in for MacroRingsRow -- thin rounded
+/** Compact collapsed-state stand-in for MacroRingsRow - thin rounded
  * bars, filled-portion only (no numbers), label below each. Shown
  * crossfaded with the rings as the macro card collapses (see
  * JournalScreen's ringFraction). */
@@ -379,7 +379,7 @@ private fun MacroBar(label: String, eaten: Int, goal: Int, color: Color, modifie
 /**
  * Stylized date bar: arrows in circular pill buttons, date itself in a
  * rounded-rect pill a shade darker than the white card behind it (using
- * surfaceVariant -- subtle, not a stark/high-contrast block), with a
+ * surfaceVariant - subtle, not a stark/high-contrast block), with a
  * small calendar glyph for decoration. Tapping the date pill opens
  * CalendarPickerDialog.
  */
@@ -484,7 +484,7 @@ private fun LoggedItemLine(log: Log) {
 }
 
 /** "#gF \u2022 #gP \u2022 #gC \u2022 #gFi", each number+letter colored to
- * match its ring in MacroRingsRow/MacroColors -- a quick per-item macro
+ * match its ring in MacroRingsRow/MacroColors - a quick per-item macro
  * breakdown without needing to open the item. */
 private fun macroShortcut(log: Log) = buildAnnotatedString {
     withStyle(SpanStyle(color = MacroColors.Fat)) { append("${log.fatGLogged}F") }

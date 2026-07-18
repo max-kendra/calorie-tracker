@@ -51,7 +51,7 @@ fun ProfileScreen(
         HealthConnectManager.requestPermissionsContract()
     ) { granted ->
         // Needed now that refreshHealthConnectState also checks the
-        // weight-import toggle (see that function's doc comment) --
+        // weight-import toggle (see that function's doc comment) -
         // without this, granting permission via this button wouldn't
         // actually turn weight import on, since the toggle defaults to
         // off until explicitly set somewhere.
@@ -83,7 +83,7 @@ fun ProfileScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        // ----- Header: avatar + name + settings -----
+        // --- Header: avatar + name + settings ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -114,7 +114,7 @@ fun ProfileScreen(
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-        // ----- Weight goal summary -----
+        // --- Weight goal summary ---
         WeightGoalSummary(
             startingWeightKg = state.startingWeightKg,
             currentWeightKg = state.currentWeightKg,
@@ -123,7 +123,7 @@ fun ProfileScreen(
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 
-        // ----- Health Connect gating -----
+        // --- Health Connect gating ---
         when {
             !state.healthConnectAvailable -> {
                 Text(
@@ -148,7 +148,7 @@ fun ProfileScreen(
                 }
             }
             else -> {
-                // ----- Range selector -----
+                // --- Range selector ---
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -188,9 +188,9 @@ fun ProfileScreen(
                 Text("Weights saved", style = MaterialTheme.typography.titleMedium)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
-                if (state.weightHistory.isEmpty()) {
+                if (state.allWeightHistory.isEmpty()) {
                     Text(
-                        "No weight entries in this range.",
+                        "No weight entries yet.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -198,7 +198,7 @@ fun ProfileScreen(
                     val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
                     // Most recent first for the list (readWeightHistory
                     // returns oldest-first, which is what the chart wants).
-                    state.weightHistory.sortedByDescending { it.time }.forEach { entry ->
+                    state.allWeightHistory.sortedByDescending { it.time }.forEach { entry ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -275,7 +275,7 @@ private fun WeightStat(label: String, kg: Double?) {
 
 private fun formatKg(kg: Double): String {
     // One decimal place, trimmed to a whole number when exact (e.g.
-    // "88" instead of "88.0") -- matches how the design inspiration
+    // "88" instead of "88.0") - matches how the design inspiration
     // displays weights.
     val rounded = (kg * 10).roundToInt() / 10.0
     return if (rounded == rounded.toInt().toDouble()) rounded.toInt().toString() else rounded.toString()

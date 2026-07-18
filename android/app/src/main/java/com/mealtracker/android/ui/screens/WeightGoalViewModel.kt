@@ -20,7 +20,7 @@ data class WeightGoalUiState(
 
 /**
  * Purely the two fixed reference points shown in the Profile screen's
- * weight-goal summary -- see UserProfile model docstring (backend) for
+ * weight-goal summary - see UserProfile model docstring (backend) for
  * why these are stored values, unlike "current weight" which always
  * comes live from Health Connect.
  */

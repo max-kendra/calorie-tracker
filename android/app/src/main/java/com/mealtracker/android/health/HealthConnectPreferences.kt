@@ -4,13 +4,13 @@ import android.content.Context
 
 /**
  * Whether weight-import and nutrition-export are actually turned ON,
- * SEPARATELY from whether Health Connect permission has been granted --
+ * SEPARATELY from whether Health Connect permission has been granted -
  * granting access and wanting a feature enabled are different
  * decisions (see design discussion: both permissions get requested
  * together at onboarding, but a user might still want only one of the
  * two features actually active).
  *
- * Plain SharedPreferences rather than a backend-synced setting -- this
+ * Plain SharedPreferences rather than a backend-synced setting - this
  * is inherently a per-device decision (Health Connect itself is
  * per-device, not account-synced), so there's no real benefit to
  * syncing it across devices even if this app's other settings do sync.

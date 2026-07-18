@@ -70,7 +70,7 @@ fun WeightGoalScreen(
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
         Text(
-            "Your current weight is read from Health Connect automatically -- these two " +
+            "Your current weight is read from Health Connect automatically - these two " +
                 "values are just fixed reference points for the progress summary on your " +
                 "profile.",
             style = MaterialTheme.typography.bodySmall,

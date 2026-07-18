@@ -43,14 +43,14 @@ class Item(Base):
     carbs_100g = Column(Numeric, nullable=True)
     fat_100g = Column(Numeric, nullable=True)
     fiber_100g = Column(Numeric, nullable=True)
-    # Tracked for daily/weekly summaries only -- deliberately NOT surfaced
+    # Tracked for daily/weekly summaries only - deliberately NOT surfaced
     # in the compact per-item/meal/recipe nutrition displays (NutritionTotals),
     # to avoid crowding the main tracker UI. See ExtendedNutritionTotals.
     sugar_100g = Column(Numeric, nullable=True)
     saturated_fat_100g = Column(Numeric, nullable=True)
     # Canonical unit is mg per 100g (matches USDA FoodData Central and
     # gives sensible precision for small amounts). EU labels show "salt"
-    # in grams instead of sodium -- conversion is salt(g) = sodium(g) x
+    # in grams instead of sodium - conversion is salt(g) = sodium(g) x
     # 2.5, so sodium_mg_100g = salt_g_100g x 400. Handle that conversion
     # at data-entry time in the UI (e.g. an "enter as salt" toggle); not
     # done in the API.
@@ -77,7 +77,7 @@ class Item(Base):
 
 class ServingSize(Base):
     """
-    An item's list of named serving sizes (e.g. "slice" -> 37.5g).
+    An item's list of named serving sizes (e.g. "slice" --> 37.5g).
     Modeled as a child table rather than an array column so it stays
     queryable/joinable normally.
     """
@@ -190,7 +190,7 @@ class Log(Base):
     carbs_g_logged = Column(Numeric, nullable=False)
     fat_g_logged = Column(Numeric, nullable=False)
     fiber_g_logged = Column(Numeric, nullable=False)
-    # Same snapshot-at-write-time integrity rule as the other macros --
+    # Same snapshot-at-write-time integrity rule as the other macros -
     # frozen even if the source item is edited later. Not exposed in the
     # per-log API response (LogOut) to avoid crowding the tracker UI, but
     # summed for daily/weekly summaries (ExtendedNutritionTotals).
@@ -319,7 +319,7 @@ class PhysiologicalGuideline(Base):
 class UserProfile(Base):
     """
     NOTE: bodyweight is a manual stopgap here (weight_kg) until Health
-    Connect integration is built on the Android side -- at that point,
+    Connect integration is built on the Android side - at that point,
     this field should be treated as a fallback/cache, with Health
     Connect's latest reading preferred when available (see design doc's
     original intent for bodyweight sourcing).
@@ -332,13 +332,13 @@ class UserProfile(Base):
     profile_pic_path = Column(String, nullable=True)
     height_cm = Column(Integer, nullable=True)
     age = Column(Integer, nullable=True)
-    # Manual stopgap -- see class docstring. Nullable since not every
+    # Manual stopgap - see class docstring. Nullable since not every
     # user will have entered it yet, especially before this existed.
     weight_kg = Column(Numeric, nullable=True)
-    # Weight goal -- purely user-entered reference points for the
-    # Profile screen's "start -> current -> goal" summary and the weight
+    # Weight goal - purely user-entered reference points for the
+    # Profile screen's "start --> current --> goal" summary and the weight
     # graph's goal line. Unlike weight_kg above, these are NOT meant to
-    # be superseded by Health Connect -- "starting weight" in particular
+    # be superseded by Health Connect - "starting weight" in particular
     # is inherently a fixed historical value (whatever it was when the
     # user set this goal), not a live reading. current weight for that
     # same summary comes from Health Connect at read time, not from a
@@ -351,7 +351,7 @@ class UserProfile(Base):
     # removed, but no profile actually had it set at removal time.
     primary_hormone = Column(String, nullable=True)
     activity_level = Column(String, nullable=True)
-    # 'lose' | 'maintain' | 'gain' -- drives the kcal goal calculation
+    # 'lose' | 'maintain' | 'gain' - drives the kcal goal calculation
     # (see routers/user_profile.py). Stored on the profile since it's a
     # standing orientation, not a one-off calculation parameter.
     goal_type = Column(String, nullable=True)

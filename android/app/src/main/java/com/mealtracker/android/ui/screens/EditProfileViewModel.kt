@@ -28,7 +28,7 @@ data class EditProfileUiState(
 
 /**
  * Just the identity/body-basics fields (name, height, age, dominant
- * hormone) -- weight, activity level, and goal type live on
+ * hormone) - weight, activity level, and goal type live on
  * CalorieGoalViewModel instead, since they're specifically TDEE-
  * calculation inputs rather than general profile info (see design
  * discussion: "calorie goal, that's where the TDEE calculation should

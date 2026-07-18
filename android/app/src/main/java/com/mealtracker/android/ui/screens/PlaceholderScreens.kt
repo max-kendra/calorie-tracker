@@ -9,7 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
 /**
- * Remaining placeholder bottom-nav destination -- Journal, Profile,
+ * Remaining placeholder bottom-nav destination - Journal, Profile,
  * Macronutrients, and Meal Calorie Goal all have real implementations
  * now. Meal Plan is next.
  */

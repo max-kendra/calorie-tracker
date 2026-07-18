@@ -21,24 +21,24 @@ import java.time.format.DateTimeFormatter
 
 // Flat default for logging whatever comes out of this flow (a newly
 // created item, or an existing one picked via barcode match) straight
-// to a meal -- no quantity/serving picker here yet, same simplification
+// to a meal - no quantity/serving picker here yet, same simplification
 // as MealDetailViewModel's QUICK_LOG_QUANTITY_G, and for the same
 // reason: this is a fast-path convenience, not a substitute for
 // accurate quantity entry. Revisit once a quantity step exists.
 private const val MEAL_LOG_QUANTITY_G = 100.0
 
 // How long to wait after the last keystroke before actually firing a
-// USDA search request -- see updateUsdaQuery's doc comment.
+// USDA search request - see updateUsdaQuery's doc comment.
 private const val USDA_SEARCH_DEBOUNCE_MS = 350L
 
 // Standard rounded salt<->sodium conversion (salt is ~39.3% sodium by
 // mass; EU nutrition labels round this to salt = sodium x 2.5, i.e.
 // sodium = salt / 2.5). Used at the boundaries of AddItemUiState.
-// saltG100g -- see that field's doc comment.
+// saltG100g - see that field's doc comment.
 private const val SALT_TO_SODIUM_RATIO = 2.5
 
 /**
- * Barcode is now the mandatory first step -- there's no independent
+ * Barcode is now the mandatory first step - there's no independent
  * "Scan Label" or "Enter Manually" entry point, since without a barcode
  * match there'd be nothing to check against and every new item needs
  * SOME identifying step first (see design doc discussion). Flow:
@@ -54,7 +54,7 @@ private const val SALT_TO_SODIUM_RATIO = 2.5
  *   cropped client-side before upload, same as the label step)
  *     -> PROCESSING_PRODUCT_PHOTO -> CAPTURE_LABEL (name/brand/image
  *        carried into state, pre-filled but still editable in the
- *        eventual form -- see scanProductPhoto())
+ *        eventual form - see scanProductPhoto())
  *
  *   CAPTURE_LABEL (live, in-app camera OR gallery pick)
  *     -> PROCESSING_LABEL -> ITEM_FORM (pre-filled, barcode/name/brand/
@@ -67,18 +67,18 @@ private const val SALT_TO_SODIUM_RATIO = 2.5
 enum class AddItemPhase {
     SCAN_BARCODE, BARCODE_LOOKUP, BARCODE_RESULT, MANUAL_BARCODE_ENTRY,
     // Reached only via jumpToUsdaSearch() from the meal's text Search
-    // tab now, not from barcode scanning -- see design discussion ("the
+    // tab now, not from barcode scanning - see design discussion ("the
     // barcode flow was good exactly the way it was").
     USDA_SEARCH,
-    // A no-match barcode lands here now, BEFORE any photo -- asking the
+    // A no-match barcode lands here now, BEFORE any photo - asking the
     // user directly for name/brand instead of guessing them from OCR on
     // the product photo (see design discussion: OCR-guessed name/brand
     // was unreliable in general and especially hopeless for non-Latin
-    // packaging -- e.g. Japanese/Korean/Chinese -- since EasyOCR here is
+    // packaging - e.g. Japanese/Korean/Chinese - since EasyOCR here is
     // only configured for Latin-script languages and won't read those
     // characters at all, let alone guess which line is the name).
     ENTER_NAME_BRAND,
-    // Photo-only now -- no OCR runs against this one at all, purely for
+    // Photo-only now - no OCR runs against this one at all, purely for
     // the hero/icon image. Nutrition values only ever come from
     // CAPTURE_LABEL below.
     CAPTURE_PRODUCT_PHOTO, PROCESSING_PRODUCT_PHOTO,
@@ -93,13 +93,13 @@ data class AddItemUiState(
     val showManualEntryPrompt: Boolean = false,
     val manualBarcodeInput: String = "",
 
-    // Barcode result -- see LiveBarcodeScannerView's doc comment for why
+    // Barcode result - see LiveBarcodeScannerView's doc comment for why
     // the barcode must always be shown for user confirmation, regardless
     // of decoder/source.
     val scannedBarcode: String? = null,
     val decoderUsed: String? = null,
     val matchedItem: Item? = null,
-    // Set on a barcode match instead of navigating away -- shown as a
+    // Set on a barcode match instead of navigating away - shown as a
     // toast over the still-live camera (see design discussion). Null
     // once dismissed, added directly, or tapped through to
     // BARCODE_RESULT for more detail.
@@ -111,42 +111,42 @@ data class AddItemUiState(
     val ocrWasUsed: Boolean = false,
     val usdaImportUsed: Boolean = false,
 
-    // Raw-ingredient (USDA) search -- see USDA_SEARCH phase, reached
+    // Raw-ingredient (USDA) search - see USDA_SEARCH phase, reached
     // from the meal's text Search tab.
     val usdaQuery: String = "",
     val usdaResults: List<UsdaFoodSummary> = emptyList(),
     val isSearchingUsda: Boolean = false,
     val usdaError: String? = null,
 
-    // Product photo step -- image_path comes back from the backend once
+    // Product photo step - image_path comes back from the backend once
     // uploaded (see scanProductPhoto()) and is carried through to the
     // final POST /items call so the photo gets attached to the item.
     // guessedName/guessedBrand are rough OCR heuristics used ONLY to
-    // pre-fill `name`/`brand` below -- not kept as separate fields, since
+    // pre-fill `name`/`brand` below - not kept as separate fields, since
     // once they've pre-filled the (still-editable) form fields there's
     // nothing else that needs to reference the original guess.
     val productImagePath: String? = null,
 
     // Shown when OCR genuinely couldn't extract anything useful from the
     // label photo (not just a network/upload error, which uses scanError
-    // instead) -- offers retake or skip-to-manual-entry rather than
+    // instead) - offers retake or skip-to-manual-entry rather than
     // silently handing the user an empty form with no explanation.
     val showOcrFailedDialog: Boolean = false,
 
-    // Item form fields -- all Strings for TextField editing, parsed on save
+    // Item form fields - all Strings for TextField editing, parsed on save
     val name: String = "",
     val brand: String = "",
     val barcode: String = "",
     val itemType: String = "product", // "product" | "ingredient"
-    // Not every label reports macros per 100g -- some show per serving
+    // Not every label reports macros per 100g - some show per serving
     // (e.g. "per 30g" or "per slice"), and OCR can only flag that
     // uncertainty (ocrPer100gConfirmed), not fix it. This is what the
-    // macro fields below are ACTUALLY entered per -- defaults to 100
+    // macro fields below are ACTUALLY entered per - defaults to 100
     // (matching the vast majority of labels, and OCR/USDA prefills,
     // which do normalize to per-100g already), but editable so the
     // user can just type in whatever amount the label actually shows
     // instead of doing the per-100g math themselves by hand. Converted
-    // to true per-100g values at save time -- see saveItem().
+    // to true per-100g values at save time - see saveItem().
     val perAmountG: String = "100",
     val kcal100g: String = "",
     val protein100g: String = "",
@@ -155,20 +155,20 @@ data class AddItemUiState(
     val fiber100g: String = "",
     val sugar100g: String = "",
     val saturatedFat100g: String = "",
-    // SALT, not sodium -- food labels show salt (that's literally what's
+    // SALT, not sodium - food labels show salt (that's literally what's
     // printed on the package: "Salt: 0.5g"), and asking someone to
     // mentally convert to sodium themselves invites mistakes. Backend
-    // still stores/logs SODIUM in mg (ItemCreateRequest.sodiumMg100g) --
+    // still stores/logs SODIUM in mg (ItemCreateRequest.sodiumMg100g) -
     // conversion happens at the boundaries (see prefillFromOcr and
     // saveItem below) using the standard salt-to-sodium ratio (salt is
-    // ~40% sodium by mass, i.e. salt_g \u00d7 2.5 \u2248 sodium_g -- the
+    // ~40% sodium by mass, i.e. salt_g \u00d7 2.5 \u2248 sodium_g - the
     // same rounded factor used on EU nutrition labels). This field
     // itself always holds SALT in grams, never sodium.
     val saltG100g: String = "",
 
     val saveError: String? = null,
     val createdItem: Item? = null,
-    // SAVED screen's "Add Item" text -- see logCreatedItemToMeal.
+    // SAVED screen's "Add Item" text - see logCreatedItemToMeal.
     val isLoggingToMeal: Boolean = false
 )
 
@@ -180,7 +180,7 @@ class AddItemViewModel : ViewModel() {
     // Set once (see MealDetailScreen, which embeds this whole flow
     // inline in its Add Item sheet) so saveItem()/useMatchedItem() know
     // which meal to attach a log to. Null when this flow is reached any
-    // other way -- in that case it still creates/matches the Item, just
+    // other way - in that case it still creates/matches the Item, just
     // without also logging it anywhere (which used to be the ONLY
     // behavior, before this flow was embeddable in a meal's context).
     private var mealContext: Pair<LocalDate, String>? = null
@@ -201,13 +201,13 @@ class AddItemViewModel : ViewModel() {
         )
     }
 
-    /** SAVED screen's small "Add Item" text -- the explicit, opt-in way
+    /** SAVED screen's small "Add Item" text - the explicit, opt-in way
      * to log the just-saved/matched item to this meal, now that saving/
      * matching itself no longer does this automatically (see design
      * discussion: "would you like to add this item to your meal?",
      * asked rather than assumed). onComplete fires either way (success
      * or failure) since a logging hiccup here shouldn't trap the user
-     * on this screen -- matches the "unobtrusive" framing this was
+     * on this screen - matches the "unobtrusive" framing this was
      * asked for. */
     fun logCreatedItemToMeal(onComplete: () -> Unit) {
         val item = _uiState.value.createdItem
@@ -220,7 +220,7 @@ class AddItemViewModel : ViewModel() {
             try {
                 logToMealIfAttached(item.itemId)
             } catch (e: Exception) {
-                // Best-effort -- still proceed, see doc comment above.
+                // Best-effort - still proceed, see doc comment above.
             }
             _uiState.value = _uiState.value.copy(isLoggingToMeal = false)
             onComplete()
@@ -231,10 +231,10 @@ class AddItemViewModel : ViewModel() {
         _uiState.value = AddItemUiState()
     }
 
-    /** Matched an existing item via barcode (BARCODE_RESULT phase) --
+    /** Matched an existing item via barcode (BARCODE_RESULT phase) -
      * just shows the SAVED confirmation screen now, same as a newly-
      * saved item. Used to auto-log it to the attached meal here, but
-     * logging is decoupled from matching/saving now -- see SAVED
+     * logging is decoupled from matching/saving now - see SAVED
      * screen's explicit "Add Item" action (logCreatedItemToMeal) for
      * why ("would you like to add this item to your meal?", asked
      * rather than assumed, per design discussion). */
@@ -248,13 +248,13 @@ class AddItemViewModel : ViewModel() {
         return MultipartBody.Part.createFormData("image", "photo.jpg", requestBody)
     }
 
-    // ----- Barcode step -----
+    // --- Barcode step ---
 
     /** Called by the Composable's timeout timer if SCAN_BARCODE has been
      * showing for ~8s with nothing detected. */
     fun onBarcodeTimeout() {
         // If a toast is showing, we clearly DID detect and match a
-        // barcode -- "no barcode detected" would be actively wrong here,
+        // barcode - "no barcode detected" would be actively wrong here,
         // and it kept firing even while a match was actively displayed
         // (see design discussion).
         if (_uiState.value.phase == AddItemPhase.SCAN_BARCODE && _uiState.value.matchedItemToast == null) {
@@ -286,7 +286,7 @@ class AddItemViewModel : ViewModel() {
     /** Called when the live scanner (multi-frame consensus, see
      * LiveBarcodeScannerView) settles on a value. */
     /** ML Kit's analyzer calls back on EVERY frame it sees a barcode, not
-     * just once -- without a guard here, that meant re-running the
+     * just once - without a guard here, that meant re-running the
      * lookup (and replacing the toast's state, causing a visible
      * flicker/reset) many times a second for as long as the same code
      * stayed in frame. Ignore further detections while a toast for a
@@ -338,11 +338,11 @@ class AddItemViewModel : ViewModel() {
             }
 
             if (matched == null) {
-                // No existing item for this barcode -- don't stop and
+                // No existing item for this barcode - don't stop and
                 // make the user tap a confirmation button just to
                 // proceed; we already have the barcode captured, so go
                 // straight into adding a new item (this part of the
-                // original behavior stays -- do NOT reintroduce a "what
+                // original behavior stays - do NOT reintroduce a "what
                 // kind of item" prompt here, see design discussion: "the
                 // barcode flow was good exactly the way it was").
                 // Raw-ingredient/USDA lookup lives only under the text
@@ -350,7 +350,7 @@ class AddItemViewModel : ViewModel() {
                 // injected into scanning.
                 //
                 // Goes to ENTER_NAME_BRAND now, not straight to the
-                // photo step -- see that phase's doc comment.
+                // photo step - see that phase's doc comment.
                 _uiState.value = _uiState.value.copy(
                     phase = AddItemPhase.ENTER_NAME_BRAND,
                     scannedBarcode = barcode,
@@ -361,7 +361,7 @@ class AddItemViewModel : ViewModel() {
                 return@launch
             }
 
-            // Matched -- stays on SCAN_BARCODE (camera keeps running) and
+            // Matched - stays on SCAN_BARCODE (camera keeps running) and
             // shows a toast over it instead of navigating to a separate
             // full-screen result, per design discussion. Tapping the
             // toast (openMatchedItemToastDetail) reuses BARCODE_RESULT as
@@ -381,7 +381,7 @@ class AddItemViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(matchedItemToast = null, matchedItem = null)
     }
 
-    /** Reached only from the Search tab now, not from scanning -- see
+    /** Reached only from the Search tab now, not from scanning - see
      * design discussion. Jumps straight into USDA_SEARCH without going
      * through SCAN_BARCODE at all. initialQuery carries over whatever
      * the user already typed in the meal's own search box, so they
@@ -401,23 +401,23 @@ class AddItemViewModel : ViewModel() {
         )
     }
 
-    // ----- Product photo step -----
+    // --- Product photo step ---
 
-    /** Uploads the cropped product-package photo -- saves it server-side
+    /** Uploads the cropped product-package photo - saves it server-side
      * (image_path comes back for us to carry through to the eventual
      * item save) and pre-fills name/brand with OCR's best-effort guess.
      * Always proceeds to CAPTURE_LABEL on success, even if OCR found
-     * nothing useful to guess from -- unlike scanLabel()'s failure
+     * nothing useful to guess from - unlike scanLabel()'s failure
      * handling, there's no "couldn't read anything" dialog here, since
      * an unhelpful guess just means the name/brand fields start blank,
      * same as manual entry always was; it's not a dead end the way a
      * fully-failed label scan is. */
-    /** Photo-only now -- no OCR runs against this at all (see
+    /** Photo-only now - no OCR runs against this at all (see
      * ENTER_NAME_BRAND's doc comment for why name/brand come from the
      * user directly instead of an OCR guess here). The backend endpoint
      * still happens to run OCR/guess internally (it's shared with the
      * image-update flow elsewhere), but those guessed fields are
-     * deliberately ignored here now -- name/brand are already set. */
+     * deliberately ignored here now - name/brand are already set. */
     fun scanProductPhoto(imageBytes: ByteArray) {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_PRODUCT_PHOTO, scanError = null)
         viewModelScope.launch {
@@ -436,11 +436,11 @@ class AddItemViewModel : ViewModel() {
         }
     }
 
-    /** Attaches/replaces a photo directly from within ITEM_FORM -- for
+    /** Attaches/replaces a photo directly from within ITEM_FORM - for
      * items that skipped the usual photo-capture steps entirely (USDA
      * imports currently; jumpToUsdaSearch goes straight to ITEM_FORM
      * with no photo step). Doesn't change phase, unlike
-     * scanProductPhoto() above -- this is meant to be usable at any
+     * scanProductPhoto() above - this is meant to be usable at any
      * point while reviewing the form, not a step in the linear flow. */
     fun attachPhotoToForm(imageBytes: ByteArray) {
         viewModelScope.launch {
@@ -453,20 +453,20 @@ class AddItemViewModel : ViewModel() {
         }
     }
 
-    /** User chose to skip the product photo entirely -- barcode carries
+    /** User chose to skip the product photo entirely - barcode carries
      * over, name/brand/image stay blank for manual entry later. */
     fun skipProductPhoto() {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
     }
 
-    // Cancelled and relaunched on every keystroke -- see updateUsdaQuery's
+    // Cancelled and relaunched on every keystroke - see updateUsdaQuery's
     // debounce below.
     private var usdaSearchJob: Job? = null
 
-    /** Debounced now -- this was firing a request on every single
+    /** Debounced now - this was firing a request on every single
      * keystroke (see design discussion: "I think it's because we send a
      * request every single stroke"), which was very likely a real
-     * contributor to the USDA 502s seen in practice -- FDC's API is
+     * contributor to the USDA 502s seen in practice - FDC's API is
      * already rate-limited (especially on the shared DEMO_KEY, see
      * app/routers/usda.py's error message), and typing a 10-character
      * search term used to mean 10 separate requests instead of one. */
@@ -483,7 +483,7 @@ class AddItemViewModel : ViewModel() {
             try {
                 val results = ApiClient.service.searchUsda(query = query)
                 // Guard against a slower earlier search landing after a
-                // newer one -- mostly redundant now that the job itself
+                // newer one - mostly redundant now that the job itself
                 // gets cancelled, kept as an extra safety net.
                 if (_uiState.value.usdaQuery == query) {
                     _uiState.value = _uiState.value.copy(isSearchingUsda = false, usdaResults = results)
@@ -499,7 +499,7 @@ class AddItemViewModel : ViewModel() {
         }
     }
 
-    /** Picked a USDA result -- fetches full detail and pre-fills the
+    /** Picked a USDA result - fetches full detail and pre-fills the
      * item form, same pattern as scanLabel()'s OCR prefill below. */
     fun selectUsdaFood(fdcId: Int) {
         viewModelScope.launch {
@@ -518,7 +518,7 @@ class AddItemViewModel : ViewModel() {
                     fiber100g = macros.fiber100g ?: "",
                     sugar100g = macros.sugar100g ?: "",
                     saturatedFat100g = macros.saturatedFat100g ?: "",
-                    // USDA reports sodium in mg too -- same conversion as
+                    // USDA reports sodium in mg too - same conversion as
                     // OCR's prefill.
                     // sodium (mg) -> salt (g): divide by 1000 for the
                     // unit change, multiply by the salt:sodium ratio.
@@ -531,7 +531,7 @@ class AddItemViewModel : ViewModel() {
         }
     }
 
-    // ----- Label step -----
+    // --- Label step ---
 
     fun scanLabel(imageBytes: ByteArray) {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_LABEL, scanError = null)
@@ -546,7 +546,7 @@ class AddItemViewModel : ViewModel() {
                     macros.saturatedFat100g == null && macros.sodiumMg100g == null
 
                 if (extractedNothing) {
-                    // A genuine "couldn't read this label" case -- offer
+                    // A genuine "couldn't read this label" case - offer
                     // retake or skip-to-manual rather than silently
                     // handing over an empty form.
                     _uiState.value = _uiState.value.copy(
@@ -568,7 +568,7 @@ class AddItemViewModel : ViewModel() {
                     fiber100g = macros.fiber100g ?: "",
                     sugar100g = macros.sugar100g ?: "",
                     saturatedFat100g = macros.saturatedFat100g ?: "",
-                    // OCR/backend reports sodium in mg -- convert to g
+                    // OCR/backend reports sodium in mg - convert to g
                     // for display, matching what's printed on the label.
                     // sodium (mg) -> salt (g): divide by 1000 for the
                     // unit change, multiply by the salt:sodium ratio.
@@ -588,7 +588,7 @@ class AddItemViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(showOcrFailedDialog = false)
     }
 
-    /** User chose to skip OCR entirely and fill in macros by hand --
+    /** User chose to skip OCR entirely and fill in macros by hand -
      * barcode carries over, everything else starts blank. */
     fun proceedToManualFormFromOcrFailure() {
         _uiState.value = _uiState.value.copy(
@@ -598,12 +598,12 @@ class AddItemViewModel : ViewModel() {
         )
     }
 
-    // ----- Item form -----
+    // --- Item form ---
 
     fun updateName(value: String) { _uiState.value = _uiState.value.copy(name = value) }
     fun updateBrand(value: String) { _uiState.value = _uiState.value.copy(brand = value) }
 
-    /** Confirms ENTER_NAME_BRAND -- name is required (it's the whole
+    /** Confirms ENTER_NAME_BRAND - name is required (it's the whole
      * point of asking directly instead of guessing from OCR), brand is
      * optional, same as the final ITEM_FORM's own validation. */
     fun confirmNameBrand() {
@@ -625,14 +625,14 @@ class AddItemViewModel : ViewModel() {
     fun updateSalt(value: String) { _uiState.value = _uiState.value.copy(saltG100g = value) }
 
     /** Lets the user go back and retake/reupload the nutrition label
-     * photo from ITEM_FORM if they're unhappy with the OCR results --
+     * photo from ITEM_FORM if they're unhappy with the OCR results -
      * previously only reachable via the OCR-failure dialog
      * (showOcrFailedDialog), which only appears on a COMPLETE failure
      * (zero macros found at all). If OCR partially succeeds (some
-     * macros extracted, but wrong or incomplete -- see design
+     * macros extracted, but wrong or incomplete - see design
      * discussion), there was no way back to try again short of
      * restarting the whole flow. Doesn't clear the existing field
-     * values -- a fresh scanLabel() call overwrites them anyway if it
+     * values - a fresh scanLabel() call overwrites them anyway if it
      * succeeds, same as any other rescan. */
     fun retakeLabelPhoto() {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
@@ -648,7 +648,7 @@ class AddItemViewModel : ViewModel() {
         _uiState.value = state.copy(phase = AddItemPhase.SAVING, saveError = null)
 
         // Scales whatever was entered "per perAmountG grams" up/down to
-        // a true per-100g value -- e.g. entered per 30g -> multiply by
+        // a true per-100g value - e.g. entered per 30g -> multiply by
         // 100/30. A blank/zero/invalid perAmountG falls back to 100 (no
         // conversion) rather than silently producing garbage (dividing
         // by zero or a missing amount).

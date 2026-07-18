@@ -1,16 +1,14 @@
 package com.mealtracker.android.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -23,52 +21,37 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.mealtracker.android.ui.screens.CalendarMonthState
+import com.mealtracker.android.ui.screens.StreakCalendarMonthState
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
 
-// Coloring scheme: how much of the day got tracked, by distinct meal
-// types logged (0-4) - see CalendarMonthState's doc comment for why
-// this counts distinct meal TYPES, not raw log count.
-private val TrackedNone = Color(0xFFBDBDBD)   // 0 meal types - gray
-private val TrackedOne = Color(0xFFE57373)    // 1 meal type - red
-private val TrackedTwo = Color(0xFFFFC107)    // 2 meal types - yellow
-private val TrackedThreePlus = Color(0xFF4CAF50) // 3+ meal types - green
-
-private fun colorForCount(count: Int): Color = when {
-    count >= 3 -> TrackedThreePlus
-    count == 2 -> TrackedTwo
-    count == 1 -> TrackedOne
-    else -> TrackedNone
-}
-
 private val WEEKDAY_HEADERS = listOf("S", "M", "T", "W", "T", "F", "S")
+private val StreakRingColor = Color(0xFFE8837A) // matches the flame icon on the streak card
 
 /**
- * Month calendar for picking a Journal date. Each day is a colored
- * circle (see colorForCount) reflecting how many distinct meal types
- * were logged that day - lets you spot gaps in tracking at a glance,
- * not just navigate dates. `monthState` is nullable/loading-aware since
- * the coloring data loads async per month (see
- * JournalViewModel.loadCalendarMonth) - days render as untracked/gray
- * until that resolves, rather than blocking the picker from opening.
+ * Month calendar opened by tapping the streak card -- every date with
+ * at least one log gets an orange ring around it, so you can see the
+ * actual run of days behind the streak number, not just the count.
+ * `monthState` is nullable/loading-aware the same way Journal's
+ * CalendarPickerDialog is -- days render ringless until the month's
+ * data resolves, rather than blocking the dialog from opening.
  */
 @Composable
-fun CalendarPickerDialog(
+fun StreakCalendarDialog(
     displayedMonth: YearMonth,
-    selectedDate: LocalDate,
-    monthState: CalendarMonthState?,
+    monthState: StreakCalendarMonthState?,
     onMonthChange: (YearMonth) -> Unit,
-    onDateSelected: (LocalDate) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val today = LocalDate.now()
+
     Dialog(onDismissRequest = onDismiss) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -105,9 +88,6 @@ fun CalendarPickerDialog(
 
                 val firstOfMonth = displayedMonth.atDay(1)
                 val daysInMonth = displayedMonth.lengthOfMonth()
-                // DayOfWeek.value is Monday=1..Sunday=7; %7 remaps to
-                // Sunday=0..Saturday=6 so the grid starts on Sunday,
-                // matching WEEKDAY_HEADERS above.
                 val startOffset = firstOfMonth.dayOfWeek.value % 7
                 val totalCells = startOffset + daysInMonth
                 val rowCount = (totalCells + 6) / 7
@@ -123,25 +103,24 @@ fun CalendarPickerDialog(
                             ) {
                                 if (dayNum in 1..daysInMonth) {
                                     val date = displayedMonth.atDay(dayNum)
-                                    val count = monthState?.mealTypesLoggedByDay?.get(date) ?: 0
-                                    val isSelected = date == selectedDate
+                                    val isTracked = monthState?.loggedDates?.contains(date) == true
+                                    val isToday = date == today
                                     Box(
                                         modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(CircleShape)
-                                            .background(colorForCount(count).copy(alpha = if (isSelected) 1f else 0.6f))
+                                            .padding(3.dp)
+                                            .fillMaxSize()
                                             .then(
-                                                if (isSelected) {
-                                                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                                if (isTracked) {
+                                                    Modifier.border(2.dp, StreakRingColor, CircleShape)
                                                 } else Modifier
-                                            )
-                                            .clickable { onDateSelected(date) },
+                                            ),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             "$dayNum",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color.Black
+                                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -150,38 +129,16 @@ fun CalendarPickerDialog(
                     }
                 }
 
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
-                // Legend - explains the coloring without needing a
-                // separate help screen.
-                Row(
+                Text(
+                    "Ringed days have at least one thing logged",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    LegendDot(TrackedThreePlus, "3+")
-                    LegendDot(TrackedTwo, "2")
-                    LegendDot(TrackedOne, "1")
-                    LegendDot(TrackedNone, "0")
-                }
+                    textAlign = TextAlign.Center
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun LegendDot(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
-        Text(
-            " $label meals",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 2.dp, end = 8.dp)
-        )
     }
 }

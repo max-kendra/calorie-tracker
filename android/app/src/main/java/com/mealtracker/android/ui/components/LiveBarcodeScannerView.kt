@@ -22,10 +22,10 @@ import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * Live, continuous, on-device barcode scanning -- deliberately NOT a
+ * Live, continuous, on-device barcode scanning - deliberately NOT a
  * single-photo-capture-then-upload-to-backend flow. This matters for two
  * reasons (see design doc discussion):
- *   1. No network round trip per frame -- feels instant, which a
+ *   1. No network round trip per frame - feels instant, which a
  *      photo-then-upload flow can't match over Tailscale.
  *   2. Multi-frame consensus is inherently more reliable than a single
  *      still: this requires the SAME decoded value to appear on several
@@ -34,12 +34,12 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  *
  * IMPORTANT: this hasn't been empirically tested against real product
  * barcodes the way pyzbar/zxing-cpp were (see backend README for that
- * testing) -- ML Kit is Google's on-device model and is generally
+ * testing) - ML Kit is Google's on-device model and is generally
  * reliable, but we have no first-party test data for it specifically.
  * The multi-frame consensus requirement here is an extra safety margin
  * given that gap, but the "always show the decoded number for the user
  * to visually confirm against the package" rule from the backend scanner
- * still applies with at least as much reason -- never auto-trust this.
+ * still applies with at least as much reason - never auto-trust this.
  */
 @Composable
 fun LiveBarcodeScannerView(
@@ -83,7 +83,7 @@ fun LiveBarcodeScannerView(
                     )
                     onCameraReady(camera)
                 } catch (e: Exception) {
-                    // Camera unavailable/binding failed -- nothing more we
+                    // Camera unavailable/binding failed - nothing more we
                     // can do here; the preview just won't show. The
                     // AddItemScreen's camera-permission check happens
                     // before this Composable is even shown, so this is
@@ -98,7 +98,7 @@ fun LiveBarcodeScannerView(
 
 /**
  * Requires REQUIRED_CONSECUTIVE_MATCHES identical readings in a row
- * before accepting a barcode -- see the file-level doc comment for why.
+ * before accepting a barcode - see the file-level doc comment for why.
  */
 private class BarcodeAnalyzer(
     private val onStableBarcodeDetected: (String) -> Unit
@@ -158,10 +158,10 @@ private class BarcodeAnalyzer(
 
 /**
  * Decodes a barcode from a static image (used for the "pick from
- * gallery instead" path -- e.g. photos taken at the store to review
+ * gallery instead" path - e.g. photos taken at the store to review
  * later, see design doc). Same ML Kit client as the live scanner, just
  * fed a single static image instead of a continuous frame stream, so no
- * multi-frame consensus is possible here -- a single decode attempt.
+ * multi-frame consensus is possible here - a single decode attempt.
  */
 suspend fun decodeBarcodeFromUri(context: Context, uri: Uri): String? =
     suspendCancellableCoroutine { continuation ->

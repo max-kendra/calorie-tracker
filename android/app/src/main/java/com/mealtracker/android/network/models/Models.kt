@@ -73,13 +73,14 @@ data class Log(
     @SerialName("carbs_g_logged") val carbsGLogged: Int,
     @SerialName("fat_g_logged") val fatGLogged: Int,
     @SerialName("fiber_g_logged") val fiberGLogged: Int,
-    // Not shown in the compact per-item displays (matches the backend's
-    // ExtendedNutritionTotals split) -- used only by the Home screen's
-    // sodium/sugar/saturated-fat threshold card and its "top
-    // contributors" breakdown.
-    @SerialName("sugar_g_logged") val sugarGLogged: Int = 0,
-    @SerialName("saturated_fat_g_logged") val saturatedFatGLogged: Int = 0,
-    @SerialName("sodium_mg_logged") val sodiumMgLogged: Int = 0,
+    // Newly exposed -- backend already computed/stored these per log
+    // (same snapshot-at-log-time integrity as the fields above), just
+    // never returned them until now. Used for Health Connect nutrition
+    // export (see MealDetailScreen's sync effect), which wants these
+    // three too, not just the five main-tracked macros.
+    @SerialName("sugar_g_logged") val sugarGLogged: Int,
+    @SerialName("saturated_fat_g_logged") val saturatedFatGLogged: Int,
+    @SerialName("sodium_mg_logged") val sodiumMgLogged: Int,
     @SerialName("item_name") val itemName: String? = null,
     @SerialName("recipe_name") val recipeName: String? = null,
     // Denormalized from the source item/recipe -- backs the thumbnail in
@@ -448,4 +449,23 @@ data class ItemMacrosUpdateRequest(
     @SerialName("sugar_100g") val sugar100g: Double? = null,
     @SerialName("saturated_fat_100g") val saturatedFat100g: Double? = null,
     @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null
+)
+
+/**
+ * Mirrors PhysiologicalGuidelineOut from app/schemas.py -- population-
+ * level reference ranges (2025-2030 Dietary Guidelines for Americans /
+ * WHO / DRI, per each row's `basis`), NOT personalized targets. Static/
+ * seeded data, fetched read-only via GET /guidelines. Used by the Home
+ * screen's threshold card (sodium/added sugar/saturated fat) both to
+ * compute the weekly ceiling and to explain it via `basis` in a
+ * tooltip, rather than hardcoding the same numbers again client-side.
+ */
+@Serializable
+data class PhysiologicalGuideline(
+    val name: String,
+    @SerialName("min_value") val minValue: Double? = null,
+    @SerialName("recommended_value") val recommendedValue: Double? = null,
+    @SerialName("max_value") val maxValue: Double? = null,
+    val unit: String,
+    val basis: String? = null
 )

@@ -32,12 +32,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.ui.components.ProfileAvatar
 import com.mealtracker.android.ui.components.rememberImagePickerWithCrop
 
-// "Other" removed as a selectable option -- the backend's BMR
+// "Other" removed as a selectable option - the backend's BMR
 // calculation (see app/routers/user_profile.py) already treats an
 // UNSET primary_hormone identically to "other" (both average the
 // testosterone/estrogen constants as a fallback), so leaving this
 // field unselected achieves the exact same result. The backend schema
-// still accepts "other" as a valid stored value -- not removed there,
+// still accepts "other" as a valid stored value - not removed there,
 // since an existing profile that already has it saved should keep
 // reading back fine, not suddenly fail validation.
 private val HORMONES = listOf(
@@ -49,7 +49,7 @@ private val HORMONES = listOf(
 fun EditProfileScreen(
     viewModel: EditProfileViewModel = viewModel(),
     onBack: () -> Unit,
-    // Fired once, right after a successful save -- null in the normal
+    // Fired once, right after a successful save - null in the normal
     // Settings-reached usage (nothing should auto-navigate there, the
     // user reviews the "Saved" confirmation and taps back manually).
     // Onboarding passes this to advance to the next step automatically,

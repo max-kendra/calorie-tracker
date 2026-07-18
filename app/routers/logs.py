@@ -29,11 +29,11 @@ router = APIRouter(
 )
 
 
-def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str], Optional[str], Optional[str]]:
+def _validate_and_compute(payload, db: Session) --> tuple[RawTotals, Optional[str], Optional[str], Optional[str]]:
     """
     Shared validation + macro computation for both logs and meal_plans.
     Returns (totals, item_name, recipe_name, image_path) for convenience/
-    display -- image_path denormalized onto LogOut so the client can show
+    display - image_path denormalized onto LogOut so the client can show
     a thumbnail without a separate lookup per row.
     """
     if (payload.item_id is None) == (payload.recipe_id is None):
@@ -79,7 +79,7 @@ def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str
 
 def _log_to_out(
     log: Log, item_name: Optional[str], recipe_name: Optional[str], image_path: Optional[str] = None
-) -> LogOut:
+) --> LogOut:
     """The DB stores kcal_logged etc as precise Decimal (frozen at write
     time). Rounded UP to int here, at the display boundary only."""
     return LogOut(
@@ -110,7 +110,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     """
     Computes and SNAPSHOTS macros at write time. This is deliberate: if the
     source item/recipe is edited later, this log's numbers must not change
-    -- historical days/weekly summaries reflect what was actually counted
+    - historical days/weekly summaries reflect what was actually counted
     at the time (see design doc).
     """
     totals, item_name, recipe_name, image_path = _validate_and_compute(payload, db)
@@ -145,10 +145,10 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
     POST /logs with recipe_id set, still used for real recipes). This is
     the functional distinction between the two: a recipe stays one
     atomic log entry; a meal's ingredients land individually, each fully
-    editable/removable afterward -- same as if the user had added each
+    editable/removable afterward - same as if the user had added each
     item to this meal one at a time (see design doc).
 
-    Only valid for recipe_type="meal" -- rejects actual recipes, which
+    Only valid for recipe_type="meal" - rejects actual recipes, which
     should keep logging the normal atomic way.
     """
     recipe = (
@@ -162,7 +162,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
     if recipe.recipe_type != "meal":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This is a recipe, not a meal -- log it with POST /logs and recipe_id instead",
+            detail="This is a recipe, not a meal - log it with POST /logs and recipe_id instead",
         )
     if not recipe.ingredients:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This meal has no ingredients")
@@ -177,7 +177,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
         item = items_by_id.get(ingredient.item_id)
         if not item:
             # The ingredient's item was deleted since this meal was
-            # saved -- skip it rather than fail the whole request over
+            # saved - skip it rather than fail the whole request over
             # one missing item.
             continue
 
@@ -223,7 +223,7 @@ def list_logs(
     meal_type: Optional[MealType] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """Backs the Journal screen -- a single `date` gives one day's log,
+    """Backs the Journal screen - a single `date` gives one day's log,
     start/end gives a range for weekly summaries."""
     query = db.query(Log)
 
@@ -273,12 +273,12 @@ def recent_items(
 ):
     """
     Items sorted by most recently LOGGED (not most recently added to the
-    catalog) -- backs the Add Item sheet's default "Saved" view, so the
+    catalog) - backs the Add Item sheet's default "Saved" view, so the
     things you actually eat regularly float to the top rather than
     whatever you happened to create first.
 
-    Recipe-based logs are excluded here -- this returns Items only, not
-    Recipes -- kept simple for the first version of this endpoint;
+    Recipe-based logs are excluded here - this returns Items only, not
+    Recipes - kept simple for the first version of this endpoint;
     revisit if recipes need to show up in "recently logged" too.
     """
     last_logged_subq = (
@@ -310,7 +310,7 @@ def daily_summary(
     db: Session = Depends(get_db),
 ):
     """
-    Weekly/daily summary view -- sums the FROZEN kcal_logged/etc columns
+    Weekly/daily summary view - sums the FROZEN kcal_logged/etc columns
     grouped by date, not a live recomputation. This is what makes past
     summaries stable even if items/recipes are edited afterward.
     """
@@ -367,7 +367,7 @@ def daily_summary(
 @router.patch("/{log_id}", response_model=LogOut)
 def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
     """
-    Quantity-only edit -- item_id/recipe_id/date/meal_type stay fixed
+    Quantity-only edit - item_id/recipe_id/date/meal_type stay fixed
     (see LogUpdate's doc comment). Re-runs the same snapshot computation
     create_log does, so the log's macros stay internally consistent with
     its new quantity rather than going stale.
@@ -419,7 +419,7 @@ def delete_log(log_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{log_id}", response_model=LogOut)
 def get_log(log_id: int, db: Session = Depends(get_db)):
-    # Registered LAST among the GET routes -- this is a catch-all path
+    # Registered LAST among the GET routes - this is a catch-all path
     # param, and FastAPI matches routes in registration order, so it
     # must come after every fixed-path GET (/recent-items,
     # /summary/daily, and the bare "" list route) or it'll shadow them,

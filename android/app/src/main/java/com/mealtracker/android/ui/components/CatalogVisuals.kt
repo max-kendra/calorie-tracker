@@ -12,12 +12,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * Default icon+background for an Item (type: "product"/"ingredient") or
- * Recipe (recipeType: "recipe"/"meal") that has no image_path -- used
+ * Recipe (recipeType: "recipe"/"meal") that has no image_path - used
  * everywhere a thumbnail shows (search results, logged-items rows, the
  * item/recipe detail hero, the matched-barcode toast) so a missing
  * photo isn't just a blank gray box. Same pattern/reasoning as
  * MealVisuals (breakfast/lunch/dinner/snack icons), but keyed off the
- * catalog type instead of meal type -- these are conceptually different
+ * catalog type instead of meal type - these are conceptually different
  * groupings (a "snack" meal-slot can contain a "product" item), so
  * they're deliberately two separate objects rather than one shared
  * `when`.

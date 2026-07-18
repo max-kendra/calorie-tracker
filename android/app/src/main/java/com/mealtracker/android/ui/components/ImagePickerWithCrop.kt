@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
 /**
- * Gallery-pick + crop, packaged as a single reusable unit -- extracted
+ * Gallery-pick + crop, packaged as a single reusable unit - extracted
  * from the pick/decode/crop logic in AddItemScreen.kt so the same flow
  * doesn't get re-implemented for every place that needs "let the user
  * pick and crop an image" (currently: profile picture, from both the
@@ -36,12 +36,12 @@ import java.io.ByteArrayOutputStream
  * lambda from an onClick to launch the picker.
  *
  * CropDialog itself is a plain composable now, not self-overlaying (see
- * its own doc comment -- Dialog's window kept not sizing to the full
+ * its own doc comment - Dialog's window kept not sizing to the full
  * screen reliably). AddItemScreen/MealDetailScreen can lay it out as a
  * Box sibling themselves since they control their own structure, but
  * THIS helper is invoked from arbitrary/unknown call sites (Profile,
  * Edit Profile, wherever else) that it has no control over and can't
- * assume are Box-wrapped -- so it still wraps its own CropDialog usage
+ * assume are Box-wrapped - so it still wraps its own CropDialog usage
  * in a local Dialog here, isolating that risk to just this one helper
  * rather than reintroducing it into the shared component.
  */
@@ -67,7 +67,7 @@ fun rememberImagePickerWithCrop(onCropped: (ByteArray) -> Unit): () -> Unit {
             }
         }
         cropBitmap = bitmap
-        // Consumed -- clears so re-picking the exact same photo still
+        // Consumed - clears so re-picking the exact same photo still
         // re-triggers this effect (LaunchedEffect only re-runs when its
         // key actually CHANGES, so leaving pendingUri set to the same
         // value would silently no-op on a second identical pick).

@@ -26,12 +26,12 @@ import com.mealtracker.android.health.HealthConnectManager
 import com.mealtracker.android.health.HealthConnectPreferences
 
 /**
- * Onboarding's Health Connect step -- requests BOTH the weight-read and
+ * Onboarding's Health Connect step - requests BOTH the weight-read and
  * nutrition-write permission together, in one combined prompt, per
  * design discussion ("nutrition export should get asked at the same
  * time as weight import too"). Unlike the other four onboarding steps
  * (see OnboardingScreen's doc comment: "no skip option... required, not
- * optional"), this one IS skippable -- Health Connect might not be
+ * optional"), this one IS skippable - Health Connect might not be
  * available on this device at all, or the user might simply not want
  * either feature, and neither of those should block using the rest of
  * the app the way an incomplete profile/goal would. Both features can
@@ -51,7 +51,7 @@ fun HealthConnectOnboardingStep(onDone: () -> Unit) {
     val permissionLauncher = rememberLauncherForActivityResult(
         HealthConnectManager.requestPermissionsContract()
     ) { granted ->
-        // Enables whichever of the two were actually granted -- a
+        // Enables whichever of the two were actually granted - a
         // partial grant (e.g. the user allows weight but denies
         // nutrition in the system prompt) shouldn't silently turn on
         // the feature they just said no to.

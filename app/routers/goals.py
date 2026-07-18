@@ -32,8 +32,8 @@ DEFAULT_SPLIT_PCT = {
 }
 
 
-def _split_computed_totals(goal: Goal, pct: Decimal) -> NutritionTotals:
-    """Per-meal targets are never stored as absolute numbers -- always a
+def _split_computed_totals(goal: Goal, pct: Decimal) --> NutritionTotals:
+    """Per-meal targets are never stored as absolute numbers - always a
     percentage of the goal, computed here and rounded for display."""
     factor = pct / Decimal("100")
 
@@ -46,7 +46,7 @@ def _split_computed_totals(goal: Goal, pct: Decimal) -> NutritionTotals:
     )
 
 
-def _goal_to_out(goal: Goal) -> GoalOut:
+def _goal_to_out(goal: Goal) --> GoalOut:
     return GoalOut(
         id=goal.id,
         start_date=goal.start_date,
@@ -67,7 +67,7 @@ def _goal_to_out(goal: Goal) -> GoalOut:
     )
 
 
-def _get_goal_or_404(goal_id: int, db: Session) -> Goal:
+def _get_goal_or_404(goal_id: int, db: Session) --> Goal:
     goal = (
         db.query(Goal)
         .options(joinedload(Goal.meal_splits))
@@ -79,7 +79,7 @@ def _get_goal_or_404(goal_id: int, db: Session) -> Goal:
     return goal
 
 
-def _validate_splits_sum_to_100(splits: list) -> None:
+def _validate_splits_sum_to_100(splits: list) --> None:
     total = sum((s.pct_of_kcal for s in splits), Decimal("0"))
     if total != Decimal("100"):
         raise HTTPException(
@@ -92,7 +92,7 @@ def _validate_splits_sum_to_100(splits: list) -> None:
 def create_goal(payload: GoalCreate, db: Session = Depends(get_db)):
     """
     Automatically closes the previously active goal (end_date IS NULL) by
-    setting its end_date to the day before this goal's start_date -- only
+    setting its end_date to the day before this goal's start_date - only
     one goal is ever active at a time. Defaults to an even 25/25/25/25
     meal split unless the caller provides their own (which must sum to 100).
     """
@@ -135,7 +135,7 @@ def create_goal(payload: GoalCreate, db: Session = Depends(get_db)):
 
 @router.get("/active", response_model=GoalOut)
 def get_active_goal(db: Session = Depends(get_db)):
-    """The goal currently in effect -- end_date IS NULL."""
+    """The goal currently in effect - end_date IS NULL."""
     goal = (
         db.query(Goal)
         .options(joinedload(Goal.meal_splits))
@@ -155,7 +155,7 @@ def get_goal(goal_id: int, db: Session = Depends(get_db)):
 
 @router.get("", response_model=list[GoalOut])
 def list_goals(db: Session = Depends(get_db)):
-    """Full history -- useful for seeing how targets changed over time
+    """Full history - useful for seeing how targets changed over time
     (cutting/bulking/maintenance phases)."""
     goals = (
         db.query(Goal).options(joinedload(Goal.meal_splits)).order_by(Goal.start_date.desc()).all()
@@ -165,7 +165,7 @@ def list_goals(db: Session = Depends(get_db)):
 
 @router.patch("/{goal_id}", response_model=GoalOut)
 def update_goal(goal_id: int, payload: GoalUpdate, db: Session = Depends(get_db)):
-    """Update overall targets. Meal splits (percentages) are unaffected --
+    """Update overall targets. Meal splits (percentages) are unaffected -
     they automatically apply to whatever the new targets are, since
     they're stored as percentages, not absolute numbers."""
     goal = _get_goal_or_404(goal_id, db)
@@ -181,7 +181,7 @@ def update_goal(goal_id: int, payload: GoalUpdate, db: Session = Depends(get_db)
 @router.put("/{goal_id}/meal-splits", response_model=GoalOut)
 def replace_meal_splits(goal_id: int, payload: MealGoalSplitsUpdate, db: Session = Depends(get_db)):
     """
-    Bulk replace -- matches the "Meal calorie goal" screen where all meals
+    Bulk replace - matches the "Meal calorie goal" screen where all meals
     are edited together. Hard validation gate: must sum to exactly 100%,
     same rule the UI enforces before allowing the user to leave the screen.
     """

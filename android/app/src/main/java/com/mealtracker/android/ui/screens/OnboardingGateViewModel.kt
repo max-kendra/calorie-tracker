@@ -13,7 +13,7 @@ data class OnboardingGateUiState(
     // Null while isChecking is true; the destination is only decided
     // once this resolves. Defaults to true (rather than false) if the
     // check itself fails for some reason (e.g. transient network error)
-    // -- see checkSetupComplete()'s catch block for why.
+    // - see checkSetupComplete()'s catch block for why.
     val needsOnboarding: Boolean? = null
 )
 
@@ -23,7 +23,7 @@ data class OnboardingGateUiState(
  * straight to the normal Home/Journal tabs. "Complete" means: profile
  * has name/height/age, a weight goal is set, AND an active calorie goal
  * exists (macro grams always exist once a goal does, since
- * CalorieGoalViewModel.saveAsGoal() always sets them -- see that file --
+ * CalorieGoalViewModel.saveAsGoal() always sets them - see that file -
  * so there's no separate "macros missing" case to check for here).
  */
 class OnboardingGateViewModel : ViewModel() {
@@ -54,7 +54,7 @@ class OnboardingGateViewModel : ViewModel() {
                 )
             } catch (e: Exception) {
                 // Network/server error during the check itself (not "no
-                // goal exists yet", which is handled above) -- defaults
+                // goal exists yet", which is handled above) - defaults
                 // to true rather than silently letting the user into a
                 // Home screen that will itself immediately break on
                 // missing goal data (the exact 404-on-meal-split bug

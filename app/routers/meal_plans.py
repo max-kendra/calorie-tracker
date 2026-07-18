@@ -25,9 +25,9 @@ router = APIRouter(
 )
 
 
-def _plan_to_out(plan: MealPlan, db: Session) -> MealPlanOut:
+def _plan_to_out(plan: MealPlan, db: Session) --> MealPlanOut:
     """
-    NOT snapshotted -- totals are computed fresh on every read, so a
+    NOT snapshotted - totals are computed fresh on every read, so a
     planned meal always reflects current item/recipe data right up until
     it's committed (see design doc: meal_plans stays live-reference,
     unlike logs which freeze at write time).
@@ -132,7 +132,7 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
     tracker" action. For every meal_plan in [start_date, end_date]:
     compute its macros NOW and freeze them into a new `logs` row (this is
     the exact moment a planned meal becomes a historical fact). The
-    source meal_plan row is then deleted -- committing is one-directional;
+    source meal_plan row is then deleted - committing is one-directional;
     re-planning the same meal for a future date means creating a new plan.
     """
     plans = (

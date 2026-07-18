@@ -50,7 +50,7 @@ private val GOAL_TYPES = listOf(
 fun CalorieGoalScreen(
     viewModel: CalorieGoalViewModel = viewModel(),
     onBack: () -> Unit,
-    // Fires on goalSaveSuccess specifically -- NOT state.saveSuccess,
+    // Fires on goalSaveSuccess specifically - NOT state.saveSuccess,
     // which just means the TDEE inputs (weight/activity/goal type) were
     // saved to the profile before calculating. The actual "done with
     // this step" moment for onboarding purposes is the goal itself
@@ -92,7 +92,7 @@ fun CalorieGoalScreen(
         }
         if (state.heightCm == null || state.age == null) {
             Text(
-                "Set your height and age on My Profile first -- both are needed for this calculation.",
+                "Set your height and age on My Profile first - both are needed for this calculation.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )

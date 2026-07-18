@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import ocr
 from app.config import settings
-from app.routers import goals, items, logs, meal_plans, recipes, usda, user_profile
+from app.routers import goals, guidelines, items, logs, meal_plans, recipes, usda, user_profile
 
 # Without this, nothing below INFO level (including the new OCR-result
 # logging added to scan_label -- see app/routers/items.py) ever actually
@@ -30,6 +30,7 @@ app.include_router(recipes.router)
 app.include_router(logs.router)
 app.include_router(meal_plans.router)
 app.include_router(goals.router)
+app.include_router(guidelines.router)
 app.include_router(user_profile.router)
 app.include_router(usda.router)
 

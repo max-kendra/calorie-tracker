@@ -479,7 +479,7 @@ class MealGoalSplitsUpdate(BaseModel):
     splits: list[MealGoalSplitIn]
 
 
-PrimaryHormone = Literal["estrogen", "testosterone"]
+PrimaryHormone = Literal["estrogen", "testosterone", "other"]
 
 
 GoalType = Literal["lose", "maintain", "gain"]
@@ -552,3 +552,24 @@ class KcalGoalCalculationResult(BaseModel):
     kcal_low: int
     kcal_high: int
     floor_applied: bool  # true if the 1500 kcal/day safety floor kicked in
+
+
+class PhysiologicalGuidelineOut(BaseModel):
+    """
+    Mirrors PhysiologicalGuideline -- population-level reference ranges
+    (not personalized targets), seeded once via migration
+    (824c17bcbba4_seed_physiological_guidelines) and otherwise static.
+    Exposed read-only so the client can show WHERE a threshold number
+    (e.g. the sodium/sugar/saturated-fat weekly ceilings on the Home
+    screen) actually comes from, via `basis`, rather than that math
+    living as unexplained magic numbers on both ends.
+    """
+
+    name: str
+    min_value: Optional[Decimal] = None
+    recommended_value: Optional[Decimal] = None
+    max_value: Optional[Decimal] = None
+    unit: str
+    basis: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)

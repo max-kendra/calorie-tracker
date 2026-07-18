@@ -14,14 +14,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Simple ring/donut chart -- draws one arc per segment, proportional to
+ * Simple ring/donut chart - draws one arc per segment, proportional to
  * its fraction of the total, in the given color. Used on the
  * Macronutrients and Meal Calorie Goal screens to visualize the current
  * split, matching the design doc's mockup layout (colored donut with the
  * running total shown in the center).
  *
  * `segments` should be (fraction 0f..1f, color) pairs. Fractions don't
- * need to sum to exactly 1f -- if they sum to less, the remainder is
+ * need to sum to exactly 1f - if they sum to less, the remainder is
  * simply left as empty track, which is useful for showing an
  * incomplete/invalid split visually (e.g. only 92% allocated).
  */

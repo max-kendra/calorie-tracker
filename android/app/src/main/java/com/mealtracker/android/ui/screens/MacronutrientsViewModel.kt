@@ -26,12 +26,12 @@ data class MacroRow(
 
 /**
  * Percentages are whole Ints, adjusted in single-percentage-point steps
- * (see the Slider's `steps` config in MacronutrientsScreen) -- storing
+ * (see the Slider's `steps` config in MacronutrientsScreen) - storing
  * the value itself as a whole Int means there's no hidden fractional
  * drift between what's displayed and what's actually sent to the
  * backend, which requires an exact 100% sum.
  *
- * kcalTarget is READ-ONLY here -- it's set exclusively via the Profile
+ * kcalTarget is READ-ONLY here - it's set exclusively via the Profile
  * screen's calorie-goal calculator now, not editable on this screen.
  * This screen requires an active Goal to already exist (Profile gates
  * navigation here until one does, but we still handle the missing-goal

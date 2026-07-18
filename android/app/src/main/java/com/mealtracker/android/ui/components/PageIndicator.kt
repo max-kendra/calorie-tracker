@@ -15,7 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 
 /**
- * One dot per step, current step filled/highlighted, others dim -- used
+ * One dot per step, current step filled/highlighted, others dim - used
  * by OnboardingScreen to show progress through its fixed sequence of
  * reused profile-setup screens. Generic (just count + current index), so
  * it isn't tied to onboarding specifically if another multi-step flow

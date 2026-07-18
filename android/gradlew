@@ -75,7 +75,7 @@ while
     [ -h "$app_path" ]
 do
     ls=$( ls -ld "$app_path" )
-    link=${ls#*' -> '}
+    link=${ls#*' --> '}
     case $link in             #(
       /*)   app_path=$link ;; #(
       *)    app_path=$APP_HOME$link ;;
@@ -165,14 +165,14 @@ fi
 #   * the main class name
 #   * -classpath
 #   * -D...appname settings
-#   * --module-path (only if needed)
+#   * -module-path (only if needed)
 #   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
 
 # For Cygwin or MSYS, switch paths to Windows format before running java
 if "$cygwin" || "$msys" ; then
-    APP_HOME=$( cygpath --path --mixed "$APP_HOME" )
+    APP_HOME=$( cygpath -path -mixed "$APP_HOME" )
 
-    JAVACMD=$( cygpath --unix "$JAVACMD" )
+    JAVACMD=$( cygpath -unix "$JAVACMD" )
 
     # Now convert the arguments - kludge to limit ourselves to /bin/sh
     for arg do
@@ -184,7 +184,7 @@ if "$cygwin" || "$msys" ; then
               *)    false ;;
             esac
         then
-            arg=$( cygpath --path --ignore --mixed "$arg" )
+            arg=$( cygpath -path -ignore -mixed "$arg" )
         fi
         # Roll the args list around exactly as many times as the number of
         # args, so each arg winds up back in the position where it started, but
@@ -194,7 +194,7 @@ if "$cygwin" || "$msys" ; then
         # changing the positional parameters here affects neither the number of
         # iterations, nor the values presented in `arg`.
         shift                   # remove old arg
-        set -- "$@" "$arg"      # push replacement arg
+        set - "$@" "$arg"      # push replacement arg
     done
 fi
 
@@ -208,7 +208,7 @@ DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
 #   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
 #     treated as '${Hostname}' itself on the command line.
 
-set -- \
+set - \
         "-Dorg.gradle.appname=$APP_BASE_NAME" \
         -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
         "$@"
@@ -226,7 +226,7 @@ fi
 # In Bash we could simply go:
 #
 #   readarray ARGS < <( xargs -n1 <<<"$var" ) &&
-#   set -- "${ARGS[@]}" "$@"
+#   set - "${ARGS[@]}" "$@"
 #
 # but POSIX shell has neither arrays nor command substitution, so instead we
 # post-process each arg (as a line of input to sed) to backslash-escape any
@@ -238,7 +238,7 @@ fi
 # an unmatched quote.
 #
 
-eval "set -- $(
+eval "set - $(
         printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
         xargs -n1 |
         sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |

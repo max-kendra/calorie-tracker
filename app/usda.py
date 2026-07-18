@@ -1,8 +1,8 @@
 """
-USDA FoodData Central API client -- used for the "raw ingredient
+USDA FoodData Central API client - used for the "raw ingredient
 reference" search/import flow (see design doc). Kept fully separate from
 our own `items` table: this module only fetches and normalizes external
-data. Nothing here writes to our DB directly -- the client (Android/web)
+data. Nothing here writes to our DB directly - the client (Android/web)
 gets normalized macro data back to pre-fill the Add Item review form,
 and the actual item is created via the normal POST /items call once the
 user reviews/confirms, same pattern as OCR and barcode scanning (see
@@ -16,7 +16,7 @@ _normalize_nutrient_entry() below handles both.
 
 IMPORTANT nutrient-matching gotcha, found via testing against a
 realistic sample payload (not caught by initial naive implementation):
-FDC often lists MULTIPLE sub-types for the same macro -- e.g. "Fiber,
+FDC often lists MULTIPLE sub-types for the same macro - e.g. "Fiber,
 soluble" / "Fiber, insoluble" / "Fiber, total dietary" all present at
 once, or "Sugars, added" alongside "Sugars, total including NLEA". A
 naive substring match on "fiber" or "sugars" can silently grab the wrong
@@ -26,7 +26,7 @@ lists per macro, always preferring "total" phrasing, checked across ALL
 nutrient entries before falling back to a looser match.
 
 IMPORTANT: this module has NOT been tested against a live API response
-in this environment -- USDA's domain isn't in this sandbox's network
+in this environment - USDA's domain isn't in this sandbox's network
 allowlist, and the public DEMO_KEY is rate-limited/blocked through the
 available fetch tooling here. The request/response handling follows
 USDA's documented API format exactly, and the nutrient-matching logic
@@ -34,7 +34,7 @@ USDA's documented API format exactly, and the nutrient-matching logic
 realistic sample payloads, but a real end-to-end test against the live
 API needs to happen wherever this actually runs with real network access
 (the Pi). Get a free API key at https://fdc.nal.usda.gov/api-key-signup
--- the public DEMO_KEY works for initial testing but is heavily
+- the public DEMO_KEY works for initial testing but is heavily
 rate-limited (30/hour, 50/day).
 """
 
@@ -47,7 +47,7 @@ import httpx
 FDC_BASE_URL = "https://api.nal.usda.gov/fdc/v1"
 
 
-def _normalize_nutrient_entry(entry: dict) -> tuple[str, str, float] | None:
+def _normalize_nutrient_entry(entry: dict) --> tuple[str, str, float] | None:
     """Returns (name, unit, amount) regardless of which of FDC's two
     nutrient shapes this entry uses, or None if it doesn't match either."""
     if "nutrient" in entry and "amount" in entry:
@@ -68,7 +68,7 @@ def _normalize_nutrient_entry(entry: dict) -> tuple[str, str, float] | None:
 
 
 # Each macro maps to a list of (required_phrases, excluded_phrases,
-# required_unit) tuples, tried IN ORDER across ALL nutrient entries --
+# required_unit) tuples, tried IN ORDER across ALL nutrient entries -
 # the first pattern that matches anything wins, so more specific/"total"
 # phrasings are always tried before looser ones. required_unit=None means
 # any unit is accepted.
@@ -105,11 +105,11 @@ _MATCH_PRIORITIES: dict[str, list[tuple[list[str], list[str], Optional[str]]]] =
 }
 
 
-def extract_macros(food_nutrients: list[dict]) -> dict:
+def extract_macros(food_nutrients: list[dict]) --> dict:
     """
     Best-effort extraction of our tracked macros from an FDC food's
     nutrient list. Returns only the fields it found a confident match
-    for -- missing fields are simply absent from the returned dict
+    for - missing fields are simply absent from the returned dict
     (caller/client should treat those as unknown, not zero).
 
     Uses priority-ordered matching per macro (see _MATCH_PRIORITIES) to
@@ -149,7 +149,7 @@ def extract_macros(food_nutrients: list[dict]) -> dict:
 
 @dataclass
 class UsdaFoodSummary:
-    """Lightweight result from a search -- enough to show in a result list."""
+    """Lightweight result from a search - enough to show in a result list."""
 
     fdc_id: int
     description: str
@@ -160,7 +160,7 @@ class UsdaFoodSummary:
 
 @dataclass
 class UsdaFoodDetail:
-    """Full detail for one food -- used when the user picks a search result."""
+    """Full detail for one food - used when the user picks a search result."""
 
     fdc_id: int
     description: str
@@ -175,10 +175,10 @@ class UsdaClient:
 
     def search(
         self, query: str, data_types: Optional[list[str]] = None, page_size: int = 10
-    ) -> list[UsdaFoodSummary]:
+    ) --> list[UsdaFoodSummary]:
         """
         Searches FDC. Callers building the raw-ingredient-reference flow
-        should typically pass data_types=["Foundation", "SR Legacy"] --
+        should typically pass data_types=["Foundation", "SR Legacy"] -
         these are the lab-analyzed, stable datasets for raw/whole foods
         (see design doc), as opposed to "Branded" which is user-submitted
         label data better suited to barcode lookups than name search.
@@ -206,7 +206,7 @@ class UsdaClient:
             )
         return results
 
-    def get_food(self, fdc_id: int) -> UsdaFoodDetail:
+    def get_food(self, fdc_id: int) --> UsdaFoodDetail:
         """Fetches full detail for one food by FDC ID."""
         params = {"api_key": self.api_key}
 
