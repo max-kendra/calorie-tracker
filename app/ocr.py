@@ -383,11 +383,23 @@ def _reconstruct_reading_order(data: dict) -> str:
     (confirmed against real output that this fix, as first written,
     still produced a one-row shift, just shifted differently -- "fiber
     got protein's values" instead of the original shift direction).
-    Fixed properly here with gap-based splitting instead: sort all words
-    top-to-bottom, then start a NEW row whenever the gap to the PREVIOUS
-    word (not a moving average) exceeds a threshold based on the
-    OVERALL median word height. This is the standard way to do this kind
-    of 1D row segmentation and doesn't have the moving-target problem.
+    Fixed with gap-based splitting instead: sort all words top-to-bottom,
+    start a NEW row whenever the gap to the PREVIOUS word (not a moving
+    average) exceeds a threshold. That fixed most of the label (kcal,
+    fat, saturated fat all landed on their own correct values against
+    real output) but NOT all of it -- a second real-data test still
+    mis-clustered specifically the boundary between an indented "HERAF
+    SUKKERARTER" sub-line and the following "KOSTFIBRE" row. The
+    threshold at that point was using the OVERALL median word height as
+    its reference -- but the sub-line is visibly smaller font on the
+    actual label photo, so a threshold sized for the label's typical
+    (larger) row height was too loose specifically there. Fixed by
+    using each PAIR's own average height as the threshold reference
+    instead of one global figure, so a boundary next to smaller
+    subordinate text gets a proportionally tighter threshold. Row
+    groupings are also logged now (separately from the final text) so
+    if this is STILL wrong on some other label, that's diagnosable
+    directly instead of guessing at threshold values blind again.
     """
     n = len(data.get("text", []))
     items = []
@@ -407,17 +419,21 @@ def _reconstruct_reading_order(data: dict) -> str:
 
     items.sort(key=lambda w: w["y_center"])
 
-    heights = sorted(i["height"] for i in items)
-    median_height = heights[len(heights) // 2]
-    # Threshold based on the OVERALL median height, not each individual
-    # word's own height -- a stable reference that doesn't get thrown
-    # off by one unusually small/large word (e.g. a lowercase unit
-    # suffix with a smaller bounding box than the digits next to it).
-    row_gap_threshold = max(median_height, 1) * 0.6
-
     rows: list[list[dict]] = [[items[0]]]
     for prev, curr in zip(items, items[1:]):
         gap = curr["y_center"] - prev["y_center"]
+        # Local pair-height threshold, NOT a single global median --
+        # confirmed against real output that a global threshold still
+        # mis-clustered specifically the boundary between an indented
+        # "HERAF ..." sub-line (visibly smaller font on the actual
+        # label photo) and the next full-size row: fiber_100g picked up
+        # the sugar sub-line's real value instead of its own. Using the
+        # PAIR's own average height means a boundary next to smaller
+        # subordinate text gets a proportionally smaller (tighter)
+        # threshold instead of being measured against the whole label's
+        # typical (larger) row height.
+        pair_height = (prev["height"] + curr["height"]) / 2
+        row_gap_threshold = max(pair_height, 1) * 0.6
         if gap > row_gap_threshold:
             rows.append([curr])
         else:
@@ -427,6 +443,13 @@ def _reconstruct_reading_order(data: dict) -> str:
     for row in rows:
         row.sort(key=lambda w: w["x_left"])
         lines.append(" ".join(w["text"] for w in row))
+
+    # Logged separately from the final joined text (already logged by
+    # scan_label in app/routers/items.py) -- if row grouping is STILL
+    # wrong after this fix, this is what lets that be diagnosed directly
+    # from real data instead of guessing at threshold values a third
+    # time blind.
+    logger.info("OCR row groups: %s", [[w["text"] for w in row] for row in rows])
 
     return "\n".join(lines)
 
