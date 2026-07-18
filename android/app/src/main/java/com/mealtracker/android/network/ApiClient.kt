@@ -39,9 +39,21 @@ object ApiClient {
         }
     }
 
+    // Default OkHttp timeouts (10s connect/read/write) were almost
+    // certainly why OCR requests kept "timing out" even after the
+    // server-side download/warm-up issues were fixed -- EasyOCR
+    // inference on a Pi's CPU (no GPU) genuinely can take 15-40+ seconds
+    // per label photo (confirmed: the server logs showed these requests
+    // completing successfully with real results, just slowly -- the
+    // client was giving up before the response ever arrived). Read
+    // timeout raised generously to cover that; connect/write stay
+    // closer to default since those aren't the slow part.
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(authInterceptor)
         .addInterceptor(loggingInterceptor)
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(90, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     val service: ApiService by lazy {

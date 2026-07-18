@@ -3,7 +3,6 @@ package com.mealtracker.android.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -67,6 +66,7 @@ import com.mealtracker.android.ui.components.BarcodeScannerWithControls
 import com.mealtracker.android.ui.components.CropDialog
 import com.mealtracker.android.ui.components.LiveLabelCaptureView
 import com.mealtracker.android.ui.components.decodeBarcodeFromUri
+import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -141,7 +141,7 @@ fun AddItemScreen(
         val uri = pendingCropSourceUri ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                decodeBitmapWithCorrectOrientation(context, uri)
             } catch (e: Exception) {
                 null
             }

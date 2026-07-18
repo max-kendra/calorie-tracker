@@ -1,7 +1,6 @@
 package com.mealtracker.android.ui.components
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -62,7 +61,7 @@ fun rememberImagePickerWithCrop(onCropped: (ByteArray) -> Unit): () -> Unit {
         val uri = pendingUri ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                decodeBitmapWithCorrectOrientation(context, uri)
             } catch (e: Exception) {
                 null
             }

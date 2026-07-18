@@ -1,7 +1,6 @@
 package com.mealtracker.android.ui.screens
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +89,7 @@ import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.ui.components.CatalogVisuals
 import com.mealtracker.android.ui.components.CropDialog
+import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
 import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.MacroRingsRow
 import com.mealtracker.android.ui.components.MealVisuals
@@ -977,7 +977,7 @@ private fun ItemLogPageDialog(
         val uri = pendingCropSourceUri ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                decodeBitmapWithCorrectOrientation(context, uri)
             } catch (e: Exception) {
                 null
             }

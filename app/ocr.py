@@ -83,6 +83,16 @@ logger = logging.getLogger(__name__)
 # dictionaries are deliberately left in place below regardless, since
 # plain-ASCII portions of their keywords can still occasionally match
 # against whatever the reduced character set does recognize.
+
+# Longest-side cap for run_ocr()'s pre-resize -- see that function's doc
+# comment. 1600px keeps printed nutrition-label text comfortably legible
+# (these aren't small-print ingredient lists needing max resolution)
+# while meaningfully cutting CPU-only inference time on constrained
+# hardware. Not benchmarked against a specific "too small, text becomes
+# unreadable" threshold -- worth revisiting if recognition quality drops
+# noticeably compared to before this was added.
+_MAX_OCR_DIMENSION = 1600
+
 _EASYOCR_LANG_CODES = {
     "dan": "da",
     "eng": "en",
@@ -364,6 +374,18 @@ def run_ocr(image_bytes: bytes) -> str:
     run once, since there's only one OCR pass to score.
     """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+    # Downscale before OCR -- phone camera photos are often 3000-4000px+
+    # on the longest side, far more resolution than printed nutrition-
+    # label text needs to stay legible, and EasyOCR's detection AND
+    # recognition passes both scale with pixel count. On CPU-only
+    # hardware (a Pi, no GPU) this is a real, meaningful speed
+    # difference, not a minor optimization -- confirmed slow in practice
+    # (per real deploy logs / design discussion: "I hear the fan turn
+    # on when we're OCR'ing"). thumbnail() preserves aspect ratio and is
+    # a no-op if the image is already smaller than this.
+    image.thumbnail((_MAX_OCR_DIMENSION, _MAX_OCR_DIMENSION))
+
     reader = _get_reader()
     # detail=0 -> just the recognized strings (no bounding boxes/
     # confidence); paragraph=False -> keep individual detected lines

@@ -97,6 +97,17 @@ dependencies {
     implementation(libs.health.connect.client)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // Reads a photo's embedded EXIF orientation tag so captured images
+    // display right-side-up before cropping -- camera JPEGs are
+    // typically stored in the sensor's native (landscape) pixel
+    // layout with an EXIF tag saying how to rotate for display, rather
+    // than actually rotating the pixel data itself (cheaper for the
+    // camera to write). BitmapFactory.decodeStream() ignores that tag
+    // entirely, which is why a portrait photo was showing up sideways
+    // in the crop screen every time (see design discussion) -- not a
+    // bug in OUR crop/rotate logic, just a step that was never being
+    // done at all.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Forces a real Guava dependency into the graph -- without this,
     // Health Connect's transitive deps can pull in the empty
     // com.google.guava:listenablefuture:1.0 placeholder artifact (some
