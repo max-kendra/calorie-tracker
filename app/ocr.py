@@ -1,7 +1,7 @@
 """
 OCR extraction for nutrition labels.
 
-Flow: run EasyOCR across all supported languages combined -> pick the
+Flow: run Tesseract across all supported languages combined -> pick the
 best-matching language by counting keyword hits per language's dictionary
 -> parse per-100g macro values from the recognized text using that
 language's keyword patterns -> convert salt->sodium if the label uses
@@ -11,181 +11,105 @@ This NEVER writes to our DB -- same pattern as USDA and barcode scanning:
 the result is a best-effort draft for the client to show in the Add Item
 review form, which the user corrects before anything is saved.
 
-ENGINE NOTE: this used to run on Tesseract (pytesseract). We switched to
-EasyOCR because it was noticeably more accurate on real, imperfectly-lit
-photos of labels -- Tesseract needed fairly clean, well-cropped input to
-do well, which didn't match how people actually photograph labels in the
-app. Tradeoff: EasyOCR runs on PyTorch, so it's heavier (bigger image,
-slower per-request CPU inference, and it downloads model weights on
-first run) than Tesseract was, which matters if this is deployed on a
-Raspberry Pi -- worth benchmarking real request latency post-deploy.
+ENGINE NOTE (Tesseract branch): this app has gone back and forth between
+Tesseract (pytesseract) and EasyOCR -- see the other branch/history for
+that story. This branch is Tesseract again, to actually compare the two
+on real data (see app/ocr_metrics.py, which records per-scan timing/
+memory tagged by `engine` for exactly this). Tesseract is a classical
+(non-neural-network) OCR engine -- much lighter on CPU-only hardware
+than EasyOCR/PyTorch, and its language data is installed via apt at
+image-build time (see Dockerfile), not downloaded lazily on first use --
+so there's no equivalent of EasyOCR's first-request download/timeout
+issue here at all, and no Reader-construction/warm-up step really
+needed (see warm_up() below, now a no-op).
+
+Tesseract also doesn't have EasyOCR's "which languages can share one
+model" restriction (that's what forced trimming down to 4 languages on
+the EasyOCR branch) -- each Tesseract language is its own independent
+traineddata file, and combining several via lang="eng+dan+..." doesn't
+raise on an unsupported combination the way EasyOCR's Reader did. The
+tradeoff is speed, not compatibility: more combined languages means
+Tesseract tries recognition against more trained models, which does
+scale roughly with how many are listed -- worth keeping an eye on via
+ocr_metrics.py if language coverage gets expanded further.
 
 The parsing/keyword logic below (`_extract_number_near_keyword`,
 `_extract_kcal`, `LANGUAGE_CONFIGS`, etc.) is engine-agnostic -- it just
 operates on whatever text string the OCR step returns, one line per
-detected text region -- so none of that needed to change. The comments
-in there about specific Tesseract quirks (dropped whitespace, misread
-characters) are historical context from when this was tuned against
-Tesseract output; they're left in place since tolerating that kind of
-noise is harmless even if EasyOCR doesn't happen to exhibit the exact
-same quirks, but they haven't been re-verified against real EasyOCR
-output. Treat that the same way as the "HONESTY ABOUT LANGUAGE COVERAGE"
-note below -- re-verify against real EasyOCR output before trusting it
-fully in production.
+detected line of text -- so none of that needed to change switching back
+to this engine. Tesseract's own layout analysis generally preserves
+proper reading order for structured documents on its own, unlike
+EasyOCR's raw detection order (see the reading-order bug that used to
+live here, on the EasyOCR branch) -- if garbled/misordered output shows
+up again on real labels, pytesseract.image_to_data() exposes the same
+per-word bounding-box info that fix relied on, and the same row-grouping
+technique could be reapplied here.
 
 HONESTY ABOUT LANGUAGE COVERAGE: Danish, German, and English keyword
 dictionaries below were verified against real Tesseract OCR output on
-synthetic label images (see tests) -- not yet re-verified against
-EasyOCR output. Swedish, Finnish, Norwegian, Spanish, Slovak, and Czech
-dictionaries use standard EU nutrition-label vocabulary (consistent
-under EU FIC labeling regulation) but have NOT been run through real OCR
-of either engine here -- they should be treated as a reasonable starting
-point, not verified, until tested against real labels in those
-languages.
+synthetic label images (see tests). Swedish, Finnish, Norwegian,
+Spanish, Slovak, Czech, and Polish dictionaries use standard EU
+nutrition-label vocabulary (consistent under EU FIC labeling regulation)
+but have NOT been run through real OCR here -- treat them as a
+reasonable starting point, not verified, until tested against real
+labels in those languages.
 """
 
-import re
 import difflib
 import logging
-import threading
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
 from typing import Optional
 
-import easyocr
-import numpy as np
+import pytesseract
 from PIL import Image
 
 from app.nutrition import salt_g_to_sodium_mg
 
 logger = logging.getLogger(__name__)
 
-# EasyOCR language codes for the 9 languages we support -- these are NOT
-# the same codes Tesseract used (e.g. "dan" -> "da", "deu" -> "de"). The
-# LANGUAGE_CONFIGS dict below still keys off the Tesseract-style codes
-# ("dan", "deu", ...) since that's what detect_language()/parse_label()
-# use internally and what the rest of the app (tests, API responses)
-# expects -- this map is only used to talk to EasyOCR itself.
-#
-# Trimmed down to 4 languages (from 9) per design discussion -- English,
-# Danish, Polish, and Slovak between them cover standard Latin, Nordic
-# vowels, and Slavic diacritics, which is "most" of what the full list
-# added anyway. IMPORTANT CAVEAT, so this doesn't get treated as a
-# bigger fix than it is: this does NOT meaningfully shrink the one-time
-# model download that was actually causing the timeout (see
-# _get_reader()'s doc comment) -- EasyOCR downloads one shared
-# recognition model per SCRIPT, not one per language, so 4 Latin
-# languages vs 9 downloads roughly the same files. What this DOES help
-# with is Reader construction time and memory after that download
-# completes (a smaller combined character set), and it does mean
-# German/Norwegian/Swedish/Czech/Spanish-specific diacritics won't be
-# recognized correctly anymore -- their LANGUAGE_CONFIGS keyword
-# dictionaries are deliberately left in place below regardless, since
-# plain-ASCII portions of their keywords can still occasionally match
-# against whatever the reduced character set does recognize.
-
-# Longest-side cap for run_ocr()'s pre-resize -- see that function's doc
-# comment. 1600px keeps printed nutrition-label text comfortably legible
-# (these aren't small-print ingredient lists needing max resolution)
-# while meaningfully cutting CPU-only inference time on constrained
-# hardware. Not benchmarked against a specific "too small, text becomes
-# unreadable" threshold -- worth revisiting if recognition quality drops
-# noticeably compared to before this was added.
+# Longest-side cap for run_ocr()'s pre-resize. 1600px keeps printed
+# nutrition-label text comfortably legible (these aren't small-print
+# ingredient lists needing max resolution) while cutting CPU inference
+# time on constrained hardware -- Tesseract is much lighter than EasyOCR
+# to begin with, but this still helps and costs nothing to keep. Not
+# benchmarked against a specific "too small, text becomes unreadable"
+# threshold -- worth revisiting if recognition quality drops noticeably.
 _MAX_OCR_DIMENSION = 1600
 
-_EASYOCR_LANG_CODES = {
-    "dan": "da",
-    "eng": "en",
-    "pol": "pl",
-    "slk": "sk",
-}
-
-# EasyOCR's Reader is expensive to construct (loads model weights from
-# disk/downloads them on first run) -- build it once lazily and reuse it
-# across requests rather than per-call. Guarded with a lock since FastAPI
-# may serve requests concurrently and Reader construction isn't meant to
-# be called from multiple threads at once.
+# Tesseract's own multi-language syntax (lang="a+b+c") -- these are
+# Tesseract's native 3-letter codes, which is ALSO what LANGUAGE_CONFIGS
+# below is keyed by, so unlike the EasyOCR branch there's no separate
+# code-translation map needed here at all. Each of these needs its
+# corresponding `tesseract-ocr-<code>` apt package installed (see
+# Dockerfile) -- pytesseract itself does nothing without that data
+# present on the system.
 #
-# CORRECTED (reverting a wrong "fix" from earlier): this was briefly
-# changed to build a SEPARATE Reader per language (each paired with
-# English), on the assumption that EasyOCR can't combine unrelated
-# languages into one Reader. That assumption was wrong for this case --
-# EasyOCR groups languages by SCRIPT, and every language on our list
-# (English, Danish, Norwegian, Swedish, Finnish, Slovak, Czech, Polish,
-# French, Spanish) shares the same Latin-script model; combining them
-# loads ONE model with the union of each language's diacritics, not 9
-# incompatible ones. Running 8-9 SEPARATE Readers instead was
-# significantly heavier (multiple full model loads + multiple inference
-# passes per request) than the original single combined Reader ever
-# was, and that's what was actually behind the new OCR/product-photo-
-# scan timeouts and 500s/502s -- not a language-compatibility bug at
-# all. Reverted to a single combined Reader, which is both simpler and
-# correct.
-#
-# If Reader construction ever does fail for a genuinely bad reason, this
-# now logs the real exception instead of silently swallowing it (that
-# silent-swallow behavior in the caller -- see scan_label's try/except
-# in app/routers/items.py -- is what let the previous, wrong diagnosis
-# go unnoticed for as long as it did).
-_reader: Optional[easyocr.Reader] = None
-_reader_lock = threading.Lock()
-
-
-def _get_reader() -> easyocr.Reader:
-    global _reader
-    if _reader is None:
-        with _reader_lock:
-            if _reader is None:  # re-check inside the lock
-                try:
-                    _reader = easyocr.Reader(
-                        list(_EASYOCR_LANG_CODES.values()),
-                        gpu=False,
-                        # Explicit path instead of EasyOCR's default
-                        # (~/.EasyOCR, i.e. /root/.EasyOCR in this
-                        # container) -- matches docker-compose.yml's
-                        # ./easyocr_models:/app/easyocr_models volume
-                        # mount, so the downloaded models persist across
-                        # rebuilds instead of re-downloading every time
-                        # (see design discussion). Relying on the
-                        # default would've worked too as long as the
-                        # volume mount pointed at the right place, but
-                        # this is more explicit/robust against the
-                        # container's user or home directory ever
-                        # changing.
-                        model_storage_directory="/app/easyocr_models",
-                    )
-                except Exception:
-                    logger.exception(
-                        "EasyOCR Reader construction failed for languages: %s",
-                        list(_EASYOCR_LANG_CODES.values()),
-                    )
-                    raise
-    return _reader
+# Not restricted to 4 languages the way the EasyOCR branch was -- that
+# restriction existed specifically because EasyOCR couldn't combine
+# certain languages into one Reader (raised ValueError for Finnish
+# specifically, confirmed against a real error). Tesseract doesn't have
+# that restriction, so Finnish is back, and there's no reason not to use
+# the full set this app has ever supported.
+_TESSERACT_LANGS = "eng+dan+deu+swe+fin+nor+spa+slk+ces+pol"
 
 
 def warm_up():
     """
-    Forces the (one-time-per-container-lifetime) Reader construction --
-    including EasyOCR's own model download on a fresh container/volume,
-    which took ~20-40s in practice (confirmed against real deploy logs:
-    detection model download, then recognition model download, then
-    torch/dataloader init) -- to happen NOW, at app startup (see
-    app/main.py's lifespan handler), rather than whenever the first live
-    OCR request happens to land.
-
-    That was the actual bug behind "timeout after the download log line,
-    but the process finishes anyway" -- the download/init isn't slow on
-    EVERY request, just the very first one after a container starts, and
-    that unlucky first request was always some real user's scan attempt,
-    which timed out client-side waiting for it. Trimming the language
-    list (see _EASYOCR_LANG_CODES's doc comment) does NOT fix this by
-    itself -- it only shaves Reader construction time after the download,
-    not the download itself. Moving the cost to startup means it happens
-    once during `docker compose up`/deploy instead, which nobody's
-    waiting on a live request for.
+    No-op on this engine. EasyOCR needed this to force its one-time model
+    download/Reader construction to happen at startup instead of on
+    whichever live request happened to be first (see that branch's
+    history for the timeout bug this fixed). Tesseract has no equivalent
+    cost -- its language data is installed via apt at image-build time,
+    already on disk and ready the moment the container starts, nothing
+    to lazily initialize. Kept as a function (even though it does
+    nothing here) so app/main.py's startup hook doesn't need to change
+    between branches -- it becomes meaningful again automatically if you
+    switch back to EasyOCR.
     """
-    _get_reader()
+    pass
 
 
 @dataclass
@@ -193,15 +117,20 @@ class LabelLanguageConfig:
     per_100g_markers: list[str]
     energy_keyword: str  # matched directly before "kcal"
     fat_keyword: str
-    fat_exclude_prefixes: list[str]  # lines starting with these are "of which" sub-lines
+    fat_exclude_prefixes: list[str]
     saturated_fat_keyword: str
     carbs_keyword: str
     carbs_exclude_prefixes: list[str]
     sugar_keyword: str
     fiber_keyword: str
     protein_keyword: str
-    salt_keyword: Optional[str] = None  # EU labels: salt in grams
-    sodium_keyword: Optional[str] = None  # some labels show sodium directly
+    # Both optional -- most labels only show one or the other. salt_keyword
+    # happens to be provided by every LANGUAGE_CONFIGS entry below in
+    # practice, but is still guarded with `if config.salt_keyword:`
+    # wherever it's read, same as sodium_keyword, so a future language
+    # entry is free to omit either.
+    salt_keyword: Optional[str] = None
+    sodium_keyword: Optional[str] = None
 
 
 LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
@@ -260,6 +189,24 @@ LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
         fiber_keyword="fibrer",
         protein_keyword="protein",
         salt_keyword="salt",
+    ),
+    # Re-added on this branch -- removed on the EasyOCR branch because
+    # EasyOCR's Reader specifically raised ValueError trying to combine
+    # Finnish with the other languages (confirmed against a real error).
+    # Tesseract has no such restriction (see _TESSERACT_LANGS' doc
+    # comment), so there's no reason to leave this out here.
+    "fin": LabelLanguageConfig(
+        per_100g_markers=["100 g"],
+        energy_keyword="energia",
+        fat_keyword="rasva",
+        fat_exclude_prefixes=["josta"],
+        saturated_fat_keyword="tyydyttynyttä",
+        carbs_keyword="hiilihydraatti",
+        carbs_exclude_prefixes=["josta"],
+        sugar_keyword="sokereita",
+        fiber_keyword="kuitu",
+        protein_keyword="proteiini",
+        salt_keyword="suola",
     ),
     "nor": LabelLanguageConfig(
         per_100g_markers=["100 g"],
@@ -409,111 +356,24 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> 
     return sum(1 for kw in keywords if _fuzzy_contains(text_lower, kw))
 
 
-def _reconstruct_reading_order(detections: list) -> str:
-    """
-    EasyOCR's own detection order (what you'd get from detail=0) does
-    NOT reliably match visual reading order for a two-column layout like
-    a nutrition table (label words on the left, numbers on the right) --
-    confirmed against real output where EVERY number came out first as
-    one cluster, then EVERY label word came out after as a second
-    cluster, with zero lines actually pairing a keyword with its value.
-    That's not a recognition failure (the text was read correctly) --
-    it's an ordering one, and _extract_number_near_keyword() below needs
-    a keyword and its number on the SAME line to find anything at all,
-    so this was quietly the real reason "the values are clearly in
-    there" still produced zero macros.
-
-    Reconstructs proper top-to-bottom, left-to-right order from the
-    bounding boxes detail=1 gives us (which detail=0 throws away):
-    group detections into rows by vertical position, sort each row
-    left-to-right, then sort rows top-to-bottom -- so a table row's
-    label and value end up adjacent in the final text the way the
-    parsing functions below expect.
-    """
-    if not detections:
-        return ""
-
-    items = []
-    for bbox, text, _confidence in detections:
-        ys = [point[1] for point in bbox]
-        xs = [point[0] for point in bbox]
-        items.append({
-            "text": text,
-            "y_center": sum(ys) / len(ys),
-            "x_left": min(xs),
-            "height": max(ys) - min(ys),
-        })
-
-    items.sort(key=lambda i: i["y_center"])
-
-    # A detection joins the current row if its vertical center is within
-    # ~60% of a text-height of that row's running average center --
-    # loose enough to tolerate a slightly crooked photo/detection
-    # without merging genuinely different table rows into one.
-    rows: list[list[dict]] = []
-    current_row: list[dict] = []
-    current_row_y = 0.0
-    for item in items:
-        if current_row and abs(item["y_center"] - current_row_y) <= max(item["height"], 1) * 0.6:
-            current_row.append(item)
-            current_row_y = sum(i["y_center"] for i in current_row) / len(current_row)
-        else:
-            if current_row:
-                rows.append(current_row)
-            current_row = [item]
-            current_row_y = item["y_center"]
-    if current_row:
-        rows.append(current_row)
-
-    lines = []
-    for row in rows:
-        row.sort(key=lambda i: i["x_left"])
-        lines.append(" ".join(i["text"] for i in row))
-
-    return "\n".join(lines)
-
-
 def run_ocr(image_bytes: bytes) -> str:
     """
-    Runs EasyOCR ONCE, combined across all supported languages (see
-    _get_reader()'s doc comment for why one combined Reader is correct
-    here, not one per language), and returns the recognized text
-    reassembled into proper reading order (see
-    _reconstruct_reading_order's doc comment for why that's a separate,
-    necessary step and not just "join the lines"). Which language the
-    text is actually in gets figured out afterward by detect_language()
-    (see extract_label_from_image()), via the same keyword-scoring
-    approach that used to also run once per language here -- now it
-    only needs to run once, since there's only one OCR pass to score.
+    Runs Tesseract ONCE, combined across all supported languages (see
+    _TESSERACT_LANGS) via pytesseract -- a thin wrapper around the
+    system `tesseract` CLI binary. Which language the text is actually
+    in gets figured out afterward by detect_language() (see
+    extract_label_from_image()), via the same keyword-scoring approach
+    used on every other branch -- unchanged, since that logic is
+    engine-agnostic.
     """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-    # Downscale before OCR -- phone camera photos are often 3000-4000px+
-    # on the longest side, far more resolution than printed nutrition-
-    # label text needs to stay legible, and EasyOCR's detection AND
-    # recognition passes both scale with pixel count. On CPU-only
-    # hardware (a Pi, no GPU) this is a real, meaningful speed
-    # difference, not a minor optimization -- confirmed slow in practice
-    # (per real deploy logs / design discussion: "I hear the fan turn
-    # on when we're OCR'ing"). thumbnail() preserves aspect ratio and is
-    # a no-op if the image is already smaller than this. Note this
-    # operates on whatever was already uploaded -- if the client already
-    # cropped tightly (see design discussion), there may be little or
-    # nothing left to downscale; this only helps when the cropped
-    # region is STILL larger than _MAX_OCR_DIMENSION despite being a
-    # small fraction of the original photo (a modern phone sensor can
-    # produce a tight crop that's still several megapixels).
+    # Downscale before OCR -- see _MAX_OCR_DIMENSION's doc comment.
+    # thumbnail() preserves aspect ratio and is a no-op if the image is
+    # already smaller than this.
     image.thumbnail((_MAX_OCR_DIMENSION, _MAX_OCR_DIMENSION))
 
-    reader = _get_reader()
-    # detail=1 (the default) -- NEEDED now for the bounding boxes
-    # _reconstruct_reading_order uses; detail=0 was discarding exactly
-    # the position info required to fix the ordering bug above.
-    # paragraph=False -- keep individual detected text regions separate
-    # rather than merging into paragraphs, since we're doing our own
-    # row-grouping instead.
-    detections = reader.readtext(np.array(image), paragraph=False)
-    return _reconstruct_reading_order(detections)
+    return pytesseract.image_to_string(image, lang=_TESSERACT_LANGS)
 
 
 def detect_language(text: str) -> Optional[str]:
@@ -695,7 +555,7 @@ def guess_name_and_brand(text: str) -> tuple[Optional[str], Optional[str]]:
     date-looking lines via _looks_like_text), guess the LONGEST such line
     is the product name -- on real packaging the product name is
     typically the most prominent (often largest-font) text, and while
-    EasyOCR doesn't give us font-size info to check that directly, line
+    OCR doesn't give us font-size info to check that directly, line
     length is a rough proxy that's easy to compute and better than
     guessing randomly. The brand guess is simply the next-longest
     distinct line, on the (weak, often wrong) assumption that the brand
