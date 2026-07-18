@@ -360,18 +360,82 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> 
     return sum(1 for kw in keywords if re.search(kw, text_lower))
 
 
+def _reconstruct_reading_order(detections: list) -> str:
+    """
+    EasyOCR's own detection order (what you'd get from detail=0) does
+    NOT reliably match visual reading order for a two-column layout like
+    a nutrition table (label words on the left, numbers on the right) --
+    confirmed against real output where EVERY number came out first as
+    one cluster, then EVERY label word came out after as a second
+    cluster, with zero lines actually pairing a keyword with its value.
+    That's not a recognition failure (the text was read correctly) --
+    it's an ordering one, and _extract_number_near_keyword() below needs
+    a keyword and its number on the SAME line to find anything at all,
+    so this was quietly the real reason "the values are clearly in
+    there" still produced zero macros.
+
+    Reconstructs proper top-to-bottom, left-to-right order from the
+    bounding boxes detail=1 gives us (which detail=0 throws away):
+    group detections into rows by vertical position, sort each row
+    left-to-right, then sort rows top-to-bottom -- so a table row's
+    label and value end up adjacent in the final text the way the
+    parsing functions below expect.
+    """
+    if not detections:
+        return ""
+
+    items = []
+    for bbox, text, _confidence in detections:
+        ys = [point[1] for point in bbox]
+        xs = [point[0] for point in bbox]
+        items.append({
+            "text": text,
+            "y_center": sum(ys) / len(ys),
+            "x_left": min(xs),
+            "height": max(ys) - min(ys),
+        })
+
+    items.sort(key=lambda i: i["y_center"])
+
+    # A detection joins the current row if its vertical center is within
+    # ~60% of a text-height of that row's running average center --
+    # loose enough to tolerate a slightly crooked photo/detection
+    # without merging genuinely different table rows into one.
+    rows: list[list[dict]] = []
+    current_row: list[dict] = []
+    current_row_y = 0.0
+    for item in items:
+        if current_row and abs(item["y_center"] - current_row_y) <= max(item["height"], 1) * 0.6:
+            current_row.append(item)
+            current_row_y = sum(i["y_center"] for i in current_row) / len(current_row)
+        else:
+            if current_row:
+                rows.append(current_row)
+            current_row = [item]
+            current_row_y = item["y_center"]
+    if current_row:
+        rows.append(current_row)
+
+    lines = []
+    for row in rows:
+        row.sort(key=lambda i: i["x_left"])
+        lines.append(" ".join(i["text"] for i in row))
+
+    return "\n".join(lines)
+
+
 def run_ocr(image_bytes: bytes) -> str:
     """
     Runs EasyOCR ONCE, combined across all supported languages (see
     _get_reader()'s doc comment for why one combined Reader is correct
-    here, not one per language), and returns the recognized text as one
-    line per detected text region (newline-joined) -- matching the
-    line-oriented shape the parsing functions below expect, same shape
-    pytesseract.image_to_string used to produce. Which language the text
-    is actually in gets figured out afterward by detect_language() (see
-    extract_label_from_image()), via the same keyword-scoring approach
-    that used to also run once per language here -- now it only needs to
-    run once, since there's only one OCR pass to score.
+    here, not one per language), and returns the recognized text
+    reassembled into proper reading order (see
+    _reconstruct_reading_order's doc comment for why that's a separate,
+    necessary step and not just "join the lines"). Which language the
+    text is actually in gets figured out afterward by detect_language()
+    (see extract_label_from_image()), via the same keyword-scoring
+    approach that used to also run once per language here -- now it
+    only needs to run once, since there's only one OCR pass to score.
     """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
@@ -383,17 +447,24 @@ def run_ocr(image_bytes: bytes) -> str:
     # difference, not a minor optimization -- confirmed slow in practice
     # (per real deploy logs / design discussion: "I hear the fan turn
     # on when we're OCR'ing"). thumbnail() preserves aspect ratio and is
-    # a no-op if the image is already smaller than this.
+    # a no-op if the image is already smaller than this. Note this
+    # operates on whatever was already uploaded -- if the client already
+    # cropped tightly (see design discussion), there may be little or
+    # nothing left to downscale; this only helps when the cropped
+    # region is STILL larger than _MAX_OCR_DIMENSION despite being a
+    # small fraction of the original photo (a modern phone sensor can
+    # produce a tight crop that's still several megapixels).
     image.thumbnail((_MAX_OCR_DIMENSION, _MAX_OCR_DIMENSION))
 
     reader = _get_reader()
-    # detail=0 -> just the recognized strings (no bounding boxes/
-    # confidence); paragraph=False -> keep individual detected lines
-    # separate rather than merging into paragraphs, since the per-line
-    # keyword matching below relies on each nutrition-label row being
-    # its own line.
-    lines = reader.readtext(np.array(image), detail=0, paragraph=False)
-    return "\n".join(lines)
+    # detail=1 (the default) -- NEEDED now for the bounding boxes
+    # _reconstruct_reading_order uses; detail=0 was discarding exactly
+    # the position info required to fix the ordering bug above.
+    # paragraph=False -- keep individual detected text regions separate
+    # rather than merging into paragraphs, since we're doing our own
+    # row-grouping instead.
+    detections = reader.readtext(np.array(image), paragraph=False)
+    return _reconstruct_reading_order(detections)
 
 
 def detect_language(text: str) -> Optional[str]:
