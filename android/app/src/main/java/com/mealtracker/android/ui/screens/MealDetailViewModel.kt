@@ -42,7 +42,7 @@ private val MEAL_DISPLAY_NAMES = mapOf(
  * barcodeNotFound, now removed) but was fully superseded once the whole
  * flow could be embedded inline (see design discussion: "we want it
  * inside the card", not navigating to a separate screen). */
-enum class AddItemSheetMode { SEARCH, BARCODE }
+enum class AddItemSheetMode { SEARCH, BARCODE, CREATE }
 
 /**
  * Flat default for the sheet's "quick log" flows (tap a Saved/Search

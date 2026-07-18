@@ -314,6 +314,11 @@ fun MealDetailScreen(
                         selected = state.sheetMode == AddItemSheetMode.BARCODE && !state.enteredAddFlowViaUsdaLink,
                         onClick = { selectMethod(AddItemSheetMode.BARCODE) }
                     )
+                    AddMethodIcon(
+                        Icons.Filled.Add, "Create",
+                        selected = state.sheetMode == AddItemSheetMode.CREATE,
+                        onClick = { selectMethod(AddItemSheetMode.CREATE) }
+                    )
                 }
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
@@ -442,6 +447,30 @@ fun MealDetailScreen(
                                 addItemViewModel.resetToScanChoice()
                                 viewModel.setSheetMode(AddItemSheetMode.SEARCH)
                                 viewModel.openItemQuantityPicker(item)
+                            }
+                        )
+                    }
+                    AddItemSheetMode.CREATE -> {
+                        // Same per-meal scoping reasoning as
+                        // AddItemViewModel above -- a fresh build each
+                        // time this meal's Create tab is re-entered,
+                        // rather than resuming a half-finished recipe
+                        // from switching meals and back.
+                        val createRecipeViewModel: CreateRecipeViewModel =
+                            viewModel(key = "create_recipe_${date}_$mealType")
+                        CreateRecipeContent(
+                            viewModel = createRecipeViewModel,
+                            onLogToMeal = { recipe ->
+                                viewModel.logRecipeQuickly(recipe)
+                                createRecipeViewModel.reset()
+                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                            },
+                            onDone = {
+                                createRecipeViewModel.reset()
+                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                                viewModel.refreshSearchAfterAdd()
+                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
                             }
                         )
                     }

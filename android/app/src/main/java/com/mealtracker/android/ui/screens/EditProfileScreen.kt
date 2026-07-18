@@ -139,7 +139,7 @@ fun EditProfileScreen(
             )
 
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
-            Text("Dominant hormone (optional)", style = MaterialTheme.typography.labelLarge)
+            Text("Dominant hormone", style = MaterialTheme.typography.labelLarge)
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
