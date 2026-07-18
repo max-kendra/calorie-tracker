@@ -7,10 +7,12 @@ WORKDIR /app
 # OCR (app/ocr.py) runs on EasyOCR now instead of Tesseract -- EasyOCR is
 # pure Python + PyTorch, so unlike pytesseract it does NOT need a system
 # binary/language packs installed via apt (the tesseract-ocr-* packages
-# that used to be here are gone). EasyOCR does download its model weights
-# on first run instead, so the container needs outbound network access
-# the first time it starts (or bake the weights into the image ahead of
-# time if this needs to run fully offline).
+# that used to be here are gone). EasyOCR downloads its model weights on
+# first run -- see docker-compose.yml's easyocr_models volume mount,
+# which persists that download across rebuilds/recreates so it only
+# happens once per Pi, not once per deploy. Still needs outbound network
+# access the very first time (or bake the weights into the image ahead
+# of time if this needs to run fully offline from day one).
 # build-essential + cmake: zxing-cpp has no prebuilt wheel for ARM64
 # (the Pi's architecture), so pip has to compile it from source, which
 # needs a C/C++ compiler and cmake. Not needed on x86_64 where a

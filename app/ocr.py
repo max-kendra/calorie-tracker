@@ -66,21 +66,28 @@ logger = logging.getLogger(__name__)
 # ("dan", "deu", ...) since that's what detect_language()/parse_label()
 # use internally and what the rest of the app (tests, API responses)
 # expects -- this map is only used to talk to EasyOCR itself.
+#
+# Trimmed down to 4 languages (from 9) per design discussion -- English,
+# Danish, Polish, and Slovak between them cover standard Latin, Nordic
+# vowels, and Slavic diacritics, which is "most" of what the full list
+# added anyway. IMPORTANT CAVEAT, so this doesn't get treated as a
+# bigger fix than it is: this does NOT meaningfully shrink the one-time
+# model download that was actually causing the timeout (see
+# _get_reader()'s doc comment) -- EasyOCR downloads one shared
+# recognition model per SCRIPT, not one per language, so 4 Latin
+# languages vs 9 downloads roughly the same files. What this DOES help
+# with is Reader construction time and memory after that download
+# completes (a smaller combined character set), and it does mean
+# German/Norwegian/Swedish/Czech/Spanish-specific diacritics won't be
+# recognized correctly anymore -- their LANGUAGE_CONFIGS keyword
+# dictionaries are deliberately left in place below regardless, since
+# plain-ASCII portions of their keywords can still occasionally match
+# against whatever the reduced character set does recognize.
 _EASYOCR_LANG_CODES = {
     "dan": "da",
-    "deu": "de",
     "eng": "en",
-    "swe": "sv",
-    # "fin": "fi" removed -- EasyOCR doesn't actually support Finnish
-    # (raises ValueError({'fi'}, 'is not supported') at Reader
-    # construction, confirmed against a real error in production logs).
-    # LANGUAGE_CONFIGS' "fin" keyword dictionary is removed too, below --
-    # keeping it would've been genuinely dead weight once OCR itself
-    # can never recognize Finnish text to begin with.
-    "nor": "no",
-    "spa": "es",
+    "pol": "pl",
     "slk": "sk",
-    "ces": "cs",
 }
 
 # EasyOCR's Reader is expensive to construct (loads model weights from
@@ -120,7 +127,23 @@ def _get_reader() -> easyocr.Reader:
         with _reader_lock:
             if _reader is None:  # re-check inside the lock
                 try:
-                    _reader = easyocr.Reader(list(_EASYOCR_LANG_CODES.values()), gpu=False)
+                    _reader = easyocr.Reader(
+                        list(_EASYOCR_LANG_CODES.values()),
+                        gpu=False,
+                        # Explicit path instead of EasyOCR's default
+                        # (~/.EasyOCR, i.e. /root/.EasyOCR in this
+                        # container) -- matches docker-compose.yml's
+                        # ./easyocr_models:/app/easyocr_models volume
+                        # mount, so the downloaded models persist across
+                        # rebuilds instead of re-downloading every time
+                        # (see design discussion). Relying on the
+                        # default would've worked too as long as the
+                        # volume mount pointed at the right place, but
+                        # this is more explicit/robust against the
+                        # container's user or home directory ever
+                        # changing.
+                        model_storage_directory="/app/easyocr_models",
+                    )
                 except Exception:
                     logger.exception(
                         "EasyOCR Reader construction failed for languages: %s",
@@ -128,6 +151,30 @@ def _get_reader() -> easyocr.Reader:
                     )
                     raise
     return _reader
+
+
+def warm_up():
+    """
+    Forces the (one-time-per-container-lifetime) Reader construction --
+    including EasyOCR's own model download on a fresh container/volume,
+    which took ~20-40s in practice (confirmed against real deploy logs:
+    detection model download, then recognition model download, then
+    torch/dataloader init) -- to happen NOW, at app startup (see
+    app/main.py's lifespan handler), rather than whenever the first live
+    OCR request happens to land.
+
+    That was the actual bug behind "timeout after the download log line,
+    but the process finishes anyway" -- the download/init isn't slow on
+    EVERY request, just the very first one after a container starts, and
+    that unlucky first request was always some real user's scan attempt,
+    which timed out client-side waiting for it. Trimming the language
+    list (see _EASYOCR_LANG_CODES's doc comment) does NOT fix this by
+    itself -- it only shaves Reader construction time after the download,
+    not the download itself. Moving the cost to startup means it happens
+    once during `docker compose up`/deploy instead, which nobody's
+    waiting on a live request for.
+    """
+    _get_reader()
 
 
 @dataclass
@@ -254,6 +301,25 @@ LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
         fiber_keyword="vláknina",
         protein_keyword="bílkoviny",
         salt_keyword="sůl",
+    ),
+    # Was missing entirely -- "pol" was already in the OCR reader's
+    # language list (both before and after the 9->4 language trim) but
+    # had no keyword dictionary to actually parse recognized Polish text
+    # against, so a Polish label could get read by EasyOCR just fine and
+    # still never produce any macros. Found while double-checking the
+    # language trim per design discussion.
+    "pol": LabelLanguageConfig(
+        per_100g_markers=["100 g"],
+        energy_keyword="wartość energetyczna",
+        fat_keyword="tłuszcz",
+        fat_exclude_prefixes=["w tym"],
+        saturated_fat_keyword="kwasy tłuszczowe nasycone",
+        carbs_keyword="węglowodany",
+        carbs_exclude_prefixes=["w tym"],
+        sugar_keyword="cukry",
+        fiber_keyword="błonnik",
+        protein_keyword="białko",
+        salt_keyword="sól",
     ),
 }
 

@@ -1,9 +1,11 @@
 import logging
 import os
+import threading
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app import ocr
 from app.config import settings
 from app.routers import goals, items, logs, meal_plans, recipes, usda, user_profile
 
@@ -45,3 +47,29 @@ app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 def health_check():
     """Unauthenticated — just confirms the API process is up."""
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+def _warm_up_ocr():
+    """
+    Forces EasyOCR's Reader construction (including its one-time model
+    download on a fresh container/volume) to happen NOW, at startup,
+    instead of on whichever live request happens to be first to touch
+    OCR -- see app/ocr.py's warm_up() docstring for the full story. That
+    was the actual bug behind "we get a timeout right after the
+    download log line, but the process runs anyway" (design
+    discussion) -- the slow part only happens once per container
+    lifetime, and it was always some real user's first scan attempt
+    that unluckily landed on it.
+
+    Runs in a background thread rather than blocking startup -- this
+    can take 20-40s on a fresh container (model download + torch/
+    dataloader init, per real deploy logs), and blocking here would
+    delay every other endpoint (items, logs, USDA, etc.) from becoming
+    available for that whole time too, not just OCR. The only remaining
+    edge case is a user trying to scan something within the first
+    ~30s of a fresh deploy, before this finishes -- much narrower than
+    before, where EVERY container's first scan attempt (whenever that
+    happened to be) hit the slow path.
+    """
+    threading.Thread(target=ocr.warm_up, daemon=True).start()

@@ -17,8 +17,19 @@ services:
     # vanish on every rebuild/recreate. Left-hand side is a path on the
     # Pi; right-hand side must match Settings.media_dir resolved against
     # the container's WORKDIR (/app), i.e. media_dir="media" -> /app/media.
+    #
+    # easyocr_models: same reasoning, for EasyOCR's downloaded model
+    # weights (see app/ocr.py's _get_reader -- model_storage_directory
+    # points at /app/easyocr_models specifically so this mount has a
+    # predictable, explicit target). Without this, every rebuild wiped
+    # the container's filesystem and re-triggered EasyOCR's ~20-40s
+    # model download on whichever request happened to be the first to
+    # touch OCR after that rebuild (see design discussion -- this was
+    # part of what caused the OCR timeout bug). With it, the download
+    # only ever happens once per Pi, not once per rebuild.
     volumes:
       - ./media:/app/media
+      - ./easyocr_models:/app/easyocr_models
 
 # Note: if you ever containerize Postgres too, you'd switch back to
 # bridge networking with an explicit `ports: ["8000:8000"]` mapping and
