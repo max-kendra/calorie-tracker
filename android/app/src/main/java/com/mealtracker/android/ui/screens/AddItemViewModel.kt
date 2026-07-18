@@ -64,6 +64,17 @@ enum class AddItemPhase {
     // tab now, not from barcode scanning -- see design discussion ("the
     // barcode flow was good exactly the way it was").
     USDA_SEARCH,
+    // A no-match barcode lands here now, BEFORE any photo -- asking the
+    // user directly for name/brand instead of guessing them from OCR on
+    // the product photo (see design discussion: OCR-guessed name/brand
+    // was unreliable in general and especially hopeless for non-Latin
+    // packaging -- e.g. Japanese/Korean/Chinese -- since EasyOCR here is
+    // only configured for Latin-script languages and won't read those
+    // characters at all, let alone guess which line is the name).
+    ENTER_NAME_BRAND,
+    // Photo-only now -- no OCR runs against this one at all, purely for
+    // the hero/icon image. Nutrition values only ever come from
+    // CAPTURE_LABEL below.
     CAPTURE_PRODUCT_PHOTO, PROCESSING_PRODUCT_PHOTO,
     CAPTURE_LABEL, PROCESSING_LABEL, ITEM_FORM, SAVING, SAVED
 }
@@ -294,14 +305,18 @@ class AddItemViewModel : ViewModel() {
                 // No existing item for this barcode -- don't stop and
                 // make the user tap a confirmation button just to
                 // proceed; we already have the barcode captured, so go
-                // straight into adding a new item (original behavior --
-                // do NOT reintroduce a "what kind of item" prompt here,
-                // see design discussion: "the barcode flow was good
-                // exactly the way it was"). Raw-ingredient/USDA lookup
-                // lives only under the text Search tab now (see
-                // jumpToUsdaSearch below), not injected into scanning.
+                // straight into adding a new item (this part of the
+                // original behavior stays -- do NOT reintroduce a "what
+                // kind of item" prompt here, see design discussion: "the
+                // barcode flow was good exactly the way it was").
+                // Raw-ingredient/USDA lookup lives only under the text
+                // Search tab now (see jumpToUsdaSearch below), not
+                // injected into scanning.
+                //
+                // Goes to ENTER_NAME_BRAND now, not straight to the
+                // photo step -- see that phase's doc comment.
                 _uiState.value = _uiState.value.copy(
-                    phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
+                    phase = AddItemPhase.ENTER_NAME_BRAND,
                     scannedBarcode = barcode,
                     decoderUsed = decoderUsed,
                     matchedItem = null,
@@ -356,6 +371,12 @@ class AddItemViewModel : ViewModel() {
      * an unhelpful guess just means the name/brand fields start blank,
      * same as manual entry always was; it's not a dead end the way a
      * fully-failed label scan is. */
+    /** Photo-only now -- no OCR runs against this at all (see
+     * ENTER_NAME_BRAND's doc comment for why name/brand come from the
+     * user directly instead of an OCR guess here). The backend endpoint
+     * still happens to run OCR/guess internally (it's shared with the
+     * image-update flow elsewhere), but those guessed fields are
+     * deliberately ignored here now -- name/brand are already set. */
     fun scanProductPhoto(imageBytes: ByteArray) {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.PROCESSING_PRODUCT_PHOTO, scanError = null)
         viewModelScope.launch {
@@ -363,9 +384,7 @@ class AddItemViewModel : ViewModel() {
                 val result = ApiClient.service.scanProductPhoto(imageBytesToPart(imageBytes))
                 _uiState.value = _uiState.value.copy(
                     phase = AddItemPhase.CAPTURE_LABEL,
-                    productImagePath = result.imagePath,
-                    name = result.guessedName ?: _uiState.value.name,
-                    brand = result.guessedBrand ?: _uiState.value.brand
+                    productImagePath = result.imagePath
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -512,6 +531,16 @@ class AddItemViewModel : ViewModel() {
 
     fun updateName(value: String) { _uiState.value = _uiState.value.copy(name = value) }
     fun updateBrand(value: String) { _uiState.value = _uiState.value.copy(brand = value) }
+
+    /** Confirms ENTER_NAME_BRAND -- name is required (it's the whole
+     * point of asking directly instead of guessing from OCR), brand is
+     * optional, same as the final ITEM_FORM's own validation. */
+    fun confirmNameBrand() {
+        if (_uiState.value.name.isBlank()) {
+            return
+        }
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO)
+    }
     fun updateBarcode(value: String) { _uiState.value = _uiState.value.copy(barcode = value) }
     fun updateItemType(value: String) { _uiState.value = _uiState.value.copy(itemType = value) }
     fun updateKcal(value: String) { _uiState.value = _uiState.value.copy(kcal100g = value) }

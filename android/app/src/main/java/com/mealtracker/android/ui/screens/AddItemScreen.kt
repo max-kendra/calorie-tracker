@@ -330,6 +330,13 @@ fun AddItemScreen(
                 onQueryChange = { viewModel.updateUsdaQuery(it) },
                 onResultClick = { fdcId -> viewModel.selectUsdaFood(fdcId) }
             )
+            AddItemPhase.ENTER_NAME_BRAND -> EnterNameBrandContent(
+                name = state.name,
+                brand = state.brand,
+                onNameChange = { viewModel.updateName(it) },
+                onBrandChange = { viewModel.updateBrand(it) },
+                onContinue = { viewModel.confirmNameBrand() }
+            )
             AddItemPhase.CAPTURE_PRODUCT_PHOTO -> CaptureLabelContent(
                 instructionText = "Frame the product package",
                 scanError = state.scanError,
@@ -341,7 +348,8 @@ fun AddItemScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
-                onSkip = { viewModel.skipProductPhoto() }
+                onSkip = { viewModel.skipProductPhoto() },
+                skipLabel = "Skip"
             )
             AddItemPhase.PROCESSING_PRODUCT_PHOTO -> LoadingContent()
             AddItemPhase.CAPTURE_LABEL -> CaptureLabelContent(
@@ -354,7 +362,9 @@ fun AddItemScreen(
                     galleryPickerForLabel.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
-                }
+                },
+                onSkip = { viewModel.proceedToManualFormFromOcrFailure() },
+                skipLabel = "Enter Manually"
             )
             AddItemPhase.PROCESSING_LABEL -> LoadingContent()
             AddItemPhase.ITEM_FORM, AddItemPhase.SAVING -> ItemFormContent(
@@ -397,6 +407,51 @@ fun AddItemScreen(
 private fun LoadingContent() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator()
+    }
+}
+
+/** Reached on a no-match barcode, before any photo -- asks for name and
+ * brand directly instead of guessing them from OCR on the product
+ * photo. See AddItemPhase.ENTER_NAME_BRAND's doc comment for why. */
+@Composable
+private fun EnterNameBrandContent(
+    name: String,
+    brand: String,
+    onNameChange: (String) -> Unit,
+    onBrandChange: (String) -> Unit,
+    onContinue: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("What is this item?", style = MaterialTheme.typography.titleMedium)
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "You'll still be able to review the nutrition info before saving.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            label = { Text("Name") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+        OutlinedTextField(
+            value = brand,
+            onValueChange = onBrandChange,
+            label = { Text("Brand (optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+        Button(onClick = onContinue, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            Text("Continue")
+        }
     }
 }
 
@@ -627,7 +682,8 @@ private fun CaptureLabelContent(
     scanError: String?,
     onImageCaptured: (ByteArray) -> Unit,
     onPickFromGallery: () -> Unit,
-    onSkip: (() -> Unit)? = null
+    onSkip: (() -> Unit)? = null,
+    skipLabel: String = "Skip"
 ) {
     val context = LocalContext.current
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
@@ -670,19 +726,20 @@ private fun CaptureLabelContent(
         }
 
         if (onSkip != null) {
-            // Only offered for the product-photo step -- unlike the
-            // label step, a missing product photo/name-brand-guess isn't
-            // a dead end (the form fields just start blank, same as
-            // always-manual entry), so skipping is safe to offer here.
-            // The label step has no skip button: OCR-failure there
-            // already has its own explicit "enter manually" escape
-            // hatch via showOcrFailedDialog, so a second way out would
-            // be redundant.
+            // Now offered on both steps -- product photo always allowed
+            // skipping (a missing photo/name-brand-guess isn't a dead
+            // end, form fields just start blank). The label step used to
+            // NOT have this, reasoning that OCR-failure's own "enter
+            // manually" escape hatch (showOcrFailedDialog) covered it --
+            // but that only appears AFTER a failed attempt. Per design
+            // discussion, the user should be able to skip straight to
+            // manual entry WITHOUT taking a photo at all, not just after
+            // one fails.
             TextButton(
                 onClick = onSkip,
                 modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
             ) {
-                Text("Skip", color = Color.White)
+                Text(skipLabel, color = Color.White)
             }
         }
 

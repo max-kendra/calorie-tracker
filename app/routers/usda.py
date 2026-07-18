@@ -1,5 +1,6 @@
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import require_api_key
@@ -16,6 +17,26 @@ router = APIRouter(
 
 def _get_client() -> UsdaClient:
     return UsdaClient(api_key=settings.usda_api_key)
+
+
+def _usda_error_detail(e: Exception) -> str:
+    """Distinguishes a 429 (rate limit) from other failures -- the
+    default usda_api_key is the public DEMO_KEY, which is limited to
+    30 requests/hour and 50/day AND SHARED across every DEMO_KEY user
+    globally, not just this app -- trivially easy to exceed, and the
+    resulting error otherwise looks identical to a genuine bug ("500's
+    and 502's with usda", reported without an obvious cause). Get a
+    free personal key at https://fdc.nal.usda.gov/api-key-signup and
+    set USDA_API_KEY -- personal keys get a much higher limit (1000/
+    hour) and aren't shared with other users."""
+    if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
+        return (
+            "USDA FoodData Central rate limit exceeded. If you're using the default "
+            "DEMO_KEY, it's limited to 30 requests/hour and shared globally with every "
+            "other DEMO_KEY user -- get a free personal key at "
+            "https://fdc.nal.usda.gov/api-key-signup and set it as USDA_API_KEY."
+        )
+    return f"USDA FoodData Central request failed: {e}"
 
 
 @router.get("/search", response_model=list[UsdaFoodSummaryOut])
@@ -42,10 +63,7 @@ def search_usda(
     try:
         results = client.search(query, data_types=data_types, page_size=page_size)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"USDA FoodData Central request failed: {e}",
-        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=_usda_error_detail(e))
 
     return [
         UsdaFoodSummaryOut(
@@ -71,10 +89,7 @@ def get_usda_food(fdc_id: int):
     try:
         result = client.get_food(fdc_id)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"USDA FoodData Central request failed: {e}",
-        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=_usda_error_detail(e))
 
     return UsdaFoodDetailOut(
         fdc_id=result.fdc_id,
