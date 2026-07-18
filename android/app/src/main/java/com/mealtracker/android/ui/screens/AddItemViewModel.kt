@@ -624,6 +624,20 @@ class AddItemViewModel : ViewModel() {
     fun updateSaturatedFat(value: String) { _uiState.value = _uiState.value.copy(saturatedFat100g = value) }
     fun updateSalt(value: String) { _uiState.value = _uiState.value.copy(saltG100g = value) }
 
+    /** Lets the user go back and retake/reupload the nutrition label
+     * photo from ITEM_FORM if they're unhappy with the OCR results --
+     * previously only reachable via the OCR-failure dialog
+     * (showOcrFailedDialog), which only appears on a COMPLETE failure
+     * (zero macros found at all). If OCR partially succeeds (some
+     * macros extracted, but wrong or incomplete -- see design
+     * discussion), there was no way back to try again short of
+     * restarting the whole flow. Doesn't clear the existing field
+     * values -- a fresh scanLabel() call overwrites them anyway if it
+     * succeeds, same as any other rescan. */
+    fun retakeLabelPhoto() {
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
+    }
+
     fun saveItem() {
         val state = _uiState.value
         if (state.name.isBlank()) {

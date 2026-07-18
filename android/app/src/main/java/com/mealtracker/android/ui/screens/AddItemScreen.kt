@@ -873,6 +873,14 @@ private fun ItemFormContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // Retaking used to only be reachable via the OCR-failure
+            // dialog, which only shows on a COMPLETE failure -- a
+            // partial/wrong-but-nonzero result had no way back to try
+            // again short of restarting the whole flow (see design
+            // discussion). Available here any time OCR was used at all.
+            TextButton(onClick = { viewModel.retakeLabelPhoto() }) {
+                Text("Retake Label Photo")
+            }
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
         }
 

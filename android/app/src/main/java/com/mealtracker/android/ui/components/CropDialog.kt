@@ -246,6 +246,17 @@ fun CropDialog(
                 TextButton(onClick = onCancel) {
                     Text("Cancel", color = Color.White)
                 }
+                // Sets the crop rect to the FULL image bounds, skipping
+                // manual cropping entirely -- added per design
+                // discussion: re-testing the same photo for OCR
+                // debugging kept producing different results because a
+                // hand-dragged crop boundary isn't pixel-identical
+                // twice in a row, even for "the same" crop. Selecting
+                // the full image removes that source of variance when
+                // the user doesn't actually need/want to crop.
+                TextButton(onClick = { if (imageBounds != Rect.Zero) cropRect = imageBounds }) {
+                    Text("Full Image", color = Color.White)
+                }
                 IconButton(onClick = { rotationDegrees = (rotationDegrees + 90) % 360 }) {
                     Icon(Icons.Filled.RotateRight, contentDescription = "Rotate", tint = Color.White)
                 }
