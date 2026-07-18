@@ -164,7 +164,7 @@ async def scan_label(image: UploadFile = File(...)):
     # table, not just guessing a product name), it's the more likely
     # place for OCR failures to actually surface in practice.
     try:
-        with record_ocr_scan("easyocr", "scan_label", len(image_bytes)) as metrics:
+        with record_ocr_scan("tesseract", "scan_label", len(image_bytes)) as metrics:
             result = extract_label_from_image(image_bytes)
             metrics["detected_language"] = result.detected_language
             metrics["per_100g_confirmed"] = result.per_100g_confirmed
