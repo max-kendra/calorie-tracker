@@ -1,116 +1,191 @@
 """
 OCR extraction for nutrition labels.
 
-Flow: run Tesseract across all supported languages combined -> pick the
+Flow: run EasyOCR across all supported languages combined -> pick the
 best-matching language by counting keyword hits per language's dictionary
 -> parse per-100g macro values from the recognized text using that
 language's keyword patterns -> convert salt->sodium if the label uses
 salt (EU convention) rather than sodium directly.
 
-This NEVER writes to our DB - same pattern as USDA and barcode scanning:
+This NEVER writes to our DB -- same pattern as USDA and barcode scanning:
 the result is a best-effort draft for the client to show in the Add Item
 review form, which the user corrects before anything is saved.
 
-ENGINE NOTE (Tesseract branch): this app has gone back and forth between
-Tesseract (pytesseract) and EasyOCR - see the other branch/history for
-that story. This branch is Tesseract again, to actually compare the two
-on real data (see app/ocr_metrics.py, which records per-scan timing/
-memory tagged by `engine` for exactly this). Tesseract is a classical
-(non-neural-network) OCR engine - much lighter on CPU-only hardware
-than EasyOCR/PyTorch, and its language data is installed via apt at
-image-build time (see Dockerfile), not downloaded lazily on first use -
-so there's no equivalent of EasyOCR's first-request download/timeout
-issue here at all, and no Reader-construction/warm-up step really
-needed (see warm_up() below, now a no-op).
+ENGINE NOTE: this used to run on Tesseract (pytesseract). We switched to
+EasyOCR because it was noticeably more accurate on real, imperfectly-lit
+photos of labels -- Tesseract needed fairly clean, well-cropped input to
+do well, which didn't match how people actually photograph labels in the
+app. Tradeoff: EasyOCR runs on PyTorch, so it's heavier (bigger image,
+slower per-request CPU inference, and it downloads model weights on
+first run) than Tesseract was, which matters if this is deployed on a
+Raspberry Pi -- worth benchmarking real request latency post-deploy.
 
-Tesseract also doesn't have EasyOCR's "which languages can share one
-model" restriction (that's what forced trimming down to 4 languages on
-the EasyOCR branch) - each Tesseract language is its own independent
-traineddata file, and combining several via lang="eng+dan+..." doesn't
-raise on an unsupported combination the way EasyOCR's Reader did. The
-tradeoff is speed, not compatibility: more combined languages means
-Tesseract tries recognition against more trained models, which does
-scale roughly with how many are listed - worth keeping an eye on via
-ocr_metrics.py if language coverage gets expanded further.
-
-The parsing/keyword logic below (`_find_keyword_anchor`,
-`_find_number_to_right`, `LANGUAGE_CONFIGS`, etc.) is engine-agnostic -
-it just operates on a list of recognized words and their positions,
-regardless of which OCR engine produced them. Reading order/reassembly
-IS still done (see _reconstruct_reading_order), but ONLY for the
-raw_text field kept for display/debugging and for detect_language()
-(position-insensitive keyword counting) - actual macro extraction
-matches each keyword directly against nearby word positions instead of
-reassembling everything into lines of text first and parsing within a
-line. That line-based approach was tried on both EasyOCR and Tesseract
-and failed differently each time - see parse_label's doc comment for
-the full story of why this rewrite happened.
+The parsing/keyword logic below (`_extract_number_near_keyword`,
+`_extract_kcal`, `LANGUAGE_CONFIGS`, etc.) is engine-agnostic -- it just
+operates on whatever text string the OCR step returns, one line per
+detected text region -- so none of that needed to change. The comments
+in there about specific Tesseract quirks (dropped whitespace, misread
+characters) are historical context from when this was tuned against
+Tesseract output; they're left in place since tolerating that kind of
+noise is harmless even if EasyOCR doesn't happen to exhibit the exact
+same quirks, but they haven't been re-verified against real EasyOCR
+output. Treat that the same way as the "HONESTY ABOUT LANGUAGE COVERAGE"
+note below -- re-verify against real EasyOCR output before trusting it
+fully in production.
 
 HONESTY ABOUT LANGUAGE COVERAGE: Danish, German, and English keyword
 dictionaries below were verified against real Tesseract OCR output on
-synthetic label images (see tests). Swedish, Finnish, Norwegian,
-Spanish, Slovak, Czech, and Polish dictionaries use standard EU
-nutrition-label vocabulary (consistent under EU FIC labeling regulation)
-but have NOT been run through real OCR here - treat them as a
-reasonable starting point, not verified, until tested against real
-labels in those languages.
+synthetic label images (see tests) -- not yet re-verified against
+EasyOCR output. Swedish, Finnish, Norwegian, Spanish, Slovak, and Czech
+dictionaries use standard EU nutrition-label vocabulary (consistent
+under EU FIC labeling regulation) but have NOT been run through real OCR
+of either engine here -- they should be treated as a reasonable starting
+point, not verified, until tested against real labels in those
+languages.
 """
 
+import re
 import difflib
 import logging
-import re
+import threading
 from dataclasses import dataclass, field
 from decimal import Decimal
 from io import BytesIO
 from typing import Optional
 
-import pytesseract
+import easyocr
+import numpy as np
 from PIL import Image
 
 from app.nutrition import salt_g_to_sodium_mg
 
 logger = logging.getLogger(__name__)
 
-# Longest-side cap for run_ocr()'s pre-resize. 1600px keeps printed
-# nutrition-label text comfortably legible (these aren't small-print
-# ingredient lists needing max resolution) while cutting CPU inference
-# time on constrained hardware - Tesseract is much lighter than EasyOCR
-# to begin with, but this still helps and costs nothing to keep. Not
-# benchmarked against a specific "too small, text becomes unreadable"
-# threshold - worth revisiting if recognition quality drops noticeably.
+# EasyOCR language codes for the 9 languages we support -- these are NOT
+# the same codes Tesseract used (e.g. "dan" -> "da", "deu" -> "de"). The
+# LANGUAGE_CONFIGS dict below still keys off the Tesseract-style codes
+# ("dan", "deu", ...) since that's what detect_language()/parse_label()
+# use internally and what the rest of the app (tests, API responses)
+# expects -- this map is only used to talk to EasyOCR itself.
+#
+# Trimmed down to 4 languages (from 9) per design discussion -- English,
+# Danish, Polish, and Slovak between them cover standard Latin, Nordic
+# vowels, and Slavic diacritics, which is "most" of what the full list
+# added anyway. IMPORTANT CAVEAT, so this doesn't get treated as a
+# bigger fix than it is: this does NOT meaningfully shrink the one-time
+# model download that was actually causing the timeout (see
+# _get_reader()'s doc comment) -- EasyOCR downloads one shared
+# recognition model per SCRIPT, not one per language, so 4 Latin
+# languages vs 9 downloads roughly the same files. What this DOES help
+# with is Reader construction time and memory after that download
+# completes (a smaller combined character set), and it does mean
+# German/Norwegian/Swedish/Czech/Spanish-specific diacritics won't be
+# recognized correctly anymore -- their LANGUAGE_CONFIGS keyword
+# dictionaries are deliberately left in place below regardless, since
+# plain-ASCII portions of their keywords can still occasionally match
+# against whatever the reduced character set does recognize.
+
+# Longest-side cap for run_ocr()'s pre-resize -- see that function's doc
+# comment. 1600px keeps printed nutrition-label text comfortably legible
+# (these aren't small-print ingredient lists needing max resolution)
+# while meaningfully cutting CPU-only inference time on constrained
+# hardware. Not benchmarked against a specific "too small, text becomes
+# unreadable" threshold -- worth revisiting if recognition quality drops
+# noticeably compared to before this was added.
 _MAX_OCR_DIMENSION = 1600
 
-# Tesseract's own multi-language syntax (lang="a+b+c") - these are
-# Tesseract's native 3-letter codes, which is ALSO what LANGUAGE_CONFIGS
-# below is keyed by, so unlike the EasyOCR branch there's no separate
-# code-translation map needed here at all. Each of these needs its
-# corresponding `tesseract-ocr-<code>` apt package installed (see
-# Dockerfile) - pytesseract itself does nothing without that data
-# present on the system.
+_EASYOCR_LANG_CODES = {
+    "dan": "da",
+    "eng": "en",
+    "pol": "pl",
+    "slk": "sk",
+}
+
+# EasyOCR's Reader is expensive to construct (loads model weights from
+# disk/downloads them on first run) -- build it once lazily and reuse it
+# across requests rather than per-call. Guarded with a lock since FastAPI
+# may serve requests concurrently and Reader construction isn't meant to
+# be called from multiple threads at once.
 #
-# Not restricted to 4 languages the way the EasyOCR branch was - that
-# restriction existed specifically because EasyOCR couldn't combine
-# certain languages into one Reader (raised ValueError for Finnish
-# specifically, confirmed against a real error). Tesseract doesn't have
-# that restriction, so Finnish is back, and there's no reason not to use
-# the full set this app has ever supported.
-_TESSERACT_LANGS = "eng+dan+deu+swe+fin+nor+spa+slk+ces+pol"
+# CORRECTED (reverting a wrong "fix" from earlier): this was briefly
+# changed to build a SEPARATE Reader per language (each paired with
+# English), on the assumption that EasyOCR can't combine unrelated
+# languages into one Reader. That assumption was wrong for this case --
+# EasyOCR groups languages by SCRIPT, and every language on our list
+# (English, Danish, Norwegian, Swedish, Finnish, Slovak, Czech, Polish,
+# French, Spanish) shares the same Latin-script model; combining them
+# loads ONE model with the union of each language's diacritics, not 9
+# incompatible ones. Running 8-9 SEPARATE Readers instead was
+# significantly heavier (multiple full model loads + multiple inference
+# passes per request) than the original single combined Reader ever
+# was, and that's what was actually behind the new OCR/product-photo-
+# scan timeouts and 500s/502s -- not a language-compatibility bug at
+# all. Reverted to a single combined Reader, which is both simpler and
+# correct.
+#
+# If Reader construction ever does fail for a genuinely bad reason, this
+# now logs the real exception instead of silently swallowing it (that
+# silent-swallow behavior in the caller -- see scan_label's try/except
+# in app/routers/items.py -- is what let the previous, wrong diagnosis
+# go unnoticed for as long as it did).
+_reader: Optional[easyocr.Reader] = None
+_reader_lock = threading.Lock()
+
+
+def _get_reader() -> easyocr.Reader:
+    global _reader
+    if _reader is None:
+        with _reader_lock:
+            if _reader is None:  # re-check inside the lock
+                try:
+                    _reader = easyocr.Reader(
+                        list(_EASYOCR_LANG_CODES.values()),
+                        gpu=False,
+                        # Explicit path instead of EasyOCR's default
+                        # (~/.EasyOCR, i.e. /root/.EasyOCR in this
+                        # container) -- matches docker-compose.yml's
+                        # ./easyocr_models:/app/easyocr_models volume
+                        # mount, so the downloaded models persist across
+                        # rebuilds instead of re-downloading every time
+                        # (see design discussion). Relying on the
+                        # default would've worked too as long as the
+                        # volume mount pointed at the right place, but
+                        # this is more explicit/robust against the
+                        # container's user or home directory ever
+                        # changing.
+                        model_storage_directory="/app/easyocr_models",
+                    )
+                except Exception:
+                    logger.exception(
+                        "EasyOCR Reader construction failed for languages: %s",
+                        list(_EASYOCR_LANG_CODES.values()),
+                    )
+                    raise
+    return _reader
 
 
 def warm_up():
     """
-    No-op on this engine. EasyOCR needed this to force its one-time model
-    download/Reader construction to happen at startup instead of on
-    whichever live request happened to be first (see that branch's
-    history for the timeout bug this fixed). Tesseract has no equivalent
-    cost - its language data is installed via apt at image-build time,
-    already on disk and ready the moment the container starts, nothing
-    to lazily initialize. Kept as a function (even though it does
-    nothing here) so app/main.py's startup hook doesn't need to change
-    between branches - it becomes meaningful again automatically if you
-    switch back to EasyOCR.
+    Forces the (one-time-per-container-lifetime) Reader construction --
+    including EasyOCR's own model download on a fresh container/volume,
+    which took ~20-40s in practice (confirmed against real deploy logs:
+    detection model download, then recognition model download, then
+    torch/dataloader init) -- to happen NOW, at app startup (see
+    app/main.py's lifespan handler), rather than whenever the first live
+    OCR request happens to land.
+
+    That was the actual bug behind "timeout after the download log line,
+    but the process finishes anyway" -- the download/init isn't slow on
+    EVERY request, just the very first one after a container starts, and
+    that unlucky first request was always some real user's scan attempt,
+    which timed out client-side waiting for it. Trimming the language
+    list (see _EASYOCR_LANG_CODES's doc comment) does NOT fix this by
+    itself -- it only shaves Reader construction time after the download,
+    not the download itself. Moving the cost to startup means it happens
+    once during `docker compose up`/deploy instead, which nobody's
+    waiting on a live request for.
     """
-    pass
+    _get_reader()
 
 
 @dataclass
@@ -118,20 +193,15 @@ class LabelLanguageConfig:
     per_100g_markers: list[str]
     energy_keyword: str  # matched directly before "kcal"
     fat_keyword: str
-    fat_exclude_prefixes: list[str]
+    fat_exclude_prefixes: list[str]  # lines starting with these are "of which" sub-lines
     saturated_fat_keyword: str
     carbs_keyword: str
     carbs_exclude_prefixes: list[str]
     sugar_keyword: str
     fiber_keyword: str
     protein_keyword: str
-    # Both optional - most labels only show one or the other. salt_keyword
-    # happens to be provided by every LANGUAGE_CONFIGS entry below in
-    # practice, but is still guarded with `if config.salt_keyword:`
-    # wherever it's read, same as sodium_keyword, so a future language
-    # entry is free to omit either.
-    salt_keyword: Optional[str] = None
-    sodium_keyword: Optional[str] = None
+    salt_keyword: Optional[str] = None  # EU labels: salt in grams
+    sodium_keyword: Optional[str] = None  # some labels show sodium directly
 
 
 LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
@@ -159,7 +229,7 @@ LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
         sugar_keyword="zucker",
         fiber_keyword="ballaststoffe",
         # Tolerates "eiweiß"/"eiweiss" (standard spelling variant) and
-        # "eiweib"/"eiweis" - found via real Tesseract testing that the
+        # "eiweib"/"eiweis" -- found via real Tesseract testing that the
         # deu model can misread the ß character as a capital B.
         protein_keyword=r"eiwei(ß|ss|b|s)",
         salt_keyword="salz",
@@ -190,24 +260,6 @@ LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
         fiber_keyword="fibrer",
         protein_keyword="protein",
         salt_keyword="salt",
-    ),
-    # Re-added on this branch - removed on the EasyOCR branch because
-    # EasyOCR's Reader specifically raised ValueError trying to combine
-    # Finnish with the other languages (confirmed against a real error).
-    # Tesseract has no such restriction (see _TESSERACT_LANGS' doc
-    # comment), so there's no reason to leave this out here.
-    "fin": LabelLanguageConfig(
-        per_100g_markers=["100 g"],
-        energy_keyword="energia",
-        fat_keyword="rasva",
-        fat_exclude_prefixes=["josta"],
-        saturated_fat_keyword="tyydyttynyttä",
-        carbs_keyword="hiilihydraatti",
-        carbs_exclude_prefixes=["josta"],
-        sugar_keyword="sokereita",
-        fiber_keyword="kuitu",
-        protein_keyword="proteiini",
-        salt_keyword="suola",
     ),
     "nor": LabelLanguageConfig(
         per_100g_markers=["100 g"],
@@ -261,7 +313,7 @@ LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
         protein_keyword="bílkoviny",
         salt_keyword="sůl",
     ),
-    # Was missing entirely - "pol" was already in the OCR reader's
+    # Was missing entirely -- "pol" was already in the OCR reader's
     # language list (both before and after the 9->4 language trim) but
     # had no keyword dictionary to actually parse recognized Polish text
     # against, so a Polish label could get read by EasyOCR just fine and
@@ -291,48 +343,34 @@ class OcrExtractionResult:
     macros: dict = field(default_factory=dict)
 
 
-@dataclass
-class OcrWord:
-    """One recognized word + its position, from Tesseract's image_to_data.
-    Used directly for geometric keyword-to-value matching in parse_label
-    (see that function's doc comment for why) - NOT reassembled into
-    lines of text before parsing, unlike the raw_text field kept on
-    OcrExtractionResult purely for display/debugging."""
-    text: str
-    x_left: float
-    x_right: float
-    y_center: float
-    height: float
-
-
 def _fuzzy_contains(line_lower: str, keyword: str, threshold: float = 0.8) -> bool:
     """
-    Fuzzy alternative to `keyword in line_lower` - tolerates the kind of
+    Fuzzy alternative to `keyword in line_lower` -- tolerates the kind of
     single/double-character OCR misreads seen in practice (e.g. "fedt"
     read as "feot", confirmed against real scan output: NÆRINGSOPLYSNINGER
     itself came back as multiple different garbled spellings across
     lines). An exact substring match would silently reject a keyword
-    that WAS effectively there, just misread by one character - which
+    that WAS effectively there, just misread by one character -- which
     is indistinguishable from the keyword genuinely not being present,
     so real labels were failing to parse for no visible reason.
 
-    Performance-wise this is negligible - comparing a handful of short
+    Performance-wise this is negligible -- comparing a handful of short
     OCR'd lines against a handful of short keywords is microseconds of
     work, dwarfed by the OCR inference itself (multiple SECONDS). Not
     something worth trading accuracy for.
 
     Deliberately NOT used for the per_100g_markers check in parse_label()
-    - those markers are numeric ("100 g"), and fuzzy-matching digits is
+    -- those markers are numeric ("100 g"), and fuzzy-matching digits is
     a different, riskier kind of tolerance than fuzzy-matching word-based
     labels (a misread "700g" fuzzy-matching "100g" would be silently
-    WRONG, not just imprecise - unlike two spellings of the same word,
+    WRONG, not just imprecise -- unlike two spellings of the same word,
     differing digits usually mean a genuinely different number).
     """
     if keyword in line_lower:
-        return True  # cheap common case - no need to fuzzy-match if this already matches
+        return True  # cheap common case -- no need to fuzzy-match if this already matches
 
     # Slide a same-length window across the line and compare each to the
-    # keyword - handles the keyword appearing as a substring within a
+    # keyword -- handles the keyword appearing as a substring within a
     # longer line (e.g. "feot 53,7g"), not just the whole line being
     # (roughly) equal to the keyword alone.
     n = len(keyword)
@@ -351,9 +389,9 @@ def _fuzzy_contains(line_lower: str, keyword: str, threshold: float = 0.8) -> bo
 
 
 def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> int:
-    """How many of this language's macro keywords show up in the text -
+    """How many of this language's macro keywords show up in the text --
     used by detect_language() below to pick the best-matching language
-    for a single shared OCR pass. Fuzzy now (see _fuzzy_contains) - this
+    for a single shared OCR pass. Fuzzy now (see _fuzzy_contains) -- this
     runs BEFORE parse_label() even knows which language it's dealing
     with, so a misread keyword here could pick the wrong language (or no
     language at all) before parsing ever gets a chance."""
@@ -371,124 +409,121 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> 
     return sum(1 for kw in keywords if _fuzzy_contains(text_lower, kw))
 
 
-def _words_from_tesseract_data(data: dict) -> list["OcrWord"]:
-    """Flattens Tesseract's image_to_data dict (parallel lists) into a
-    list of OcrWord, dropping blank entries (block/paragraph/line marker
-    rows that image_to_data includes alongside actual recognized words,
-    which have empty text)."""
-    words = []
-    n = len(data.get("text", []))
-    for i in range(n):
-        text = data["text"][i].strip()
-        if not text:
-            continue
-        left = data["left"][i]
-        top = data["top"][i]
-        width = data["width"][i]
-        height = data["height"][i]
-        words.append(OcrWord(
-            text=text,
-            x_left=left,
-            x_right=left + width,
-            y_center=top + height / 2,
-            height=height,
-        ))
-    return words
-
-
-def _reconstruct_reading_order(words: list["OcrWord"]) -> str:
+def _reconstruct_reading_order(detections: list) -> str:
     """
-    Reassembles words into a display/debug text string ONLY - this is
-    NOT used for actual macro extraction anymore (see parse_label's doc
-    comment for why). Still useful for OcrExtractionResult.raw_text
-    (shown to the user, logged) and for detect_language(), which just
-    counts whether keywords appear ANYWHERE in the text and doesn't
-    care about row alignment - so imperfect reconstruction here doesn't
-    hurt language detection the way it hurt direct parsing.
+    EasyOCR's own detection order (what you'd get from detail=0) does
+    NOT reliably match visual reading order for a two-column layout like
+    a nutrition table (label words on the left, numbers on the right) --
+    confirmed against real output where EVERY number came out first as
+    one cluster, then EVERY label word came out after as a second
+    cluster, with zero lines actually pairing a keyword with its value.
+    That's not a recognition failure (the text was read correctly) --
+    it's an ordering one, and _extract_number_near_keyword() below needs
+    a keyword and its number on the SAME line to find anything at all,
+    so this was quietly the real reason "the values are clearly in
+    there" still produced zero macros.
 
-    Groups words into rows via gap-based splitting (sort top-to-bottom,
-    start a new row when the gap to the previous word exceeds a
-    threshold based on that PAIR's own average height) - see git
-    history on this function for two earlier, buggier clustering
-    attempts (a drift-prone running-average approach, then a
-    global-median-height threshold that still mis-clustered a boundary
-    next to smaller subordinate-line text). This version is kept
-    because it's still reasonable for display purposes, not because
-    it's assumed correct enough to parse against - that assumption is
-    exactly what kept failing.
+    Reconstructs proper top-to-bottom, left-to-right order from the
+    bounding boxes detail=1 gives us (which detail=0 throws away):
+    group detections into rows by vertical position, sort each row
+    left-to-right, then sort rows top-to-bottom -- so a table row's
+    label and value end up adjacent in the final text the way the
+    parsing functions below expect.
     """
-    if not words:
+    if not detections:
         return ""
 
-    items = sorted(words, key=lambda w: w.y_center)
+    items = []
+    for bbox, text, _confidence in detections:
+        ys = [point[1] for point in bbox]
+        xs = [point[0] for point in bbox]
+        items.append({
+            "text": text,
+            "y_center": sum(ys) / len(ys),
+            "x_left": min(xs),
+            "height": max(ys) - min(ys),
+        })
 
-    rows: list[list["OcrWord"]] = [[items[0]]]
-    for prev, curr in zip(items, items[1:]):
-        gap = curr.y_center - prev.y_center
-        pair_height = (prev.height + curr.height) / 2
-        row_gap_threshold = max(pair_height, 1) * 0.6
-        if gap > row_gap_threshold:
-            rows.append([curr])
+    items.sort(key=lambda i: i["y_center"])
+
+    # A detection joins the current row if its vertical center is within
+    # ~60% of a text-height of that row's running average center --
+    # loose enough to tolerate a slightly crooked photo/detection
+    # without merging genuinely different table rows into one.
+    rows: list[list[dict]] = []
+    current_row: list[dict] = []
+    current_row_y = 0.0
+    for item in items:
+        if current_row and abs(item["y_center"] - current_row_y) <= max(item["height"], 1) * 0.6:
+            current_row.append(item)
+            current_row_y = sum(i["y_center"] for i in current_row) / len(current_row)
         else:
-            rows[-1].append(curr)
+            if current_row:
+                rows.append(current_row)
+            current_row = [item]
+            current_row_y = item["y_center"]
+    if current_row:
+        rows.append(current_row)
 
     lines = []
     for row in rows:
-        row.sort(key=lambda w: w.x_left)
-        lines.append(" ".join(w.text for w in row))
+        row.sort(key=lambda i: i["x_left"])
+        lines.append(" ".join(i["text"] for i in row))
 
     return "\n".join(lines)
 
 
-def run_ocr(image_bytes: bytes) -> tuple[str, list["OcrWord"]]:
+def run_ocr(image_bytes: bytes) -> str:
     """
-    Runs Tesseract ONCE, combined across all supported languages (see
-    _TESSERACT_LANGS) via pytesseract - a thin wrapper around the
-    system `tesseract` CLI binary. Returns BOTH a reassembled text
-    string (for display/debugging/detect_language - see
-    _reconstruct_reading_order's doc comment) AND the raw per-word list
-    with positions (for parse_label's geometric matching) - computed
-    from the SAME single image_to_data call, not two separate OCR runs.
+    Runs EasyOCR ONCE, combined across all supported languages (see
+    _get_reader()'s doc comment for why one combined Reader is correct
+    here, not one per language), and returns the recognized text
+    reassembled into proper reading order (see
+    _reconstruct_reading_order's doc comment for why that's a separate,
+    necessary step and not just "join the lines"). Which language the
+    text is actually in gets figured out afterward by detect_language()
+    (see extract_label_from_image()), via the same keyword-scoring
+    approach that used to also run once per language here -- now it
+    only needs to run once, since there's only one OCR pass to score.
     """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-    # Downscale before OCR - see _MAX_OCR_DIMENSION's doc comment.
-    # thumbnail() preserves aspect ratio and is a no-op if the image is
-    # already smaller than this.
+    # Downscale before OCR -- phone camera photos are often 3000-4000px+
+    # on the longest side, far more resolution than printed nutrition-
+    # label text needs to stay legible, and EasyOCR's detection AND
+    # recognition passes both scale with pixel count. On CPU-only
+    # hardware (a Pi, no GPU) this is a real, meaningful speed
+    # difference, not a minor optimization -- confirmed slow in practice
+    # (per real deploy logs / design discussion: "I hear the fan turn
+    # on when we're OCR'ing"). thumbnail() preserves aspect ratio and is
+    # a no-op if the image is already smaller than this. Note this
+    # operates on whatever was already uploaded -- if the client already
+    # cropped tightly (see design discussion), there may be little or
+    # nothing left to downscale; this only helps when the cropped
+    # region is STILL larger than _MAX_OCR_DIMENSION despite being a
+    # small fraction of the original photo (a modern phone sensor can
+    # produce a tight crop that's still several megapixels).
     image.thumbnail((_MAX_OCR_DIMENSION, _MAX_OCR_DIMENSION))
 
-    data = pytesseract.image_to_data(image, lang=_TESSERACT_LANGS, output_type=pytesseract.Output.DICT)
-
-    # Logged BEFORE any filtering - confirmed against real output that
-    # the exact same photo produced usable words on some attempts and
-    # zero words on another with no code change upstream of this point
-    # between those attempts (turned out to be transient - but this
-    # stays, since an unexplained empty result is worth being able to
-    # diagnose immediately rather than guessing again if it recurs).
-    non_blank_count = sum(1 for t in data.get("text", []) if t.strip())
-    logger.info(
-        "Tesseract image_to_data: image_size=%s total_entries=%d non_blank_words=%d",
-        image.size,
-        len(data.get("text", [])),
-        non_blank_count,
-    )
-
-    words = _words_from_tesseract_data(data)
-    text = _reconstruct_reading_order(words)
-    return text, words
+    reader = _get_reader()
+    # detail=1 (the default) -- NEEDED now for the bounding boxes
+    # _reconstruct_reading_order uses; detail=0 was discarding exactly
+    # the position info required to fix the ordering bug above.
+    # paragraph=False -- keep individual detected text regions separate
+    # rather than merging into paragraphs, since we're doing our own
+    # row-grouping instead.
+    detections = reader.readtext(np.array(image), paragraph=False)
+    return _reconstruct_reading_order(detections)
 
 
 def detect_language(text: str) -> Optional[str]:
     """Picks the language whose keyword dictionary has the most hits in
-    the OCR'd text - more robust than general-purpose language
+    the OCR'd text -- more robust than general-purpose language
     detection here, since it directly measures "which dictionary would
     actually let us extract fields" rather than guessing at prose language,
     which is unreliable against text that's mostly numbers and labels.
     Uses _score_text_for_language() above for the actual keyword
-    counting. Position-insensitive (just counts whether keywords appear
-    ANYWHERE), so this works fine even against imperfectly-reconstructed
-    text - unlike parse_label below, which needs actual positions and
-    does NOT use this reconstructed text for that reason."""
+    counting."""
     text_lower = text.lower()
     best_lang = None
     best_score = 0
@@ -502,128 +537,35 @@ def detect_language(text: str) -> Optional[str]:
     return best_lang if best_score >= 3 else None  # require a minimum confidence
 
 
-def _phrase_ratio(words: list["OcrWord"], keyword: str) -> float:
-    """Fuzzy match ratio between a sequence of words (joined) and a
-    (possibly multi-word) keyword phrase."""
-    candidate = " ".join(w.text.lower() for w in words)
-    return difflib.SequenceMatcher(None, candidate, keyword.lower()).ratio()
-
-
-def _find_keyword_anchor(
-    words: list["OcrWord"], keyword: str, exclude_prefixes: Optional[list[str]] = None
-) -> Optional["OcrWord"]:
-    """
-    Finds the best fuzzy match for `keyword` (which may be multiple
-    words, e.g. "mættede fedtsyrer") among `words`, and returns the
-    LAST word of that match - used as the anchor for "look to the
-    right of this position" when searching for the associated number.
-
-    This is the core of the geometric rewrite: instead of reassembling
-    everything into lines of text first and hoping the reassembly put
-    each keyword on the same line as its own value (which kept failing
-    in different ways on both OCR engines this app has tried - see git
-    history), this works directly off each word's actual position,
-    so ONE bad row-boundary elsewhere on the label can't misattribute
-    THIS keyword's value.
-
-    exclude_prefixes skips a match if the SAME row (words within a
-    height-based vertical tolerance) has one of those phrases
-    immediately to its LEFT - used to distinguish a parent total row
-    (e.g. "FEDT") from a "HERAF ... FEDTSYRER" sub-row that also
-    happens to contain the parent keyword as a substring of a longer
-    word (e.g. "fedt" is literally a substring of "fedtsyrer").
-    """
-    exclude_prefixes = exclude_prefixes or []
-    kw_word_count = len(keyword.split())
-
-    best_match: Optional[OcrWord] = None
-    best_score = 0.0
-
-    for i in range(len(words) - kw_word_count + 1):
-        window = words[i:i + kw_word_count]
-
-        # Only consider windows that plausibly form one phrase - words
-        # roughly on the same row, in left-to-right order, not wildly
-        # spaced apart (guards against accidentally matching words from
-        # unrelated positions that happen to be adjacent in the list).
-        row_height = sum(w.height for w in window) / len(window)
-        row_y = sum(w.y_center for w in window) / len(window)
-        if any(abs(w.y_center - row_y) > row_height * 0.7 for w in window):
-            continue
-        if kw_word_count > 1:
-            gaps_ok = all(
-                (window[j + 1].x_left - window[j].x_right) <= row_height * 3
-                for j in range(len(window) - 1)
-            )
-            if not gaps_ok:
-                continue
-
-        score = _phrase_ratio(window, keyword)
-        if score < 0.75 or score <= best_score:
-            continue
-
-        # Exclude-prefix check - any word on the same row, entirely to
-        # the left of this match, that fuzzy-matches an exclude prefix
-        # disqualifies this occurrence.
-        left_words = [w for w in words if abs(w.y_center - row_y) <= row_height * 0.7 and w.x_right <= window[0].x_left]
-        left_text = " ".join(w.text.lower() for w in left_words)
-        if any(_fuzzy_contains(left_text, p) for p in exclude_prefixes):
-            continue
-
-        best_score = score
-        best_match = window[-1]
-
-    return best_match
-
-
-def _find_number_to_right(
-    words: list["OcrWord"], anchor: "OcrWord", require_word: Optional[str] = None
+def _extract_number_near_keyword(
+    text: str, keyword: str, exclude_prefixes: Optional[list[str]] = None
 ) -> Optional[Decimal]:
     """
-    Finds a number on the same row as `anchor`, to its right. If
-    `require_word` is given (used for energy specifically - see
-    _extract_kcal_geometric), only considers a number immediately to
-    the LEFT of a word fuzzy-matching `require_word` (e.g. "kcal"),
-    rather than just the nearest number to the right of the keyword -
-    an energy row shows BOTH a kJ and a kcal figure, and we need
-    specifically the one paired with "kcal".
+    Finds a line containing `keyword` (fuzzy match -- see
+    _fuzzy_contains, tolerates the kind of OCR misreads seen in
+    practice, e.g. "fedt" read as "feot"), not starting with any of
+    `exclude_prefixes` (used to skip "of which X" sub-lines when looking
+    for the parent total), and extracts the first number on that line.
+    Tolerates missing whitespace between the keyword and the number
+    (e.g. "Salt1,2g") and European comma decimal separators.
     """
-    same_row = [
-        w for w in words
-        if w is not anchor and abs(w.y_center - anchor.y_center) <= max(anchor.height, 1) * 0.7
-    ]
+    exclude_prefixes = exclude_prefixes or []
 
-    if require_word:
-        unit_word = next(
-            (w for w in same_row if _fuzzy_contains(w.text.lower(), require_word.lower())),
-            None,
-        )
-        if unit_word is None:
-            return None
-        # Nearest number-containing word strictly to the left of the
-        # unit word (kcal), among words also to the right of the
-        # keyword anchor itself.
-        candidates = [
-            w for w in same_row
-            if w.x_right <= unit_word.x_left and w.x_left >= anchor.x_right
-        ]
-        candidates.sort(key=lambda w: unit_word.x_left - w.x_right)
-    else:
-        candidates = [w for w in same_row if w.x_left >= anchor.x_right]
-        candidates.sort(key=lambda w: w.x_left - anchor.x_right)
+    for line in text.split("\n"):
+        line_lower = line.lower().strip()
+        if not _fuzzy_contains(line_lower, keyword):
+            continue
+        if any(line_lower.startswith(p) for p in exclude_prefixes):
+            continue
 
-    for w in candidates:
-        # Restricted to at most ONE decimal digit - EU nutrition labels
-        # universally report to 1 decimal place. This was present in the
-        # original text-based extraction and got dropped when this was
-        # rewritten for geometric matching - confirmed against real
-        # output that dropping it reintroduced exactly the bug it
-        # existed to prevent: a blurred "g" unit letter misread by
-        # Tesseract as a digit "9" with no separating space (e.g.
-        # "12.2 g" -> "12.29") was getting silently absorbed into the
-        # value. Capping at one decimal digit means that corrupted
+        # Restricted to at most ONE decimal digit -- EU nutrition labels
+        # universally report to 1 decimal place. Found via real degraded-
+        # image testing that a blurred "g" unit letter can be misread by
+        # Tesseract as a digit "9" with no separating space (e.g. "25,0 g"
+        # -> "25,09"), which a greedy \d* would incorrectly absorb into
+        # the value. Capping at one decimal digit means that corrupted
         # extra digit is correctly left uncaptured.
-        match = re.search(r"(\d+(?:[.,]\d)?)", w.text)
+        match = re.search(r"(\d+(?:[.,]\d)?)", line)
         if match:
             number_str = match.group(1).replace(",", ".")
             try:
@@ -634,52 +576,24 @@ def _find_number_to_right(
     return None
 
 
-def _extract_field(
-    words: list["OcrWord"], keyword: str, exclude_prefixes: Optional[list[str]] = None
-) -> Optional[Decimal]:
-    """Standard "find this keyword, take the nearest number to its
-    right" extraction - used for every macro except energy (see
-    _extract_kcal_geometric, which needs the number paired with "kcal"
-    specifically, not just the nearest one)."""
-    anchor = _find_keyword_anchor(words, keyword, exclude_prefixes)
-    if anchor is None:
-        return None
-    return _find_number_to_right(words, anchor)
+def _extract_kcal(text: str, energy_keyword: str) -> Optional[Decimal]:
+    """Energy lines typically show both kJ and kcal (e.g. "1046 kJ/250
+    kcal") -- we want specifically the number immediately before "kcal",
+    not the kJ value. energy_keyword itself is fuzzy-matched (see
+    _fuzzy_contains) for the same OCR-misread reason as
+    _extract_number_near_keyword -- "kcal" itself is left as an exact
+    match in the regex below since it's rarely misread and being lenient
+    there risks false positives against unrelated numbers."""
+    for line in text.split("\n"):
+        if not _fuzzy_contains(line.lower(), energy_keyword):
+            continue
+        match = re.search(r"(\d+(?:[.,]\d)?)\s*kcal", line, re.IGNORECASE)
+        if match:
+            return Decimal(match.group(1).replace(",", "."))
+    return None
 
 
-def _extract_kcal_geometric(words: list["OcrWord"], energy_keyword: str) -> Optional[Decimal]:
-    """Energy rows typically show both kJ and kcal (e.g. "1046 kJ / 250
-    kcal") - we want specifically the number paired with "kcal", not
-    the kJ value, which _find_number_to_right's require_word handles."""
-    anchor = _find_keyword_anchor(words, energy_keyword)
-    if anchor is None:
-        return None
-    return _find_number_to_right(words, anchor, require_word="kcal")
-
-
-def parse_label(words: list["OcrWord"], text: str, lang: str) -> OcrExtractionResult:
-    """
-    Extracts macros by finding each keyword's own position and looking
-    for a number geometrically near it (see _find_keyword_anchor/
-    _find_number_to_right), NOT by reassembling OCR output into lines
-    of text and pattern-matching within a line. That line-based
-    approach was tried on BOTH OCR engines this app has used and failed
-    differently each time - EasyOCR's raw detection order put every
-    number in one cluster and every label in another; Tesseract's own
-    line grouping and this app's own several attempts at reconstructing
-    it all shifted rows in various ways, one bug replaced by a
-    different one each time a threshold got adjusted. The common thread
-    was that ANY single global mistake in reassembling the WHOLE label
-    into text broke EVERY field that came after it. Matching each
-    keyword directly against nearby word positions means one bad
-    match/row only affects that ONE field, not everything downstream of
-    it - a smaller, more contained failure mode.
-
-    `text` (the reassembled string) is still used for the per_100g
-    marker check below, since that's just "does this substring appear
-    anywhere" and isn't sensitive to row alignment the way a specific
-    keyword-to-value pairing is.
-    """
+def parse_label(text: str, lang: str) -> OcrExtractionResult:
     config = LANGUAGE_CONFIGS.get(lang)
     if not config:
         return OcrExtractionResult(raw_text=text, detected_language=lang, per_100g_confirmed=False)
@@ -689,44 +603,44 @@ def parse_label(words: list["OcrWord"], text: str, lang: str) -> OcrExtractionRe
 
     macros: dict = {}
 
-    kcal = _extract_kcal_geometric(words, config.energy_keyword)
+    kcal = _extract_kcal(text, config.energy_keyword)
     if kcal is not None:
         macros["kcal_100g"] = kcal
 
-    fat = _extract_field(words, config.fat_keyword, config.fat_exclude_prefixes)
+    fat = _extract_number_near_keyword(text, config.fat_keyword, config.fat_exclude_prefixes)
     if fat is not None:
         macros["fat_100g"] = fat
 
-    sat_fat = _extract_field(words, config.saturated_fat_keyword)
+    sat_fat = _extract_number_near_keyword(text, config.saturated_fat_keyword)
     if sat_fat is not None:
         macros["saturated_fat_100g"] = sat_fat
 
-    carbs = _extract_field(words, config.carbs_keyword, config.carbs_exclude_prefixes)
+    carbs = _extract_number_near_keyword(text, config.carbs_keyword, config.carbs_exclude_prefixes)
     if carbs is not None:
         macros["carbs_100g"] = carbs
 
-    sugar = _extract_field(words, config.sugar_keyword)
+    sugar = _extract_number_near_keyword(text, config.sugar_keyword)
     if sugar is not None:
         macros["sugar_100g"] = sugar
 
-    fiber = _extract_field(words, config.fiber_keyword)
+    fiber = _extract_number_near_keyword(text, config.fiber_keyword)
     if fiber is not None:
         macros["fiber_100g"] = fiber
 
-    protein = _extract_field(words, config.protein_keyword)
+    protein = _extract_number_near_keyword(text, config.protein_keyword)
     if protein is not None:
         macros["protein_100g"] = protein
 
     # Sodium: prefer a direct sodium value if the label has one, else
-    # convert from salt (EU convention) - see app/nutrition.py for why
+    # convert from salt (EU convention) -- see app/nutrition.py for why
     # this conversion must happen here, before anything reaches the DB.
     if config.sodium_keyword:
-        sodium = _extract_field(words, config.sodium_keyword)
+        sodium = _extract_number_near_keyword(text, config.sodium_keyword)
         if sodium is not None:
             macros["sodium_mg_100g"] = sodium * Decimal("1000")  # assume g reported, convert to mg
 
     if "sodium_mg_100g" not in macros and config.salt_keyword:
-        salt = _extract_field(words, config.salt_keyword)
+        salt = _extract_number_near_keyword(text, config.salt_keyword)
         if salt is not None:
             macros["sodium_mg_100g"] = salt_g_to_sodium_mg(salt)
 
@@ -740,18 +654,18 @@ def parse_label(words: list["OcrWord"], text: str, lang: str) -> OcrExtractionRe
 
 def extract_label_from_image(image_bytes: bytes) -> OcrExtractionResult:
     """Full pipeline: OCR -> detect language -> parse fields."""
-    text, words = run_ocr(image_bytes)
+    text = run_ocr(image_bytes)
     lang = detect_language(text)
 
     if lang is None:
         return OcrExtractionResult(raw_text=text, detected_language=None, per_100g_confirmed=False)
 
-    return parse_label(words, text, lang)
+    return parse_label(text, lang)
 
 
 # Lines that are mostly digits/punctuation are almost always a barcode
 # number, a net-weight declaration ("250 g", "12x330ml"), a best-before
-# date, or similar - never a product name or brand. Filtering these out
+# date, or similar -- never a product name or brand. Filtering these out
 # before guessing name/brand meaningfully improves the heuristic below.
 # Threshold: if fewer than 40% of a line's non-space characters are
 # letters, treat it as "mostly not text" and skip it.
@@ -773,22 +687,22 @@ def guess_name_and_brand(text: str) -> tuple[Optional[str], Optional[str]]:
     """
     Best-effort, NOT confident structured extraction (see
     ProductPhotoScanResult's docstring in app/schemas.py for why this is
-    fundamentally different from the nutrition-label parsing above -
+    fundamentally different from the nutrition-label parsing above --
     there's no consistent field-label vocabulary on a product package
     front to anchor on).
 
     Heuristic: take the "text-like" lines (filtering out barcode/weight/
     date-looking lines via _looks_like_text), guess the LONGEST such line
-    is the product name - on real packaging the product name is
+    is the product name -- on real packaging the product name is
     typically the most prominent (often largest-font) text, and while
-    OCR doesn't give us font-size info to check that directly, line
+    EasyOCR doesn't give us font-size info to check that directly, line
     length is a rough proxy that's easy to compute and better than
     guessing randomly. The brand guess is simply the next-longest
     distinct line, on the (weak, often wrong) assumption that the brand
     name is the second most prominent text on the front of the pack.
 
     Both are meant to pre-fill editable text fields the user reviews,
-    never to be trusted as-is - callers must treat these as drafts.
+    never to be trusted as-is -- callers must treat these as drafts.
     """
     candidates = [line.strip() for line in text.split("\n") if _looks_like_text(line)]
     if not candidates:
