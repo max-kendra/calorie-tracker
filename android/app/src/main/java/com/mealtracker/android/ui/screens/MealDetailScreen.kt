@@ -88,6 +88,7 @@ import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.ui.components.CatalogVisuals
 import com.mealtracker.android.ui.components.CropDialog
 import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.MacroRingsRow
@@ -368,7 +369,7 @@ fun MealDetailScreen(
                                 isLoading = if (showingRecent) false else state.isSearchingRecipes,
                                 emptyMessage = if (showingRecent) "No recipes yet" else "No matches",
                                 quickLoggingRecipeId = state.quickLoggingRecipeId,
-                                onQuickAddClick = { recipeId -> viewModel.logRecipeQuickly(recipeId) }
+                                onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
                             )
                         } else {
                             ItemResultsList(
@@ -712,7 +713,7 @@ private fun RecipeResultsList(
     isLoading: Boolean,
     emptyMessage: String,
     quickLoggingRecipeId: Int?,
-    onQuickAddClick: (Int) -> Unit
+    onQuickAddClick: (Recipe) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -739,7 +740,7 @@ private fun RecipeResultsList(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = quickLoggingRecipeId == null) { onQuickAddClick(recipe.recipeId) }
+                            .clickable(enabled = quickLoggingRecipeId == null) { onQuickAddClick(recipe) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -748,7 +749,8 @@ private fun RecipeResultsList(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .background(CatalogVisuals.backgroundFor(recipe.recipeType)),
+                            contentAlignment = Alignment.Center
                         ) {
                             if (recipe.imagePath != null) {
                                 coil3.compose.AsyncImage(
@@ -756,6 +758,13 @@ private fun RecipeResultsList(
                                     contentDescription = null,
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    CatalogVisuals.iconFor(recipe.recipeType),
+                                    contentDescription = null,
+                                    tint = CatalogVisuals.iconTint(),
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -773,8 +782,8 @@ private fun RecipeResultsList(
                         if (quickLoggingRecipeId == recipe.recipeId) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         } else {
-                            IconButton(onClick = { onQuickAddClick(recipe.recipeId) }) {
-                                Icon(Icons.Filled.Add, contentDescription = "Quick add 1 serving")
+                            IconButton(onClick = { onQuickAddClick(recipe) }) {
+                                Icon(Icons.Filled.Add, contentDescription = "Quick add")
                             }
                         }
                     }
@@ -839,7 +848,8 @@ private fun ItemResultsList(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .background(CatalogVisuals.backgroundFor(item.type)),
+                            contentAlignment = Alignment.Center
                         ) {
                             if (item.imagePath != null) {
                                 coil3.compose.AsyncImage(
@@ -847,6 +857,13 @@ private fun ItemResultsList(
                                     contentDescription = null,
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    CatalogVisuals.iconFor(item.type),
+                                    contentDescription = null,
+                                    tint = CatalogVisuals.iconTint(),
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -1093,7 +1110,17 @@ private fun ItemLogPageDialog(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(CatalogVisuals.backgroundFor(item.type)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            CatalogVisuals.iconFor(item.type),
+                            contentDescription = null,
+                            tint = CatalogVisuals.iconTint(),
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
                 }
                 if (isUploadingImage) {
                     Box(
@@ -1430,9 +1457,22 @@ private fun LogDetailDialog(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
+                    // This dialog only ever shows recipe-based logs (see
+                    // its own doc comment) -- "recipe" is a reasonable
+                    // fixed default here since Log doesn't carry
+                    // recipe_type (recipe vs meal) the way a full Recipe
+                    // object would.
                     Box(
-                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant)
-                    )
+                        modifier = Modifier.fillMaxSize().background(CatalogVisuals.backgroundFor("recipe")),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            CatalogVisuals.iconFor("recipe"),
+                            contentDescription = null,
+                            tint = CatalogVisuals.iconTint(),
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
                 }
                 IconButton(
                     onClick = onDismiss,
@@ -1578,7 +1618,18 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(
+                        // Log doesn't carry the source item's/recipe's
+                        // type (product/ingredient/recipe/meal), only
+                        // denormalized name/image -- recipeId presence
+                        // is the only signal available here, so this can
+                        // only distinguish "some recipe" from "some
+                        // item", not the finer type. Good enough for a
+                        // fallback icon; the search results list (which
+                        // DOES have the real type) is more precise.
+                        CatalogVisuals.backgroundFor(if (log.recipeId != null) "recipe" else "product")
+                    ),
+                contentAlignment = Alignment.Center
             ) {
                 if (log.imagePath != null) {
                     coil3.compose.AsyncImage(
@@ -1586,6 +1637,13 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
                         contentDescription = null,
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        CatalogVisuals.iconFor(if (log.recipeId != null) "recipe" else "product"),
+                        contentDescription = null,
+                        tint = CatalogVisuals.iconTint(),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

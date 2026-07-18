@@ -321,6 +321,19 @@ class LogCreate(LoggableEntryBase):
     pass
 
 
+class LogFromMealRequest(BaseModel):
+    """
+    Backs POST /logs/from-meal -- expands a saved "meal" into one log
+    PER INGREDIENT (each individually editable/removable afterward),
+    rather than a single log referencing recipe_id the way an actual
+    recipe logs. See that endpoint's docstring for the full reasoning.
+    """
+
+    recipe_id: int
+    date: date
+    meal_type: MealType
+
+
 class LogUpdate(BaseModel):
     """Quantity-only edit of an existing log -- item_id/recipe_id/date/
     meal_type are NOT editable this way (that's "delete and re-log as

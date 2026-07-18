@@ -394,6 +394,16 @@ data class LogCreateRequest(
     val quantity: Double
 )
 
+/** Backs POST /logs/from-meal -- see that endpoint's docstring for why
+ * meals expand into individual per-ingredient logs instead of one log
+ * referencing recipeId the way an actual recipe logs. */
+@Serializable
+data class LogFromMealRequest(
+    @SerialName("recipe_id") val recipeId: Int,
+    val date: String,
+    @SerialName("meal_type") val mealType: String
+)
+
 /** Quantity-only edit of an existing log -- see backend LogUpdate's doc
  * comment (item/recipe/date/meal_type aren't editable this way). */
 @Serializable

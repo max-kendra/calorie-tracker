@@ -454,7 +454,8 @@ private fun MatchedItemToast(
                 modifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(com.mealtracker.android.ui.components.CatalogVisuals.backgroundFor(item.type)),
+                contentAlignment = Alignment.Center
             ) {
                 if (item.imagePath != null) {
                     coil3.compose.AsyncImage(
@@ -462,6 +463,13 @@ private fun MatchedItemToast(
                         contentDescription = null,
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        com.mealtracker.android.ui.components.CatalogVisuals.iconFor(item.type),
+                        contentDescription = null,
+                        tint = com.mealtracker.android.ui.components.CatalogVisuals.iconTint(),
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }

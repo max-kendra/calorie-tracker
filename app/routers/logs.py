@@ -15,6 +15,7 @@ from app.schemas import (
     ExtendedNutritionTotals,
     ItemOut,
     LogCreate,
+    LogFromMealRequest,
     LogOut,
     LogUpdate,
     MealType,
@@ -131,6 +132,84 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(log)
     return _log_to_out(log, item_name, recipe_name, image_path)
+
+
+@router.post("/from-meal", response_model=list[LogOut], status_code=status.HTTP_201_CREATED)
+def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get_db)):
+    """
+    Expands a saved "meal" into one log PER INGREDIENT, rather than a
+    single log referencing recipe_id the way an actual recipe logs (see
+    POST /logs with recipe_id set, still used for real recipes). This is
+    the functional distinction between the two: a recipe stays one
+    atomic log entry; a meal's ingredients land individually, each fully
+    editable/removable afterward -- same as if the user had added each
+    item to this meal one at a time (see design doc).
+
+    Only valid for recipe_type="meal" -- rejects actual recipes, which
+    should keep logging the normal atomic way.
+    """
+    recipe = (
+        db.query(Recipe)
+        .options(joinedload(Recipe.ingredients))
+        .filter(Recipe.recipe_id == payload.recipe_id)
+        .first()
+    )
+    if not recipe:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found")
+    if recipe.recipe_type != "meal":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This is a recipe, not a meal -- log it with POST /logs and recipe_id instead",
+        )
+    if not recipe.ingredients:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This meal has no ingredients")
+
+    # Look up all the ingredient items in one query rather than one
+    # query per ingredient in the loop below.
+    item_ids = [ing.item_id for ing in recipe.ingredients]
+    items_by_id = {item.item_id: item for item in db.query(Item).filter(Item.item_id.in_(item_ids)).all()}
+
+    created: list[tuple[Log, str, Optional[str]]] = []
+    for ingredient in recipe.ingredients:
+        item = items_by_id.get(ingredient.item_id)
+        if not item:
+            # The ingredient's item was deleted since this meal was
+            # saved -- skip it rather than fail the whole request over
+            # one missing item.
+            continue
+
+        totals = compute_item_totals(item, ingredient.quantity_g, None)
+        log = Log(
+            date=payload.date,
+            meal_type=payload.meal_type,
+            item_id=item.item_id,
+            recipe_id=None,
+            serving_size_id=None,
+            quantity=ingredient.quantity_g,
+            kcal_logged=totals.kcal,
+            protein_g_logged=totals.protein_g,
+            carbs_g_logged=totals.carbs_g,
+            fat_g_logged=totals.fat_g,
+            fiber_g_logged=totals.fiber_g,
+            sugar_g_logged=totals.sugar_g,
+            saturated_fat_g_logged=totals.saturated_fat_g,
+            sodium_mg_logged=totals.sodium_mg,
+        )
+        db.add(log)
+        created.append((log, item.name, item.image_path))
+
+    if not created:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="None of this meal's ingredient items exist anymore",
+        )
+
+    db.commit()
+    result = []
+    for log, item_name, image_path in created:
+        db.refresh(log)
+        result.append(_log_to_out(log, item_name, None, image_path))
+    return result
 
 
 @router.get("", response_model=list[LogOut])

@@ -7,6 +7,7 @@ import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemMacrosUpdateRequest
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.LogCreateRequest
+import com.mealtracker.android.network.models.LogFromMealRequest
 import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
@@ -385,22 +386,38 @@ class MealDetailViewModel : ViewModel() {
      * 100g for items (see QUICK_LOG_QUANTITY_G's doc comment). Recipe
      * quantity semantics are "number of servings consumed", so 1 here
      * means one full recipe serving, not "the whole recipe". */
-    fun logRecipeQuickly(recipeId: Int) {
+    /** Recipes log atomically (one log entry referencing recipe_id, flat
+     * 1-serving default -- same "quick add, not precise" tradeoff as
+     * logItemQuickly's flat 100g). Meals expand into one log PER
+     * INGREDIENT instead (see LogFromMealRequest's doc comment) -- each
+     * lands individually editable/removable, which is the whole
+     * functional distinction between the two (see design discussion). */
+    fun logRecipeQuickly(recipe: Recipe) {
         val state = _uiState.value
         val date = state.date ?: return
         if (state.mealType.isEmpty()) return
 
-        _uiState.value = state.copy(quickLoggingRecipeId = recipeId, quickLogError = null)
+        _uiState.value = state.copy(quickLoggingRecipeId = recipe.recipeId, quickLogError = null)
         viewModelScope.launch {
             try {
-                ApiClient.service.createLog(
-                    LogCreateRequest(
-                        date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                        mealType = state.mealType,
-                        recipeId = recipeId,
-                        quantity = 1.0
+                if (recipe.recipeType == "meal") {
+                    ApiClient.service.createLogsFromMeal(
+                        LogFromMealRequest(
+                            recipeId = recipe.recipeId,
+                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                            mealType = state.mealType
+                        )
                     )
-                )
+                } else {
+                    ApiClient.service.createLog(
+                        LogCreateRequest(
+                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                            mealType = state.mealType,
+                            recipeId = recipe.recipeId,
+                            quantity = 1.0
+                        )
+                    )
+                }
                 _uiState.value = _uiState.value.copy(quickLoggingRecipeId = null)
                 load(date, state.mealType)
             } catch (e: Exception) {

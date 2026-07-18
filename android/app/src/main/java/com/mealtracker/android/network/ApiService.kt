@@ -12,6 +12,7 @@ import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.KcalGoalCalculationResult
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.LogCreateRequest
+import com.mealtracker.android.network.models.LogFromMealRequest
 import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.MealGoalSplitsUpdateRequest
 import com.mealtracker.android.network.models.OcrScanResult
@@ -86,6 +87,12 @@ interface ApiService {
     // flat-default quantity simplification.
     @POST("logs")
     suspend fun createLog(@Body request: LogCreateRequest): Log
+
+    // Expands a meal into individual per-ingredient logs -- see
+    // LogFromMealRequest's doc comment. Only for recipe_type="meal";
+    // actual recipes keep using createLog(recipeId=...) above.
+    @POST("logs/from-meal")
+    suspend fun createLogsFromMeal(@Body request: LogFromMealRequest): List<Log>
 
     // Quantity-only edit -- backs the log detail/edit screen.
     @PATCH("logs/{logId}")
