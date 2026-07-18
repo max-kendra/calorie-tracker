@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
@@ -90,7 +91,11 @@ fun AddItemScreen(
     // AddItemViewModel has no access to that (separate ViewModel/
     // screen), so this can't be handled locally the way onDone/onBack
     // are.
-    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {}
+    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {},
+    // "Add Another Item" on the SAVED screen -- bubbles up so
+    // MealDetailScreen can decide where "another" should start (Search,
+    // not straight back into barcode-scanning -- see design discussion).
+    onAddAnother: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -197,6 +202,17 @@ fun AddItemScreen(
         // cropper's source, no need to copy to cache first.
         if (uri != null) {
             startCrop(uri) { viewModel.scanLabel(it) }
+        }
+    }
+
+    // For ITEM_FORM's own "Add Photo" -- items that skipped the usual
+    // photo-capture steps entirely (USDA imports currently) had no way
+    // to attach one at all, see design discussion.
+    val galleryPickerForFormPhoto = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            startCrop(uri) { viewModel.attachPhotoToForm(it) }
         }
     }
 
@@ -370,11 +386,16 @@ fun AddItemScreen(
             AddItemPhase.ITEM_FORM, AddItemPhase.SAVING -> ItemFormContent(
                 state = state,
                 isSaving = state.phase == AddItemPhase.SAVING,
-                viewModel = viewModel
+                viewModel = viewModel,
+                onAddPhoto = {
+                    galleryPickerForFormPhoto.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
             )
             AddItemPhase.SAVED -> SavedContent(
                 itemName = state.createdItem?.name ?: "",
-                onAddAnother = { viewModel.resetToScanChoice() },
+                onAddAnother = onAddAnother,
                 onDone = onDone
             )
         }
@@ -725,29 +746,15 @@ private fun CaptureLabelContent(
             )
         }
 
-        if (onSkip != null) {
-            // Now offered on both steps -- product photo always allowed
-            // skipping (a missing photo/name-brand-guess isn't a dead
-            // end, form fields just start blank). The label step used to
-            // NOT have this, reasoning that OCR-failure's own "enter
-            // manually" escape hatch (showOcrFailedDialog) covered it --
-            // but that only appears AFTER a failed attempt. Per design
-            // discussion, the user should be able to skip straight to
-            // manual entry WITHOUT taking a photo at all, not just after
-            // one fails.
-            TextButton(
-                onClick = onSkip,
-                modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
-            ) {
-                Text(skipLabel, color = Color.White)
-            }
-        }
+        // onSkip button itself now renders bottom-center, grouped with
+        // Capture/gallery below (see that Row's doc comment for why it
+        // moved off the top of the screen).
 
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(bottom = 32.dp),
+                .padding(bottom = if (onSkip != null) 88.dp else 32.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -784,17 +791,69 @@ private fun CaptureLabelContent(
                 Text("Capture")
             }
         }
+
+        if (onSkip != null) {
+            // Grouped with the bottom controls now, not pinned top-start
+            // -- it used to sit right under/against the centered
+            // instruction text at the top of the screen, close enough
+            // that they visually ran together (see design discussion:
+            // "almost merges together with 'Frame the nutrition
+            // label'"). Bottom-center, below Capture/gallery, keeps it
+            // near the other actions instead.
+            TextButton(
+                onClick = onSkip,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp)
+            ) {
+                Text(skipLabel, color = Color.White)
+            }
+        }
     }
 }
 
 @Composable
-private fun ItemFormContent(state: AddItemUiState, isSaving: Boolean, viewModel: AddItemViewModel) {
+private fun ItemFormContent(
+    state: AddItemUiState,
+    isSaving: Boolean,
+    viewModel: AddItemViewModel,
+    onAddPhoto: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+        // Lets the user attach/replace a photo directly here -- items
+        // that skip the usual capture steps (USDA imports currently)
+        // otherwise had no way to add one at all. Same crop pipeline as
+        // everywhere else (see AddItemScreen's galleryPickerForFormPhoto).
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(onClick = onAddPhoto),
+                contentAlignment = Alignment.Center
+            ) {
+                if (state.productImagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + state.productImagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(Icons.Filled.AddAPhoto, contentDescription = "Add photo")
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 12.dp))
+            TextButton(onClick = onAddPhoto) {
+                Text(if (state.productImagePath != null) "Change Photo" else "Add Photo")
+            }
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
         if (state.ocrWasUsed) {
             if (!state.ocrPer100gConfirmed) {
                 Text(
@@ -825,20 +884,25 @@ private fun ItemFormContent(state: AddItemUiState, isSaving: Boolean, viewModel:
             label = { Text("Name") },
             modifier = Modifier.fillMaxWidth()
         )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.brand,
-            onValueChange = viewModel::updateBrand,
-            label = { Text("Brand (optional)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        OutlinedTextField(
-            value = state.barcode,
-            onValueChange = viewModel::updateBarcode,
-            label = { Text("Barcode") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        // Brand/barcode don't apply to raw ingredients (a banana isn't
+        // "branded" and doesn't have its own barcode) -- hidden rather
+        // than just left empty, per design discussion.
+        if (state.itemType != "ingredient") {
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+            OutlinedTextField(
+                value = state.brand,
+                onValueChange = viewModel::updateBrand,
+                label = { Text("Brand (optional)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
+            OutlinedTextField(
+                value = state.barcode,
+                onValueChange = viewModel::updateBarcode,
+                label = { Text("Barcode") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

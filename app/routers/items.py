@@ -171,6 +171,19 @@ async def scan_label(image: UploadFile = File(...)):
     # place for OCR failures to actually surface in practice.
     try:
         result = extract_label_from_image(image_bytes)
+        # Logged on EVERY call now, not just a crash -- a clean label
+        # that still fails to parse (no exception, just insufficient/
+        # garbled recognized text or a language that didn't hit the
+        # keyword-match threshold) previously left zero trace anywhere,
+        # making "why did this fail" undebuggable. This shows exactly
+        # what EasyOCR recognized and what we made of it.
+        logger.info(
+            "scan_label OCR result: detected_language=%s per_100g_confirmed=%s macros=%s raw_text=%r",
+            result.detected_language,
+            result.per_100g_confirmed,
+            result.macros,
+            result.raw_text,
+        )
         return OcrScanResult(
             raw_text=result.raw_text,
             detected_language=result.detected_language,

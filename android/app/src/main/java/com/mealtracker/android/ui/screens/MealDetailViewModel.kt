@@ -113,8 +113,18 @@ data class MealDetailUiState(
     val saveMealSuccess: Boolean = false,
     // Add Item sheet state
     val sheetMode: AddItemSheetMode = AddItemSheetMode.SEARCH,
-    // See requestUsdaSearch()'s doc comment.
-    val requestedUsdaSearch: Boolean = false,
+    // See requestUsdaSearch()'s doc comment. Non-null (possibly blank)
+    // means a jump is pending; carries over whatever the user already
+    // typed in this screen's own search box.
+    val requestedUsdaSearchQuery: String? = null,
+    // Entering the embedded AddItemScreen via "Search USDA" reuses the
+    // BARCODE sheetMode slot to render it (see that mode's doc comment)
+    // -- but that made the Barcode icon incorrectly look "selected" even
+    // though the user came from Search, not by tapping Barcode
+    // themselves (see design discussion). This tracks that distinction
+    // separately, for icon highlighting ONLY -- content rendering still
+    // goes purely off sheetMode.
+    val enteredAddFlowViaUsdaLink: Boolean = false,
     val recentItems: List<Item> = emptyList(),
     val isLoadingRecentItems: Boolean = false,
     val searchQuery: String = "",
@@ -261,7 +271,12 @@ class MealDetailViewModel : ViewModel() {
     // ----- Add Item sheet -----
 
     fun setSheetMode(mode: AddItemSheetMode) {
-        _uiState.value = _uiState.value.copy(sheetMode = mode)
+        // A deliberate tap on either icon means the user is explicitly
+        // choosing that mode -- clears the "came from the USDA link"
+        // distinction so Barcode's highlight goes back to reflecting
+        // sheetMode normally (see enteredAddFlowViaUsdaLink's doc
+        // comment).
+        _uiState.value = _uiState.value.copy(sheetMode = mode, enteredAddFlowViaUsdaLink = false)
     }
 
     /** "Can't find it? Search USDA" link at the bottom of the text
@@ -273,11 +288,32 @@ class MealDetailViewModel : ViewModel() {
      * clears requestedUsdaSearch once it's actually triggered the jump
      * on the embedded AddItemViewModel. */
     fun requestUsdaSearch() {
-        _uiState.value = _uiState.value.copy(sheetMode = AddItemSheetMode.BARCODE, requestedUsdaSearch = true)
+        _uiState.value = _uiState.value.copy(
+            sheetMode = AddItemSheetMode.BARCODE,
+            requestedUsdaSearchQuery = _uiState.value.searchQuery,
+            enteredAddFlowViaUsdaLink = true
+        )
     }
 
     fun clearUsdaSearchRequest() {
-        _uiState.value = _uiState.value.copy(requestedUsdaSearch = false)
+        _uiState.value = _uiState.value.copy(requestedUsdaSearchQuery = null)
+    }
+
+    /** "Add Another Item" on the embedded flow's SAVED screen -- returns
+     * to this sheet's Search tab rather than resetting back into
+     * barcode-scanning specifically, since the next item the user wants
+     * isn't necessarily barcode-scannable (an already-known item via
+     * search, or another raw ingredient via USDA search again). See
+     * design discussion: "default to Search, in case the user wants to
+     * add a saved item". Also refreshes the meal, same as finishing the
+     * flow normally -- an item WAS just added. */
+    fun returnToSearchAfterAdd() {
+        _uiState.value = _uiState.value.copy(
+            sheetMode = AddItemSheetMode.SEARCH,
+            enteredAddFlowViaUsdaLink = false
+        )
+        val date = _uiState.value.date
+        if (date != null) load(date, _uiState.value.mealType)
     }
 
     /** "Recent" here means recently added/updated in the catalog (GET

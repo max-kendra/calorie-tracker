@@ -347,9 +347,14 @@ class AddItemViewModel : ViewModel() {
 
     /** Reached only from the Search tab now, not from scanning -- see
      * design discussion. Jumps straight into USDA_SEARCH without going
-     * through SCAN_BARCODE at all. */
-    fun jumpToUsdaSearch() {
+     * through SCAN_BARCODE at all. initialQuery carries over whatever
+     * the user already typed in the meal's own search box, so they
+     * don't have to type the same thing twice (see design discussion). */
+    fun jumpToUsdaSearch(initialQuery: String = "") {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.USDA_SEARCH)
+        if (initialQuery.isNotBlank()) {
+            updateUsdaQuery(initialQuery)
+        }
     }
 
     fun retryBarcodeScan() {
@@ -391,6 +396,23 @@ class AddItemViewModel : ViewModel() {
                     phase = AddItemPhase.CAPTURE_PRODUCT_PHOTO,
                     scanError = e.message ?: "Product photo upload failed"
                 )
+            }
+        }
+    }
+
+    /** Attaches/replaces a photo directly from within ITEM_FORM -- for
+     * items that skipped the usual photo-capture steps entirely (USDA
+     * imports currently; jumpToUsdaSearch goes straight to ITEM_FORM
+     * with no photo step). Doesn't change phase, unlike
+     * scanProductPhoto() above -- this is meant to be usable at any
+     * point while reviewing the form, not a step in the linear flow. */
+    fun attachPhotoToForm(imageBytes: ByteArray) {
+        viewModelScope.launch {
+            try {
+                val result = ApiClient.service.scanProductPhoto(imageBytesToPart(imageBytes))
+                _uiState.value = _uiState.value.copy(productImagePath = result.imagePath)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(saveError = e.message ?: "Couldn't upload photo")
             }
         }
     }

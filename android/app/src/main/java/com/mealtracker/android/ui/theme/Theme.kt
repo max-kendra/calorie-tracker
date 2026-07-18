@@ -21,6 +21,16 @@ private val DarkColorScheme = darkColorScheme(
     // tints, etc.) -- none of those read from the theme at all, by
     // design, so they don't need a dark-mode counterpart here.
     primary = TealPrimary,
+    // Material3's darkColorScheme() picks its own default onPrimary
+    // assuming a typical M3 dark theme's primary is a LIGHT/pastel tone
+    // (with a dark, low-contrast "onPrimary" for text on top of it).
+    // Since our primary is deliberately the same dark, saturated teal in
+    // both themes (see above), that default onPrimary was some dark
+    // navy-ish tone -- navy text/icons on a dark green button, exactly
+    // the "content inside them is navy" bug from design discussion.
+    // White is correct here regardless of theme, so it's set explicitly
+    // rather than relying on M3's per-theme default.
+    onPrimary = Color.White,
     primaryContainer = TealPrimaryContainer,
     background = AppBackgroundDark,
     surface = SurfaceDark,
@@ -32,6 +42,7 @@ private val DarkColorScheme = darkColorScheme(
 
 private val LightColorScheme = lightColorScheme(
     primary = TealPrimary,
+    onPrimary = Color.White,
     primaryContainer = TealPrimaryContainer,
     // Plain white/near-white app-wide -- any per-screen color (like
     // Journal's pastel hero) is applied locally by that screen instead

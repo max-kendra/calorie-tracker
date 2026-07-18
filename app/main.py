@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI
@@ -5,6 +6,16 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.routers import goals, items, logs, meal_plans, recipes, usda, user_profile
+
+# Without this, nothing below INFO level (including the new OCR-result
+# logging added to scan_label -- see app/routers/items.py) ever actually
+# appears in `docker compose logs`. Python's logging module only has a
+# "handler of last resort" that writes WARNING+ to stderr when nothing
+# else is configured -- that's why existing logger.exception() calls
+# (ERROR level) were visible but a plain logger.info() call would have
+# been silently dropped. This makes INFO the effective floor everywhere
+# in the app, not just here.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(
     title="Meal Tracker API",
