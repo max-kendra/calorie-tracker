@@ -138,6 +138,16 @@ data class AddItemUiState(
     val brand: String = "",
     val barcode: String = "",
     val itemType: String = "product", // "product" | "ingredient"
+    // Not every label reports macros per 100g -- some show per serving
+    // (e.g. "per 30g" or "per slice"), and OCR can only flag that
+    // uncertainty (ocrPer100gConfirmed), not fix it. This is what the
+    // macro fields below are ACTUALLY entered per -- defaults to 100
+    // (matching the vast majority of labels, and OCR/USDA prefills,
+    // which do normalize to per-100g already), but editable so the
+    // user can just type in whatever amount the label actually shows
+    // instead of doing the per-100g math themselves by hand. Converted
+    // to true per-100g values at save time -- see saveItem().
+    val perAmountG: String = "100",
     val kcal100g: String = "",
     val protein100g: String = "",
     val carbs100g: String = "",
@@ -604,6 +614,7 @@ class AddItemViewModel : ViewModel() {
     }
     fun updateBarcode(value: String) { _uiState.value = _uiState.value.copy(barcode = value) }
     fun updateItemType(value: String) { _uiState.value = _uiState.value.copy(itemType = value) }
+    fun updatePerAmountG(value: String) { _uiState.value = _uiState.value.copy(perAmountG = value) }
     fun updateKcal(value: String) { _uiState.value = _uiState.value.copy(kcal100g = value) }
     fun updateProtein(value: String) { _uiState.value = _uiState.value.copy(protein100g = value) }
     fun updateCarbs(value: String) { _uiState.value = _uiState.value.copy(carbs100g = value) }
@@ -622,6 +633,15 @@ class AddItemViewModel : ViewModel() {
 
         _uiState.value = state.copy(phase = AddItemPhase.SAVING, saveError = null)
 
+        // Scales whatever was entered "per perAmountG grams" up/down to
+        // a true per-100g value -- e.g. entered per 30g -> multiply by
+        // 100/30. A blank/zero/invalid perAmountG falls back to 100 (no
+        // conversion) rather than silently producing garbage (dividing
+        // by zero or a missing amount).
+        val perAmount = state.perAmountG.toDoubleOrNull()?.takeIf { it > 0.0 } ?: 100.0
+        fun toPer100g(entered: String): Double? =
+            entered.toDoubleOrNull()?.let { it / perAmount * 100.0 }
+
         viewModelScope.launch {
             try {
                 val item = ApiClient.service.createItem(
@@ -630,18 +650,18 @@ class AddItemViewModel : ViewModel() {
                         barcode = state.barcode.ifBlank { null },
                         brand = state.brand.ifBlank { null },
                         imagePath = state.productImagePath,
-                        kcal100g = state.kcal100g.toDoubleOrNull(),
-                        protein100g = state.protein100g.toDoubleOrNull(),
-                        carbs100g = state.carbs100g.toDoubleOrNull(),
-                        fat100g = state.fat100g.toDoubleOrNull(),
-                        fiber100g = state.fiber100g.toDoubleOrNull(),
-                        sugar100g = state.sugar100g.toDoubleOrNull(),
-                        saturatedFat100g = state.saturatedFat100g.toDoubleOrNull(),
-                        // User-entered SALT (g) -> API expects sodium (mg):
-                        // divide by the salt:sodium ratio, then by 1000
-                        // for the unit change to mg... equivalently,
-                        // multiply by 1000 and divide by the ratio.
-                        sodiumMg100g = state.saltG100g.toDoubleOrNull()?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO),
+                        kcal100g = toPer100g(state.kcal100g),
+                        protein100g = toPer100g(state.protein100g),
+                        carbs100g = toPer100g(state.carbs100g),
+                        fat100g = toPer100g(state.fat100g),
+                        fiber100g = toPer100g(state.fiber100g),
+                        sugar100g = toPer100g(state.sugar100g),
+                        saturatedFat100g = toPer100g(state.saturatedFat100g),
+                        // Salt (g, as entered, per perAmount) -> per-100g
+                        // salt -> sodium (mg): scale to per-100g first,
+                        // same as every other macro above, THEN apply
+                        // the salt:sodium unit conversion on top.
+                        sodiumMg100g = toPer100g(state.saltG100g)?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO),
                         type = state.itemType,
                         origin = when {
                             state.usdaImportUsed -> "usda_import"

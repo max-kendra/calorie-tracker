@@ -59,7 +59,7 @@ fun MacroProgressRing(
     }
 }
 
-/** Row of four macro rings in the standard order: Fat, Protein, Carbs, Fiber. */
+/** Row of four macro rings, in order: Protein, Fat, Carbs, Fiber. */
 @Composable
 fun MacroRingsRow(
     fatEaten: Int, fatGoal: Int,
@@ -72,8 +72,8 @@ fun MacroRingsRow(
         modifier = modifier,
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly
     ) {
-        MacroProgressRing("Fat", fatEaten, fatGoal, MacroColors.Fat)
         MacroProgressRing("Protein", proteinEaten, proteinGoal, MacroColors.Protein)
+        MacroProgressRing("Fat", fatEaten, fatGoal, MacroColors.Fat)
         MacroProgressRing("Carbs", carbsEaten, carbsGoal, MacroColors.Carbs)
         MacroProgressRing("Fiber", fiberEaten, fiberGoal, MacroColors.Fiber)
     }

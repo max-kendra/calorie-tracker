@@ -185,8 +185,8 @@ fun MacronutrientsScreen(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
             }
 
-            MacroSliderRow("Fat", state.fat, viewModel::updateFatPct, FatColor)
             MacroSliderRow("Protein", state.protein, viewModel::updateProteinPct, ProteinColor)
+            MacroSliderRow("Fat", state.fat, viewModel::updateFatPct, FatColor)
             MacroSliderRow("Carbs", state.carbs, viewModel::updateCarbsPct, CarbsColor)
             MacroSliderRow("Fiber", state.fiber, viewModel::updateFiberPct, FiberColor)
 

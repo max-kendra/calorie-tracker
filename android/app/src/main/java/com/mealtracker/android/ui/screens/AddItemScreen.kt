@@ -20,6 +20,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -855,7 +856,7 @@ private fun ItemFormContent(
             if (!state.ocrPer100gConfirmed) {
                 Text(
                     "\u26a0\ufe0f Couldn't confirm these values are per 100g -- " +
-                        "double-check against the label (they might be per-serving).",
+                        "double-check against the label and adjust \"Values are per\" below if needed.",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -916,16 +917,34 @@ private fun ItemFormContent(
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        Text("Per 100g", style = MaterialTheme.typography.titleSmall)
+        // Editable now -- not every label reports macros per 100g (see
+        // design discussion), so the amount these values are entered
+        // for needs to be something the user can correct, not a fixed
+        // "Per 100g" label. Converted to true per-100g at save time
+        // (see AddItemViewModel.saveItem) regardless of what's typed
+        // here.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Values are per", style = MaterialTheme.typography.titleSmall)
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+            OutlinedTextField(
+                value = state.perAmountG,
+                onValueChange = viewModel::updatePerAmountG,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                modifier = Modifier.width(90.dp)
+            )
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+            Text("g", style = MaterialTheme.typography.titleSmall)
+        }
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
         NumberField("Calories (kcal)", state.kcal100g, viewModel::updateKcal)
         NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
-        NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
         NumberField("Fat (g)", state.fat100g, viewModel::updateFat)
-        NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
-        NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
         NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
+        NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
+        NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
+        NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
         NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
