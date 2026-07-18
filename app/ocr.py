@@ -613,7 +613,17 @@ def _find_number_to_right(
         candidates.sort(key=lambda w: w.x_left - anchor.x_right)
 
     for w in candidates:
-        match = re.search(r"(\d+(?:[.,]\d+)?)", w.text)
+        # Restricted to at most ONE decimal digit -- EU nutrition labels
+        # universally report to 1 decimal place. This was present in the
+        # original text-based extraction and got dropped when this was
+        # rewritten for geometric matching -- confirmed against real
+        # output that dropping it reintroduced exactly the bug it
+        # existed to prevent: a blurred "g" unit letter misread by
+        # Tesseract as a digit "9" with no separating space (e.g.
+        # "12.2 g" -> "12.29") was getting silently absorbed into the
+        # value. Capping at one decimal digit means that corrupted
+        # extra digit is correctly left uncaptured.
+        match = re.search(r"(\d+(?:[.,]\d)?)", w.text)
         if match:
             number_str = match.group(1).replace(",", ".")
             try:
