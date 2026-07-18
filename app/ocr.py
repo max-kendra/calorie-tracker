@@ -37,13 +37,17 @@ The parsing/keyword logic below (`_extract_number_near_keyword`,
 `_extract_kcal`, `LANGUAGE_CONFIGS`, etc.) is engine-agnostic -- it just
 operates on whatever text string the OCR step returns, one line per
 detected line of text -- so none of that needed to change switching back
-to this engine. Tesseract's own layout analysis generally preserves
-proper reading order for structured documents on its own, unlike
-EasyOCR's raw detection order (see the reading-order bug that used to
-live here, on the EasyOCR branch) -- if garbled/misordered output shows
-up again on real labels, pytesseract.image_to_data() exposes the same
-per-word bounding-box info that fix relied on, and the same row-grouping
-technique could be reapplied here.
+to this engine. Reading order IS reconstructed manually here too (see
+_reconstruct_reading_order) -- an earlier version of this branch assumed
+Tesseract's own layout analysis would preserve proper reading order on
+its own and used image_to_string() directly, but real output disproved
+that: on a photographed (not scanned) label, Tesseract's own line
+grouping shifted several rows by one (a keyword paired with the NEXT
+row's value, not its own), while other rows landed correctly -- the
+same category of bug as EasyOCR's raw detection order, just showing up
+differently. Fixed the same way: pull per-word bounding boxes via
+image_to_data() and group them into rows geometrically instead of
+trusting the engine's own grouping.
 
 HONESTY ABOUT LANGUAGE COVERAGE: Danish, German, and English keyword
 dictionaries below were verified against real Tesseract OCR output on
@@ -356,15 +360,89 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> 
     return sum(1 for kw in keywords if _fuzzy_contains(text_lower, kw))
 
 
+def _reconstruct_reading_order(data: dict) -> str:
+    """
+    Rebuilds reading order from Tesseract's own per-WORD bounding boxes
+    (image_to_data), rather than trusting Tesseract's own line/paragraph
+    grouping (what image_to_string uses internally) -- confirmed against
+    real output that this grouping is unreliable on a photographed (not
+    scanned) label: "ENERGI" ended up paired with FEDT's value, "FEDT"
+    with the saturated-fat row's value, "KULHYDRAT" with SUKKERARTER's
+    value -- a one-row shift for several rows in sequence, while a
+    couple of OTHER rows (KOSTFIBRE, PROTEIN) landed correctly. That
+    inconsistency is the tell: it's not a recognition-accuracy problem
+    (the digits were read right), it's Tesseract's own idea of "what's
+    on the same line" not reliably matching the label's actual visual
+    row structure.
+
+    An earlier version of this function clustered rows by comparing each
+    new word against the RUNNING AVERAGE y-center of the row it was
+    joining -- that has a drift problem: as more words join a row, the
+    average can creep further than the original threshold intended,
+    letting the "row" silently absorb a word from the next physical row
+    (confirmed against real output that this fix, as first written,
+    still produced a one-row shift, just shifted differently -- "fiber
+    got protein's values" instead of the original shift direction).
+    Fixed properly here with gap-based splitting instead: sort all words
+    top-to-bottom, then start a NEW row whenever the gap to the PREVIOUS
+    word (not a moving average) exceeds a threshold based on the
+    OVERALL median word height. This is the standard way to do this kind
+    of 1D row segmentation and doesn't have the moving-target problem.
+    """
+    n = len(data.get("text", []))
+    items = []
+    for i in range(n):
+        text = data["text"][i].strip()
+        if not text:
+            continue
+        items.append({
+            "text": text,
+            "y_center": data["top"][i] + data["height"][i] / 2,
+            "x_left": data["left"][i],
+            "height": data["height"][i],
+        })
+
+    if not items:
+        return ""
+
+    items.sort(key=lambda w: w["y_center"])
+
+    heights = sorted(i["height"] for i in items)
+    median_height = heights[len(heights) // 2]
+    # Threshold based on the OVERALL median height, not each individual
+    # word's own height -- a stable reference that doesn't get thrown
+    # off by one unusually small/large word (e.g. a lowercase unit
+    # suffix with a smaller bounding box than the digits next to it).
+    row_gap_threshold = max(median_height, 1) * 0.6
+
+    rows: list[list[dict]] = [[items[0]]]
+    for prev, curr in zip(items, items[1:]):
+        gap = curr["y_center"] - prev["y_center"]
+        if gap > row_gap_threshold:
+            rows.append([curr])
+        else:
+            rows[-1].append(curr)
+
+    lines = []
+    for row in rows:
+        row.sort(key=lambda w: w["x_left"])
+        lines.append(" ".join(w["text"] for w in row))
+
+    return "\n".join(lines)
+
+
 def run_ocr(image_bytes: bytes) -> str:
     """
     Runs Tesseract ONCE, combined across all supported languages (see
     _TESSERACT_LANGS) via pytesseract -- a thin wrapper around the
-    system `tesseract` CLI binary. Which language the text is actually
-    in gets figured out afterward by detect_language() (see
-    extract_label_from_image()), via the same keyword-scoring approach
-    used on every other branch -- unchanged, since that logic is
-    engine-agnostic.
+    system `tesseract` CLI binary. Uses image_to_data (per-word bounding
+    boxes) rather than the simpler image_to_string, and reconstructs
+    reading order ourselves (see _reconstruct_reading_order's doc
+    comment for why that's necessary, not just "join the lines").
+    Which language the text is actually in gets figured out afterward by
+    detect_language() (see extract_label_from_image()), via the same
+    keyword-scoring approach used on every other branch -- unchanged,
+    since that logic is engine-agnostic.
     """
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
@@ -373,7 +451,8 @@ def run_ocr(image_bytes: bytes) -> str:
     # already smaller than this.
     image.thumbnail((_MAX_OCR_DIMENSION, _MAX_OCR_DIMENSION))
 
-    return pytesseract.image_to_string(image, lang=_TESSERACT_LANGS)
+    data = pytesseract.image_to_data(image, lang=_TESSERACT_LANGS, output_type=pytesseract.Output.DICT)
+    return _reconstruct_reading_order(data)
 
 
 def detect_language(text: str) -> Optional[str]:
