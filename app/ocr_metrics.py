@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def record_ocr_scan(engine: str, endpoint: str, image_bytes_size: int) --> Iterator[dict]:
+def record_ocr_scan(engine: str, endpoint: str, image_bytes_size: int) -> Iterator[dict]:
     """
     Wrap an OCR call with this to record a metrics line for it, e.g.:
 
@@ -67,7 +67,7 @@ def record_ocr_scan(engine: str, endpoint: str, image_bytes_size: int) --> Itera
         _write_record(record)
 
 
-def _write_record(record: dict) --> None:
+def _write_record(record: dict) -> None:
     try:
         metrics_dir = Path(settings.ocr_metrics_dir)
         metrics_dir.mkdir(parents=True, exist_ok=True)

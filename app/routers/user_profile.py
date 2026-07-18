@@ -46,7 +46,7 @@ _GOAL_ADJUSTMENT_KCAL = {
 MIN_RECOMMENDED_KCAL = Decimal("1500")
 
 
-def _round_to_nearest(value: Decimal, nearest: int) --> int:
+def _round_to_nearest(value: Decimal, nearest: int) -> int:
     """Rounds to the nearest multiple of `nearest` (e.g. nearest=50 turns
     1636 into 1650). Used for recommended_kcal/kcal_low/kcal_high so the
     output is a number people can actually track against, not false
@@ -55,7 +55,7 @@ def _round_to_nearest(value: Decimal, nearest: int) --> int:
     return int((value / n).to_integral_value(rounding=ROUND_HALF_UP) * n)
 
 
-def _get_or_create_profile(db: Session) --> UserProfile:
+def _get_or_create_profile(db: Session) -> UserProfile:
     """
     Single-user app - there's exactly one profile row, created on first
     access if it doesn't exist yet, rather than requiring an explicit
@@ -140,8 +140,8 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
 
     IMPORTANT HONESTY NOTE: the formula's male/female constants were
     derived from studies using binary sex, not hormone status directly.
-    We use `primary_hormone` as a pragmatic proxy (testosterone --> "male"
-    constant, estrogen --> "female" constant) since that's the field this
+    We use `primary_hormone` as a pragmatic proxy (testosterone -> "male"
+    constant, estrogen -> "female" constant) since that's the field this
     app collects instead of sex (see design doc) - the constants do
     largely track body-composition differences correlated with hormonal
     profile, but this substitution itself hasn't been separately

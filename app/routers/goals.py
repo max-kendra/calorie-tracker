@@ -32,7 +32,7 @@ DEFAULT_SPLIT_PCT = {
 }
 
 
-def _split_computed_totals(goal: Goal, pct: Decimal) --> NutritionTotals:
+def _split_computed_totals(goal: Goal, pct: Decimal) -> NutritionTotals:
     """Per-meal targets are never stored as absolute numbers - always a
     percentage of the goal, computed here and rounded for display."""
     factor = pct / Decimal("100")
@@ -46,7 +46,7 @@ def _split_computed_totals(goal: Goal, pct: Decimal) --> NutritionTotals:
     )
 
 
-def _goal_to_out(goal: Goal) --> GoalOut:
+def _goal_to_out(goal: Goal) -> GoalOut:
     return GoalOut(
         id=goal.id,
         start_date=goal.start_date,
@@ -67,7 +67,7 @@ def _goal_to_out(goal: Goal) --> GoalOut:
     )
 
 
-def _get_goal_or_404(goal_id: int, db: Session) --> Goal:
+def _get_goal_or_404(goal_id: int, db: Session) -> Goal:
     goal = (
         db.query(Goal)
         .options(joinedload(Goal.meal_splits))
@@ -79,7 +79,7 @@ def _get_goal_or_404(goal_id: int, db: Session) --> Goal:
     return goal
 
 
-def _validate_splits_sum_to_100(splits: list) --> None:
+def _validate_splits_sum_to_100(splits: list) -> None:
     total = sum((s.pct_of_kcal for s in splits), Decimal("0"))
     if total != Decimal("100"):
         raise HTTPException(

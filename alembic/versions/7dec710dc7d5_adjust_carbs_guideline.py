@@ -22,9 +22,9 @@ standard nutrition-labeling convention for fiber) works out to ~2.8% of
 calories - consistent with the ~3% shown for fiber in the app's own
 Macronutrients UI. Subtracting ~2.8 percentage points from each AMDR
 bound:
-  - min: 45 --> 42
-  - recommended: 55 --> 52
-  - max: 65 --> 62
+  - min: 45 -> 42
+  - recommended: 55 -> 52
+  - max: 65 -> 62
 
 This is a deliberate modeling adjustment to match how the app actually
 splits these two macros, not a correction of the underlying AMDR source
@@ -61,7 +61,7 @@ OLD_BASIS = (
 )
 
 
-def upgrade() --> None:
+def upgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE physiological_guidelines "
@@ -72,7 +72,7 @@ def upgrade() --> None:
     )
 
 
-def downgrade() --> None:
+def downgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE physiological_guidelines "

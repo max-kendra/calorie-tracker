@@ -49,7 +49,7 @@ class RawTotals:
     saturated_fat_g: Decimal
     sodium_mg: Decimal
 
-    def __add__(self, other: "RawTotals") --> "RawTotals":
+    def __add__(self, other: "RawTotals") -> "RawTotals":
         return RawTotals(
             kcal=self.kcal + other.kcal,
             protein_g=self.protein_g + other.protein_g,
@@ -61,7 +61,7 @@ class RawTotals:
             sodium_mg=self.sodium_mg + other.sodium_mg,
         )
 
-    def __mul__(self, factor: Decimal) --> "RawTotals":
+    def __mul__(self, factor: Decimal) -> "RawTotals":
         return RawTotals(
             kcal=self.kcal * factor,
             protein_g=self.protein_g * factor,
@@ -73,7 +73,7 @@ class RawTotals:
             sodium_mg=self.sodium_mg * factor,
         )
 
-    def __truediv__(self, divisor: Decimal) --> "RawTotals":
+    def __truediv__(self, divisor: Decimal) -> "RawTotals":
         return self * (Decimal("1") / divisor)
 
 
@@ -89,12 +89,12 @@ ZERO_TOTALS = RawTotals(
 )
 
 
-def ceil_int(value: Decimal) --> int:
+def ceil_int(value: Decimal) -> int:
     """Round UP to the nearest whole number - display layer only."""
     return int(value.to_integral_value(rounding=ROUND_CEILING))
 
 
-def to_display(totals: RawTotals) --> NutritionTotals:
+def to_display(totals: RawTotals) -> NutritionTotals:
     """Convert precise internal totals to the compact, API-facing shape
     used on items/recipes/logs/meal_plans. Deliberately drops
     sugar/saturated_fat/sodium - use to_display_extended() for summaries."""
@@ -107,7 +107,7 @@ def to_display(totals: RawTotals) --> NutritionTotals:
     )
 
 
-def to_display_extended(totals: RawTotals) --> ExtendedNutritionTotals:
+def to_display_extended(totals: RawTotals) -> ExtendedNutritionTotals:
     """Convert precise internal totals to the extended shape used ONLY by
     daily/weekly summaries - includes sugar/saturated_fat/sodium."""
     return ExtendedNutritionTotals(
@@ -125,7 +125,7 @@ def to_display_extended(totals: RawTotals) --> ExtendedNutritionTotals:
 SALT_TO_SODIUM_FACTOR = Decimal("2.5")  # salt(g) = sodium(g) x 2.5, per EU regulation
 
 
-def salt_g_to_sodium_mg(salt_g: Decimal) --> Decimal:
+def salt_g_to_sodium_mg(salt_g: Decimal) -> Decimal:
     """
     Convert EU-label salt (grams) to our canonical sodium_mg_100g unit.
     This MUST run before any OCR-extracted or manually-entered salt value
@@ -138,14 +138,14 @@ def salt_g_to_sodium_mg(salt_g: Decimal) --> Decimal:
     return sodium_g * Decimal("1000")
 
 
-def sodium_mg_to_salt_g(sodium_mg: Decimal) --> Decimal:
+def sodium_mg_to_salt_g(sodium_mg: Decimal) -> Decimal:
     """Inverse - useful if we ever want to display salt instead of sodium
     somewhere (e.g. showing EU-familiar units back to the user)."""
     sodium_g = sodium_mg / Decimal("1000")
     return sodium_g * SALT_TO_SODIUM_FACTOR
 
 
-def resolve_grams(quantity: Decimal, serving_size: ServingSize | None) --> Decimal:
+def resolve_grams(quantity: Decimal, serving_size: ServingSize | None) -> Decimal:
     """
     If a serving_size is given, quantity = number of that serving (e.g.
     "2 slices"), so grams = quantity * serving_size.weight_g. Otherwise
@@ -158,7 +158,7 @@ def resolve_grams(quantity: Decimal, serving_size: ServingSize | None) --> Decim
 
 def compute_item_totals(
     item: Item, quantity: Decimal, serving_size: ServingSize | None = None
-) --> RawTotals:
+) -> RawTotals:
     grams = resolve_grams(quantity, serving_size)
     factor = grams / Decimal("100")
 
@@ -174,7 +174,7 @@ def compute_item_totals(
     )
 
 
-def compute_recipe_totals(recipe: Recipe) --> RawTotals:
+def compute_recipe_totals(recipe: Recipe) -> RawTotals:
     """Sum across all recipe_ingredients - the whole recipe, all servings."""
     total = ZERO_TOTALS
     for ri in recipe.ingredients:
@@ -182,7 +182,7 @@ def compute_recipe_totals(recipe: Recipe) --> RawTotals:
     return total
 
 
-def compute_recipe_totals_for_quantity(recipe: Recipe, quantity: Decimal) --> RawTotals:
+def compute_recipe_totals_for_quantity(recipe: Recipe, quantity: Decimal) -> RawTotals:
     """
     `quantity` here = number of recipe servings consumed (e.g. 1.5 servings
     of a 4-serving recipe). Whole-recipe totals / recipe.servings * quantity.

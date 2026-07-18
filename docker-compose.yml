@@ -16,7 +16,7 @@ services:
     # on the host, outside the container's filesystem - otherwise they'd
     # vanish on every rebuild/recreate. Left-hand side is a path on the
     # Pi; right-hand side must match Settings.media_dir resolved against
-    # the container's WORKDIR (/app), i.e. media_dir="media" --> /app/media.
+    # the container's WORKDIR (/app), i.e. media_dir="media" -> /app/media.
     #
     # No easyocr_models mount on THIS branch - that existed specifically
     # to persist EasyOCR's runtime-downloaded model weights across

@@ -15,11 +15,11 @@ router = APIRouter(
 )
 
 
-def _get_client() --> UsdaClient:
+def _get_client() -> UsdaClient:
     return UsdaClient(api_key=settings.usda_api_key)
 
 
-def _usda_error_detail(e: Exception) --> str:
+def _usda_error_detail(e: Exception) -> str:
     """Distinguishes a 429 (rate limit) from other failures - the
     default usda_api_key is the public DEMO_KEY, which is limited to
     30 requests/hour and 50/day AND SHARED across every DEMO_KEY user

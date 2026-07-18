@@ -18,13 +18,13 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() --> None:
+def upgrade() -> None:
     """Upgrade schema."""
     op.add_column('user_profile', sa.Column('starting_weight_kg', sa.Numeric(), nullable=True))
     op.add_column('user_profile', sa.Column('goal_weight_kg', sa.Numeric(), nullable=True))
 
 
-def downgrade() --> None:
+def downgrade() -> None:
     """Downgrade schema."""
     op.drop_column('user_profile', 'goal_weight_kg')
     op.drop_column('user_profile', 'starting_weight_kg')

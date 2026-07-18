@@ -273,7 +273,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
     # Note: FK constraints (no ON DELETE CASCADE configured on
-    # recipe_ingredients/logs/meal_plans --> items) will reject this if the
+    # recipe_ingredients/logs/meal_plans -> items) will reject this if the
     # item is still referenced anywhere — that's deliberate for now, so we
     # don't silently orphan historical logs. Revisit if this becomes
     # annoying in practice.

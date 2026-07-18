@@ -25,7 +25,7 @@ router = APIRouter(
 )
 
 
-def _plan_to_out(plan: MealPlan, db: Session) --> MealPlanOut:
+def _plan_to_out(plan: MealPlan, db: Session) -> MealPlanOut:
     """
     NOT snapshotted - totals are computed fresh on every read, so a
     planned meal always reflects current item/recipe data right up until

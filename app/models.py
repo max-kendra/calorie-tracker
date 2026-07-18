@@ -77,7 +77,7 @@ class Item(Base):
 
 class ServingSize(Base):
     """
-    An item's list of named serving sizes (e.g. "slice" --> 37.5g).
+    An item's list of named serving sizes (e.g. "slice" -> 37.5g).
     Modeled as a child table rather than an array column so it stays
     queryable/joinable normally.
     """
@@ -336,7 +336,7 @@ class UserProfile(Base):
     # user will have entered it yet, especially before this existed.
     weight_kg = Column(Numeric, nullable=True)
     # Weight goal - purely user-entered reference points for the
-    # Profile screen's "start --> current --> goal" summary and the weight
+    # Profile screen's "start -> current -> goal" summary and the weight
     # graph's goal line. Unlike weight_kg above, these are NOT meant to
     # be superseded by Health Connect - "starting weight" in particular
     # is inherently a fixed historical value (whatever it was when the

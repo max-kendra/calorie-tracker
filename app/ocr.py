@@ -1,10 +1,10 @@
 """
 OCR extraction for nutrition labels.
 
-Flow: run Tesseract across all supported languages combined --> pick the
+Flow: run Tesseract across all supported languages combined -> pick the
 best-matching language by counting keyword hits per language's dictionary
 -> parse per-100g macro values from the recognized text using that
-language's keyword patterns --> convert salt->sodium if the label uses
+language's keyword patterns -> convert salt->sodium if the label uses
 salt (EU convention) rather than sodium directly.
 
 This NEVER writes to our DB - same pattern as USDA and barcode scanning:
@@ -305,7 +305,7 @@ class OcrWord:
     height: float
 
 
-def _fuzzy_contains(line_lower: str, keyword: str, threshold: float = 0.8) --> bool:
+def _fuzzy_contains(line_lower: str, keyword: str, threshold: float = 0.8) -> bool:
     """
     Fuzzy alternative to `keyword in line_lower` - tolerates the kind of
     single/double-character OCR misreads seen in practice (e.g. "fedt"
@@ -350,7 +350,7 @@ def _fuzzy_contains(line_lower: str, keyword: str, threshold: float = 0.8) --> b
     return best >= threshold
 
 
-def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") --> int:
+def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> int:
     """How many of this language's macro keywords show up in the text -
     used by detect_language() below to pick the best-matching language
     for a single shared OCR pass. Fuzzy now (see _fuzzy_contains) - this
@@ -371,7 +371,7 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -->
     return sum(1 for kw in keywords if _fuzzy_contains(text_lower, kw))
 
 
-def _words_from_tesseract_data(data: dict) --> list["OcrWord"]:
+def _words_from_tesseract_data(data: dict) -> list["OcrWord"]:
     """Flattens Tesseract's image_to_data dict (parallel lists) into a
     list of OcrWord, dropping blank entries (block/paragraph/line marker
     rows that image_to_data includes alongside actual recognized words,
@@ -396,7 +396,7 @@ def _words_from_tesseract_data(data: dict) --> list["OcrWord"]:
     return words
 
 
-def _reconstruct_reading_order(words: list["OcrWord"]) --> str:
+def _reconstruct_reading_order(words: list["OcrWord"]) -> str:
     """
     Reassembles words into a display/debug text string ONLY - this is
     NOT used for actual macro extraction anymore (see parse_label's doc
@@ -440,7 +440,7 @@ def _reconstruct_reading_order(words: list["OcrWord"]) --> str:
     return "\n".join(lines)
 
 
-def run_ocr(image_bytes: bytes) --> tuple[str, list["OcrWord"]]:
+def run_ocr(image_bytes: bytes) -> tuple[str, list["OcrWord"]]:
     """
     Runs Tesseract ONCE, combined across all supported languages (see
     _TESSERACT_LANGS) via pytesseract - a thin wrapper around the
@@ -478,7 +478,7 @@ def run_ocr(image_bytes: bytes) --> tuple[str, list["OcrWord"]]:
     return text, words
 
 
-def detect_language(text: str) --> Optional[str]:
+def detect_language(text: str) -> Optional[str]:
     """Picks the language whose keyword dictionary has the most hits in
     the OCR'd text - more robust than general-purpose language
     detection here, since it directly measures "which dictionary would
@@ -502,7 +502,7 @@ def detect_language(text: str) --> Optional[str]:
     return best_lang if best_score >= 3 else None  # require a minimum confidence
 
 
-def _phrase_ratio(words: list["OcrWord"], keyword: str) --> float:
+def _phrase_ratio(words: list["OcrWord"], keyword: str) -> float:
     """Fuzzy match ratio between a sequence of words (joined) and a
     (possibly multi-word) keyword phrase."""
     candidate = " ".join(w.text.lower() for w in words)
@@ -511,7 +511,7 @@ def _phrase_ratio(words: list["OcrWord"], keyword: str) --> float:
 
 def _find_keyword_anchor(
     words: list["OcrWord"], keyword: str, exclude_prefixes: Optional[list[str]] = None
-) --> Optional["OcrWord"]:
+) -> Optional["OcrWord"]:
     """
     Finds the best fuzzy match for `keyword` (which may be multiple
     words, e.g. "mættede fedtsyrer") among `words`, and returns the
@@ -578,7 +578,7 @@ def _find_keyword_anchor(
 
 def _find_number_to_right(
     words: list["OcrWord"], anchor: "OcrWord", require_word: Optional[str] = None
-) --> Optional[Decimal]:
+) -> Optional[Decimal]:
     """
     Finds a number on the same row as `anchor`, to its right. If
     `require_word` is given (used for energy specifically - see
@@ -620,7 +620,7 @@ def _find_number_to_right(
         # output that dropping it reintroduced exactly the bug it
         # existed to prevent: a blurred "g" unit letter misread by
         # Tesseract as a digit "9" with no separating space (e.g.
-        # "12.2 g" --> "12.29") was getting silently absorbed into the
+        # "12.2 g" -> "12.29") was getting silently absorbed into the
         # value. Capping at one decimal digit means that corrupted
         # extra digit is correctly left uncaptured.
         match = re.search(r"(\d+(?:[.,]\d)?)", w.text)
@@ -636,7 +636,7 @@ def _find_number_to_right(
 
 def _extract_field(
     words: list["OcrWord"], keyword: str, exclude_prefixes: Optional[list[str]] = None
-) --> Optional[Decimal]:
+) -> Optional[Decimal]:
     """Standard "find this keyword, take the nearest number to its
     right" extraction - used for every macro except energy (see
     _extract_kcal_geometric, which needs the number paired with "kcal"
@@ -647,7 +647,7 @@ def _extract_field(
     return _find_number_to_right(words, anchor)
 
 
-def _extract_kcal_geometric(words: list["OcrWord"], energy_keyword: str) --> Optional[Decimal]:
+def _extract_kcal_geometric(words: list["OcrWord"], energy_keyword: str) -> Optional[Decimal]:
     """Energy rows typically show both kJ and kcal (e.g. "1046 kJ / 250
     kcal") - we want specifically the number paired with "kcal", not
     the kJ value, which _find_number_to_right's require_word handles."""
@@ -657,7 +657,7 @@ def _extract_kcal_geometric(words: list["OcrWord"], energy_keyword: str) --> Opt
     return _find_number_to_right(words, anchor, require_word="kcal")
 
 
-def parse_label(words: list["OcrWord"], text: str, lang: str) --> OcrExtractionResult:
+def parse_label(words: list["OcrWord"], text: str, lang: str) -> OcrExtractionResult:
     """
     Extracts macros by finding each keyword's own position and looking
     for a number geometrically near it (see _find_keyword_anchor/
@@ -738,8 +738,8 @@ def parse_label(words: list["OcrWord"], text: str, lang: str) --> OcrExtractionR
     )
 
 
-def extract_label_from_image(image_bytes: bytes) --> OcrExtractionResult:
-    """Full pipeline: OCR --> detect language --> parse fields."""
+def extract_label_from_image(image_bytes: bytes) -> OcrExtractionResult:
+    """Full pipeline: OCR -> detect language -> parse fields."""
     text, words = run_ocr(image_bytes)
     lang = detect_language(text)
 
@@ -758,7 +758,7 @@ def extract_label_from_image(image_bytes: bytes) --> OcrExtractionResult:
 _MIN_LETTER_FRACTION = 0.4
 
 
-def _looks_like_text(line: str) --> bool:
+def _looks_like_text(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
@@ -769,7 +769,7 @@ def _looks_like_text(line: str) --> bool:
     return (letters / non_space) >= _MIN_LETTER_FRACTION
 
 
-def guess_name_and_brand(text: str) --> tuple[Optional[str], Optional[str]]:
+def guess_name_and_brand(text: str) -> tuple[Optional[str], Optional[str]]:
     """
     Best-effort, NOT confident structured extraction (see
     ProductPhotoScanResult's docstring in app/schemas.py for why this is

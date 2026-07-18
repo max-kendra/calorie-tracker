@@ -139,14 +139,14 @@ GUIDELINES = [
 ]
 
 
-def upgrade() --> None:
+def upgrade() -> None:
     op.create_unique_constraint(
         "uq_physiological_guidelines_name", "physiological_guidelines", ["name"]
     )
     op.bulk_insert(guidelines_table, GUIDELINES)
 
 
-def downgrade() --> None:
+def downgrade() -> None:
     op.execute(
         "DELETE FROM physiological_guidelines WHERE name IN ("
         + ",".join(f"'{g['name']}'" for g in GUIDELINES)

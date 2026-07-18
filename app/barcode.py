@@ -36,7 +36,7 @@ class BarcodeDecodeResult:
     checksum_valid: bool | None  # None if not a checksummed format we check
 
 
-def _ean13_checksum_valid(barcode: str) --> bool:
+def _ean13_checksum_valid(barcode: str) -> bool:
     if len(barcode) != 13 or not barcode.isdigit():
         return False
     digits = [int(d) for d in barcode[:12]]
@@ -45,7 +45,7 @@ def _ean13_checksum_valid(barcode: str) --> bool:
     return expected == int(barcode[-1])
 
 
-def _upc_a_checksum_valid(barcode: str) --> bool:
+def _upc_a_checksum_valid(barcode: str) -> bool:
     if len(barcode) != 12 or not barcode.isdigit():
         return False
     digits = [int(d) for d in barcode[:11]]
@@ -54,7 +54,7 @@ def _upc_a_checksum_valid(barcode: str) --> bool:
     return expected == int(barcode[-1])
 
 
-def _check_checksum(barcode: str) --> bool | None:
+def _check_checksum(barcode: str) -> bool | None:
     """Returns True/False if this looks like a format we can checksum
     (EAN-13, UPC-A), or None if it's some other format/length we don't
     validate. A False here means definitely garbled - reject outright.
@@ -66,7 +66,7 @@ def _check_checksum(barcode: str) --> bool | None:
     return None
 
 
-def _decode_with(results, decoder_name: str) --> BarcodeDecodeResult | None:
+def _decode_with(results, decoder_name: str) -> BarcodeDecodeResult | None:
     for barcode, fmt in results:
         checksum_valid = _check_checksum(barcode)
         if checksum_valid is False:
@@ -79,7 +79,7 @@ def _decode_with(results, decoder_name: str) --> BarcodeDecodeResult | None:
     return None
 
 
-def decode_barcode_from_image_bytes(image_bytes: bytes) --> BarcodeDecodeResult | None:
+def decode_barcode_from_image_bytes(image_bytes: bytes) -> BarcodeDecodeResult | None:
     """
     Returns the first barcode found with a passing (or unchecked) checksum,
     or None if nothing usable was found. Caller should fall back to manual

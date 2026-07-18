@@ -47,7 +47,7 @@ import httpx
 FDC_BASE_URL = "https://api.nal.usda.gov/fdc/v1"
 
 
-def _normalize_nutrient_entry(entry: dict) --> tuple[str, str, float] | None:
+def _normalize_nutrient_entry(entry: dict) -> tuple[str, str, float] | None:
     """Returns (name, unit, amount) regardless of which of FDC's two
     nutrient shapes this entry uses, or None if it doesn't match either."""
     if "nutrient" in entry and "amount" in entry:
@@ -105,7 +105,7 @@ _MATCH_PRIORITIES: dict[str, list[tuple[list[str], list[str], Optional[str]]]] =
 }
 
 
-def extract_macros(food_nutrients: list[dict]) --> dict:
+def extract_macros(food_nutrients: list[dict]) -> dict:
     """
     Best-effort extraction of our tracked macros from an FDC food's
     nutrient list. Returns only the fields it found a confident match
@@ -175,7 +175,7 @@ class UsdaClient:
 
     def search(
         self, query: str, data_types: Optional[list[str]] = None, page_size: int = 10
-    ) --> list[UsdaFoodSummary]:
+    ) -> list[UsdaFoodSummary]:
         """
         Searches FDC. Callers building the raw-ingredient-reference flow
         should typically pass data_types=["Foundation", "SR Legacy"] -
@@ -206,7 +206,7 @@ class UsdaClient:
             )
         return results
 
-    def get_food(self, fdc_id: int) --> UsdaFoodDetail:
+    def get_food(self, fdc_id: int) -> UsdaFoodDetail:
         """Fetches full detail for one food by FDC ID."""
         params = {"api_key": self.api_key}
 

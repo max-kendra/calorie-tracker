@@ -16,7 +16,7 @@ WORKDIR /app
 # downloaded at RUNTIME on first use) - no volume mount needed for this,
 # no first-request download/timeout risk, and it works fully offline
 # from the moment the container starts.
-RUN apt-get update && apt-get install -y -no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libzbar0 \
     build-essential \
     cmake \
@@ -34,16 +34,16 @@ RUN apt-get update && apt-get install -y -no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install -no-cache-dir poetry==1.8.3
+RUN pip install --no-cache-dir poetry==1.8.3
 
 # Copy dependency files first so Docker can cache this layer - rebuilds
 # only re-install deps when pyproject.toml/poetry.lock actually change,
 # not on every code edit.
 COPY pyproject.toml poetry.lock* ./
 
-# -no-root: don't try to install this project itself as a package (it's
+# --no-root: don't try to install this project itself as a package (it's
 # not structured as one - see pyproject.toml's package-mode = false)
-# -only main: skip dev dependencies (pytest etc) in the production image
+# --only main: skip dev dependencies (pytest etc) in the production image
 # Clearing poetry's package cache in this SAME RUN command matters on a
 # space-constrained disk (e.g. a small SD card): Docker layers are
 # append-only, so deleting cached files in a LATER step doesn't shrink a
@@ -52,8 +52,8 @@ COPY pyproject.toml poetry.lock* ./
 # no torch/OpenCV-sized wheels passing through here), but still cheap
 # and correct to keep doing regardless.
 RUN poetry config virtualenvs.create false \
-    && poetry install -no-root -only main -no-interaction -no-ansi \
-    && poetry cache clear -all -n pypi \
+    && poetry install --no-root --only main --no-interaction --no-ansi \
+    && poetry cache clear --all -n pypi \
     && rm -rf /root/.cache/pypoetry /root/.cache/pip
 
 # Now copy the actual application code
@@ -63,4 +63,4 @@ COPY alembic.ini ./
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "-host", "0.0.0.0", "-port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

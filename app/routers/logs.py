@@ -29,7 +29,7 @@ router = APIRouter(
 )
 
 
-def _validate_and_compute(payload, db: Session) --> tuple[RawTotals, Optional[str], Optional[str], Optional[str]]:
+def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str], Optional[str], Optional[str]]:
     """
     Shared validation + macro computation for both logs and meal_plans.
     Returns (totals, item_name, recipe_name, image_path) for convenience/
@@ -79,7 +79,7 @@ def _validate_and_compute(payload, db: Session) --> tuple[RawTotals, Optional[st
 
 def _log_to_out(
     log: Log, item_name: Optional[str], recipe_name: Optional[str], image_path: Optional[str] = None
-) --> LogOut:
+) -> LogOut:
     """The DB stores kcal_logged etc as precise Decimal (frozen at write
     time). Rounded UP to int here, at the display boundary only."""
     return LogOut(
