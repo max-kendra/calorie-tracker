@@ -45,6 +45,7 @@ languages.
 """
 
 import re
+import difflib
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -342,10 +343,58 @@ class OcrExtractionResult:
     macros: dict = field(default_factory=dict)
 
 
+def _fuzzy_contains(line_lower: str, keyword: str, threshold: float = 0.8) -> bool:
+    """
+    Fuzzy alternative to `keyword in line_lower` -- tolerates the kind of
+    single/double-character OCR misreads seen in practice (e.g. "fedt"
+    read as "feot", confirmed against real scan output: NÆRINGSOPLYSNINGER
+    itself came back as multiple different garbled spellings across
+    lines). An exact substring match would silently reject a keyword
+    that WAS effectively there, just misread by one character -- which
+    is indistinguishable from the keyword genuinely not being present,
+    so real labels were failing to parse for no visible reason.
+
+    Performance-wise this is negligible -- comparing a handful of short
+    OCR'd lines against a handful of short keywords is microseconds of
+    work, dwarfed by the OCR inference itself (multiple SECONDS). Not
+    something worth trading accuracy for.
+
+    Deliberately NOT used for the per_100g_markers check in parse_label()
+    -- those markers are numeric ("100 g"), and fuzzy-matching digits is
+    a different, riskier kind of tolerance than fuzzy-matching word-based
+    labels (a misread "700g" fuzzy-matching "100g" would be silently
+    WRONG, not just imprecise -- unlike two spellings of the same word,
+    differing digits usually mean a genuinely different number).
+    """
+    if keyword in line_lower:
+        return True  # cheap common case -- no need to fuzzy-match if this already matches
+
+    # Slide a same-length window across the line and compare each to the
+    # keyword -- handles the keyword appearing as a substring within a
+    # longer line (e.g. "feot 53,7g"), not just the whole line being
+    # (roughly) equal to the keyword alone.
+    n = len(keyword)
+    if n == 0 or len(line_lower) < n:
+        return difflib.SequenceMatcher(None, line_lower, keyword).ratio() >= threshold
+
+    best = 0.0
+    for start in range(0, len(line_lower) - n + 1):
+        window = line_lower[start:start + n]
+        ratio = difflib.SequenceMatcher(None, window, keyword).ratio()
+        if ratio > best:
+            best = ratio
+        if best >= threshold:
+            return True
+    return best >= threshold
+
+
 def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> int:
     """How many of this language's macro keywords show up in the text --
     used by detect_language() below to pick the best-matching language
-    for a single shared OCR pass."""
+    for a single shared OCR pass. Fuzzy now (see _fuzzy_contains) -- this
+    runs BEFORE parse_label() even knows which language it's dealing
+    with, so a misread keyword here could pick the wrong language (or no
+    language at all) before parsing ever gets a chance."""
     keywords = [
         config.energy_keyword,
         config.fat_keyword,
@@ -357,7 +406,7 @@ def _score_text_for_language(text_lower: str, config: "LabelLanguageConfig") -> 
     ]
     if config.salt_keyword:
         keywords.append(config.salt_keyword)
-    return sum(1 for kw in keywords if re.search(kw, text_lower))
+    return sum(1 for kw in keywords if _fuzzy_contains(text_lower, kw))
 
 
 def _reconstruct_reading_order(detections: list) -> str:
@@ -492,7 +541,9 @@ def _extract_number_near_keyword(
     text: str, keyword: str, exclude_prefixes: Optional[list[str]] = None
 ) -> Optional[Decimal]:
     """
-    Finds a line containing `keyword`, not starting with any of
+    Finds a line containing `keyword` (fuzzy match -- see
+    _fuzzy_contains, tolerates the kind of OCR misreads seen in
+    practice, e.g. "fedt" read as "feot"), not starting with any of
     `exclude_prefixes` (used to skip "of which X" sub-lines when looking
     for the parent total), and extracts the first number on that line.
     Tolerates missing whitespace between the keyword and the number
@@ -502,7 +553,7 @@ def _extract_number_near_keyword(
 
     for line in text.split("\n"):
         line_lower = line.lower().strip()
-        if not re.search(keyword, line_lower):
+        if not _fuzzy_contains(line_lower, keyword):
             continue
         if any(line_lower.startswith(p) for p in exclude_prefixes):
             continue
@@ -528,9 +579,13 @@ def _extract_number_near_keyword(
 def _extract_kcal(text: str, energy_keyword: str) -> Optional[Decimal]:
     """Energy lines typically show both kJ and kcal (e.g. "1046 kJ/250
     kcal") -- we want specifically the number immediately before "kcal",
-    not the kJ value."""
+    not the kJ value. energy_keyword itself is fuzzy-matched (see
+    _fuzzy_contains) for the same OCR-misread reason as
+    _extract_number_near_keyword -- "kcal" itself is left as an exact
+    match in the regex below since it's rarely misread and being lenient
+    there risks false positives against unrelated numbers."""
     for line in text.split("\n"):
-        if not re.search(energy_keyword, line.lower()):
+        if not _fuzzy_contains(line.lower(), energy_keyword):
             continue
         match = re.search(r"(\d+(?:[.,]\d)?)\s*kcal", line, re.IGNORECASE)
         if match:
