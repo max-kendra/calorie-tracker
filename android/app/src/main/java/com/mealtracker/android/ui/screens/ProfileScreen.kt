@@ -49,10 +49,20 @@ fun ProfileScreen(
 
     val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
         HealthConnectManager.requestPermissionsContract()
-    ) {
-        // Result itself (which permissions were granted) isn't used
-        // directly -- simplest to just re-check overall state, which
-        // also covers the "user denied" case without extra branching.
+    ) { granted ->
+        // Needed now that refreshHealthConnectState also checks the
+        // weight-import toggle (see that function's doc comment) --
+        // without this, granting permission via this button wouldn't
+        // actually turn weight import on, since the toggle defaults to
+        // off until explicitly set somewhere.
+        if (granted.contains(
+                androidx.health.connect.client.permission.HealthPermission.getReadPermission(
+                    androidx.health.connect.client.records.WeightRecord::class
+                )
+            )
+        ) {
+            com.mealtracker.android.health.HealthConnectPreferences.setWeightImportEnabled(context, true)
+        }
         viewModel.refreshHealthConnectState(context)
     }
 

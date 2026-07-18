@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -87,6 +88,8 @@ import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.health.HealthConnectManager
+import com.mealtracker.android.health.HealthConnectPreferences
 import com.mealtracker.android.ui.components.CatalogVisuals
 import com.mealtracker.android.ui.components.CropDialog
 import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
@@ -146,6 +149,52 @@ fun MealDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val heroColor = MealVisuals.backgroundFor(mealType)
+    val healthConnectContext = androidx.compose.ui.platform.LocalContext.current
+
+    // Runs on ANY change to this meal's logs -- add, edit, or delete all
+    // naturally show up as a change to state.logs, so this is simpler
+    // and more robust than hooking into every individual mutation
+    // function (logItemQuickly, confirmLogItemQuantity, saveLogQuantity,
+    // deleteLog, ...) separately. Per design discussion: sync unit is
+    // the MEAL (matching this app's own logging unit and Health
+    // Connect's own per-meal mealType field), not individual items --
+    // see HealthConnectManager.writeMealNutrition's doc comment for how
+    // the upsert-on-edit behavior works via clientRecordId/
+    // clientRecordVersion, with no Health Connect ID stored on our side
+    // at all.
+    //
+    // NOTE: previously sugar/saturated fat/sodium were left null here
+    // since Log didn't expose them at all -- now that the backend
+    // returns them (see design discussion), this syncs the full set
+    // NutritionRecord supports, not a partial picture.
+    LaunchedEffect(state.logs, date, mealType) {
+        if (!HealthConnectPreferences.isNutritionExportEnabled(healthConnectContext)) return@LaunchedEffect
+        if (!HealthConnectManager.isAvailable(healthConnectContext)) return@LaunchedEffect
+        if (!HealthConnectManager.hasAllPermissions(healthConnectContext)) return@LaunchedEffect
+
+        try {
+            if (state.logs.isEmpty()) {
+                HealthConnectManager.deleteMealNutrition(healthConnectContext, date, mealType)
+            } else {
+                val totals = HealthConnectManager.MealNutritionTotals(
+                    kcal = state.logs.sumOf { it.kcalLogged }.toDouble(),
+                    proteinG = state.logs.sumOf { it.proteinGLogged }.toDouble(),
+                    carbsG = state.logs.sumOf { it.carbsGLogged }.toDouble(),
+                    fatG = state.logs.sumOf { it.fatGLogged }.toDouble(),
+                    saturatedFatG = state.logs.sumOf { it.saturatedFatGLogged }.toDouble(),
+                    sugarG = state.logs.sumOf { it.sugarGLogged }.toDouble(),
+                    fiberG = state.logs.sumOf { it.fiberGLogged }.toDouble(),
+                    sodiumMg = state.logs.sumOf { it.sodiumMgLogged }.toDouble()
+                )
+                HealthConnectManager.writeMealNutrition(healthConnectContext, date, mealType, totals)
+            }
+        } catch (e: Exception) {
+            // Best-effort, same reasoning as every other Health Connect
+            // call in this app -- a sync hiccup shouldn't disrupt using
+            // the rest of the app, and there's no user-facing action to
+            // take on a background sync failure anyway.
+        }
+    }
 
     val scaffoldState = rememberBottomSheetScaffoldState()
     val coroutineScope = rememberCoroutineScope()
@@ -173,6 +222,13 @@ fun MealDetailScreen(
     LaunchedEffect(date, mealType) {
         viewModel.load(date, mealType)
     }
+
+    // Wraps the whole screen so ItemLogPageDialog (moved to the end,
+    // after BottomSheetScaffold) can render as a LATER sibling and
+    // therefore draw on top of everything else -- see that block's own
+    // comment near the end of this function for why it needs to be a
+    // Box sibling here rather than its own separate Dialog window.
+    Box(modifier = Modifier.fillMaxSize()) {
 
     if (state.showSaveMealDialog) {
         AlertDialog(
@@ -208,73 +264,6 @@ fun MealDetailScreen(
                 }
             }
         )
-    }
-
-    val itemToLog = state.itemToLog
-    if (itemToLog != null) {
-        ItemLogPageDialog(
-            item = itemToLog,
-            goalFat = state.goalFat,
-            goalProtein = state.goalProtein,
-            goalCarbs = state.goalCarbs,
-            goalFiber = state.goalFiber,
-            quantityInput = state.logQuantityInput,
-            servingSizeId = state.logServingSizeId,
-            isLogging = state.isLoggingItem,
-            error = state.logItemError,
-            isEditing = state.editingLogId != null,
-            onQuantityChange = { viewModel.updateLogQuantityInput(it) },
-            onServingChange = { viewModel.updateLogServingSize(it) },
-            onCreateNewServing = { viewModel.openCreateServingDialog() },
-            onConfirm = { viewModel.confirmLogItemQuantity() },
-            onDelete = {
-                state.editingLogId?.let { viewModel.deleteLog(it) }
-                viewModel.dismissItemQuantityPicker()
-            },
-            onDismiss = { viewModel.dismissItemQuantityPicker() },
-            onImageUpdated = { updated -> viewModel.onItemImageUpdated(updated) },
-            onEditClick = { viewModel.openEditItemDialog() }
-        )
-
-        if (state.showCreateServingDialog) {
-            CreateServingDialog(
-                name = state.newServingName,
-                weightG = state.newServingWeightG,
-                isCreating = state.isCreatingServing,
-                error = state.createServingError,
-                onNameChange = { viewModel.updateNewServingName(it) },
-                onWeightChange = { viewModel.updateNewServingWeight(it) },
-                onConfirm = { viewModel.createNewServing() },
-                onDismiss = { viewModel.dismissCreateServingDialog() }
-            )
-        }
-
-        if (state.showEditItemDialog) {
-            EditItemDialog(
-                name = state.editItemName,
-                kcal = state.editItemKcal,
-                protein = state.editItemProtein,
-                carbs = state.editItemCarbs,
-                fat = state.editItemFat,
-                fiber = state.editItemFiber,
-                sugar = state.editItemSugar,
-                saturatedFat = state.editItemSaturatedFat,
-                saltG = state.editItemSaltG,
-                isSaving = state.isSavingItemEdit,
-                error = state.editItemError,
-                onNameChange = { viewModel.updateEditItemName(it) },
-                onKcalChange = { viewModel.updateEditItemKcal(it) },
-                onProteinChange = { viewModel.updateEditItemProtein(it) },
-                onCarbsChange = { viewModel.updateEditItemCarbs(it) },
-                onFatChange = { viewModel.updateEditItemFat(it) },
-                onFiberChange = { viewModel.updateEditItemFiber(it) },
-                onSugarChange = { viewModel.updateEditItemSugar(it) },
-                onSaturatedFatChange = { viewModel.updateEditItemSaturatedFat(it) },
-                onSaltChange = { viewModel.updateEditItemSalt(it) },
-                onConfirm = { viewModel.saveItemEdit() },
-                onDismiss = { viewModel.dismissEditItemDialog() }
-            )
-        }
     }
 
     val selectedLog = state.selectedLog
@@ -504,6 +493,81 @@ fun MealDetailScreen(
                 }
             }
         }
+    }
+
+    // Moved here (was a top-level composable call near the top of this
+    // function) so it renders as a LATER sibling of BottomSheetScaffold
+    // above -- see ItemLogPageDialog's own doc comment for why it needs
+    // to be a Box sibling in the caller's own window now, instead of
+    // wrapping itself in a separate Dialog (which had the same
+    // unreliable full-screen sizing issue CropDialog itself used to
+    // have, before being fixed the same way).
+    val itemToLog = state.itemToLog
+    if (itemToLog != null) {
+        ItemLogPageDialog(
+            item = itemToLog,
+            goalFat = state.goalFat,
+            goalProtein = state.goalProtein,
+            goalCarbs = state.goalCarbs,
+            goalFiber = state.goalFiber,
+            quantityInput = state.logQuantityInput,
+            servingSizeId = state.logServingSizeId,
+            isLogging = state.isLoggingItem,
+            error = state.logItemError,
+            isEditing = state.editingLogId != null,
+            onQuantityChange = { viewModel.updateLogQuantityInput(it) },
+            onServingChange = { viewModel.updateLogServingSize(it) },
+            onCreateNewServing = { viewModel.openCreateServingDialog() },
+            onConfirm = { viewModel.confirmLogItemQuantity() },
+            onDelete = {
+                state.editingLogId?.let { viewModel.deleteLog(it) }
+                viewModel.dismissItemQuantityPicker()
+            },
+            onDismiss = { viewModel.dismissItemQuantityPicker() },
+            onImageUpdated = { updated -> viewModel.onItemImageUpdated(updated) },
+            onEditClick = { viewModel.openEditItemDialog() }
+        )
+
+        if (state.showCreateServingDialog) {
+            CreateServingDialog(
+                name = state.newServingName,
+                weightG = state.newServingWeightG,
+                isCreating = state.isCreatingServing,
+                error = state.createServingError,
+                onNameChange = { viewModel.updateNewServingName(it) },
+                onWeightChange = { viewModel.updateNewServingWeight(it) },
+                onConfirm = { viewModel.createNewServing() },
+                onDismiss = { viewModel.dismissCreateServingDialog() }
+            )
+        }
+
+        if (state.showEditItemDialog) {
+            EditItemDialog(
+                name = state.editItemName,
+                kcal = state.editItemKcal,
+                protein = state.editItemProtein,
+                carbs = state.editItemCarbs,
+                fat = state.editItemFat,
+                fiber = state.editItemFiber,
+                sugar = state.editItemSugar,
+                saturatedFat = state.editItemSaturatedFat,
+                saltG = state.editItemSaltG,
+                isSaving = state.isSavingItemEdit,
+                error = state.editItemError,
+                onNameChange = { viewModel.updateEditItemName(it) },
+                onKcalChange = { viewModel.updateEditItemKcal(it) },
+                onProteinChange = { viewModel.updateEditItemProtein(it) },
+                onCarbsChange = { viewModel.updateEditItemCarbs(it) },
+                onFatChange = { viewModel.updateEditItemFat(it) },
+                onFiberChange = { viewModel.updateEditItemFiber(it) },
+                onSugarChange = { viewModel.updateEditItemSugar(it) },
+                onSaturatedFatChange = { viewModel.updateEditItemSaturatedFat(it) },
+                onSaltChange = { viewModel.updateEditItemSalt(it) },
+                onConfirm = { viewModel.saveItemEdit() },
+                onDismiss = { viewModel.dismissEditItemDialog() }
+            )
+        }
+    }
     }
 }
 
@@ -1082,20 +1146,30 @@ private fun ItemLogPageDialog(
     }
     fun per100(value: String?): Int = ((value?.toDoubleOrNull() ?: 0.0) * effectiveGrams / 100.0).roundToInt()
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    // No Dialog() wrapper -- this used to have one, with the same
+    // "force the window to MATCH_PARENT via a SideEffect" workaround
+    // CropDialog itself used to rely on, and removed, because that
+    // workaround was found unreliable on some devices (see CropDialog's
+    // own doc comment for that history). CropDialog renders correctly
+    // as a plain composable inside HERE, but was still inheriting the
+    // SAME unreliable window from ITS OWN enclosing Dialog -- CropDialog
+    // being correct doesn't help if the window it's placed in isn't
+    // reliably full-screen (see design discussion: "how come it happens
+    // in multiple places... I thought this is defined inside the crop
+    // dialog itself" -- this is exactly why: the shared component was
+    // fine, but one of its three embedding call sites still wrapped it
+    // in the same kind of window that was already known to be
+    // unreliable). Rendered as a plain composable now, same as
+    // AddItemScreen's own capture/crop flow -- the CALLER
+    // (MealDetailScreen) is responsible for layering this as a later
+    // Box sibling so it draws on top of everything else, matching the
+    // exact same pattern already used for CropDialog itself.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
     ) {
-        val view = LocalView.current
-        SideEffect {
-            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-            window?.setLayout(
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT
-            )
-        }
-
-        Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             Box(
                 modifier = Modifier
@@ -1267,7 +1341,6 @@ private fun ItemLogPageDialog(
                 },
                 onCancel = { clearCropState() }
             )
-        }
         }
     }
 }

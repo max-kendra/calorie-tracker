@@ -345,8 +345,10 @@ class UserProfile(Base):
     # stored column.
     starting_weight_kg = Column(Numeric, nullable=True)
     goal_weight_kg = Column(Numeric, nullable=True)
-    # 'estrogen' | 'testosterone' | 'other' | NULL — used only where
-    # relevant for guideline calculations, not as a demographic label.
+    # 'estrogen' | 'testosterone' | NULL — used only where relevant for
+    # guideline calculations, not as a demographic label. A DB row could
+    # still contain a legacy 'other' from before that option was
+    # removed, but no profile actually had it set at removal time.
     primary_hormone = Column(String, nullable=True)
     activity_level = Column(String, nullable=True)
     # 'lose' | 'maintain' | 'gain' -- drives the kcal goal calculation

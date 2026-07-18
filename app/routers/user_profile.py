@@ -145,8 +145,11 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
     app collects instead of sex (see design doc) -- the constants do
     largely track body-composition differences correlated with hormonal
     profile, but this substitution itself hasn't been separately
-    clinically validated. For 'other'/unset, we average the two
-    constants as a reasonable fallback, not a rigorously derived value.
+    clinically validated. This field is optional and can be left unset
+    (a former third "other" option was removed -- no profile had it
+    set, and it behaved identically to unset anyway); for unset, we
+    average the two constants as a reasonable fallback, not a
+    rigorously derived value.
 
     This is a general-purpose estimate, not personalized medical advice.
     """
@@ -180,9 +183,10 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
     elif profile.primary_hormone == "estrogen":
         bmr = base - Decimal(161)
     else:
-        # 'other' or unset -- average of the two constants, a pragmatic
-        # fallback rather than a separately validated figure (see
-        # function docstring).
+        # Unset -- average of the two constants, a pragmatic fallback
+        # rather than a separately validated figure (see function
+        # docstring). Used to also handle a since-removed "other"
+        # option, which behaved identically to unset anyway.
         bmr = base + (Decimal(5) + Decimal(-161)) / 2
 
     multiplier = _ACTIVITY_MULTIPLIERS[profile.activity_level]

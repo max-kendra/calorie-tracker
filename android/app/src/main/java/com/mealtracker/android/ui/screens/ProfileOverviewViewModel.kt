@@ -122,7 +122,14 @@ class ProfileOverviewViewModel : ViewModel() {
         viewModelScope.launch {
             val granted = HealthConnectManager.hasAllPermissions(appContext)
             _uiState.value = _uiState.value.copy(healthConnectPermissionGranted = granted)
-            if (granted) {
+            // Both the OS permission AND the Settings toggle need to be
+            // true -- granting Health Connect access and actually
+            // wanting weight import turned on are different decisions
+            // (see HealthConnectPreferences' doc comment). Without this
+            // check, turning the toggle off in the new Health Connect
+            // settings tab would have no effect as long as permission
+            // was still granted.
+            if (granted && com.mealtracker.android.health.HealthConnectPreferences.isWeightImportEnabled(appContext)) {
                 loadWeightHistory(appContext)
             }
         }

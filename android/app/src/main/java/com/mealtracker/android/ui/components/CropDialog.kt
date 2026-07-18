@@ -151,16 +151,19 @@ fun CropDialog(
                     val bounds = Rect(offsetX, offsetY, offsetX + displayedWidth, offsetY + displayedHeight)
                     imageBounds = bounds
 
-                    // Centered 80% inset so the handles are immediately
-                    // visible/grabbable rather than sitting exactly on
-                    // the image edge.
-                    val inset = 0.1f
-                    cropRect = Rect(
-                        bounds.left + bounds.width * inset,
-                        bounds.top + bounds.height * inset,
-                        bounds.right - bounds.width * inset,
-                        bounds.bottom - bounds.height * inset
-                    )
+                    // Defaults to the FULL image now, not an inset --
+                    // per design discussion, most photos here (already
+                    // framed by the camera/gallery picker) don't need
+                    // cropping at all, and a dedicated "Full Image"
+                    // button asking the user to opt into that on every
+                    // single capture was one extra tap for what's now
+                    // the common case. The corner handles sit exactly
+                    // on the image edges as a result -- still draggable
+                    // (each has a 32dp touch target centered on its
+                    // position, same as before), just no longer inset
+                    // in from the edge by default. Manually cropping
+                    // smaller is still fully supported by dragging.
+                    cropRect = bounds
                 }
 
                 if (imageBounds != Rect.Zero) {
@@ -245,17 +248,6 @@ fun CropDialog(
             ) {
                 TextButton(onClick = onCancel) {
                     Text("Cancel", color = Color.White)
-                }
-                // Sets the crop rect to the FULL image bounds, skipping
-                // manual cropping entirely -- added per design
-                // discussion: re-testing the same photo for OCR
-                // debugging kept producing different results because a
-                // hand-dragged crop boundary isn't pixel-identical
-                // twice in a row, even for "the same" crop. Selecting
-                // the full image removes that source of variance when
-                // the user doesn't actually need/want to crop.
-                TextButton(onClick = { if (imageBounds != Rect.Zero) cropRect = imageBounds }) {
-                    Text("Full Image", color = Color.White)
                 }
                 IconButton(onClick = { rotationDegrees = (rotationDegrees + 90) % 360 }) {
                     Icon(Icons.Filled.RotateRight, contentDescription = "Rotate", tint = Color.White)

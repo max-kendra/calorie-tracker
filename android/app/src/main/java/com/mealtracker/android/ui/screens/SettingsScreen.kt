@@ -34,7 +34,8 @@ fun SettingsScreen(
     onNavigateToCalorieGoal: () -> Unit,
     onNavigateToMealCalorieGoal: () -> Unit,
     onNavigateToMacronutrients: () -> Unit,
-    onNavigateToWeightGoal: () -> Unit
+    onNavigateToWeightGoal: () -> Unit,
+    onNavigateToHealthConnect: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -61,6 +62,11 @@ fun SettingsScreen(
         SettingsRow("Calorie goals by meal", "Change calories for each meal", onNavigateToMealCalorieGoal)
         SettingsRow("Carbs, protein, fat and fiber goals", "Edit your macronutrient goals", onNavigateToMacronutrients)
         SettingsRow("Weight goal", "Set your starting and goal weight", onNavigateToWeightGoal)
+
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+
+        SettingsSectionHeader("Health Connect")
+        SettingsRow("Health Connect", "Import weight, export nutrition data", onNavigateToHealthConnect)
     }
 }
 

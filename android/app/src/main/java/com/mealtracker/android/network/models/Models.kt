@@ -73,6 +73,13 @@ data class Log(
     @SerialName("carbs_g_logged") val carbsGLogged: Int,
     @SerialName("fat_g_logged") val fatGLogged: Int,
     @SerialName("fiber_g_logged") val fiberGLogged: Int,
+    // Not shown in the compact per-item displays (matches the backend's
+    // ExtendedNutritionTotals split) -- used only by the Home screen's
+    // sodium/sugar/saturated-fat threshold card and its "top
+    // contributors" breakdown.
+    @SerialName("sugar_g_logged") val sugarGLogged: Int = 0,
+    @SerialName("saturated_fat_g_logged") val saturatedFatGLogged: Int = 0,
+    @SerialName("sodium_mg_logged") val sodiumMgLogged: Int = 0,
     @SerialName("item_name") val itemName: String? = null,
     @SerialName("recipe_name") val recipeName: String? = null,
     // Denormalized from the source item/recipe -- backs the thumbnail in

@@ -357,6 +357,16 @@ class LogOut(LoggableEntryBase):
     carbs_g_logged: int
     fat_g_logged: int
     fiber_g_logged: int
+    # Already computed and stored at write time (same snapshot-at-log-
+    # time integrity as the macros above), but not returned here until
+    # now -- weren't needed for the tracker UI itself, only for daily/
+    # weekly summaries internally. Now also exposed so the client can
+    # use them for things like Health Connect nutrition export (see
+    # design discussion), which wants a fuller picture than just the
+    # five main-tracked macros.
+    sugar_g_logged: int
+    saturated_fat_g_logged: int
+    sodium_mg_logged: int
     # Denormalized for convenient display, not stored on the row itself.
     item_name: Optional[str] = None
     recipe_name: Optional[str] = None
@@ -469,7 +479,7 @@ class MealGoalSplitsUpdate(BaseModel):
     splits: list[MealGoalSplitIn]
 
 
-PrimaryHormone = Literal["estrogen", "testosterone", "other"]
+PrimaryHormone = Literal["estrogen", "testosterone"]
 
 
 GoalType = Literal["lose", "maintain", "gain"]

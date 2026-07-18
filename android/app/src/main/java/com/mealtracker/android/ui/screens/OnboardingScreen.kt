@@ -11,7 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.mealtracker.android.ui.components.PageIndicator
 
-private const val STEP_COUNT = 4
+private const val STEP_COUNT = 5
 
 /**
  * First-run required setup -- reached instead of the normal Home/Journal
@@ -23,15 +23,19 @@ private const val STEP_COUNT = 4
  * them.
  *
  * Order: profile basics -> weight goal -> calorie goal (weight/activity/
- * TDEE calc/save) -> macro distribution. This matches the dependency
- * order of the data itself -- e.g. the calorie-goal calculation needs
- * height+age from step 1, and the macro screen needs an active goal to
- * exist, which step 3 is what creates.
+ * TDEE calc/save) -> macro distribution -> Health Connect. This matches
+ * the dependency order of the data itself -- e.g. the calorie-goal
+ * calculation needs height+age from step 1, and the macro screen needs
+ * an active goal to exist, which step 3 is what creates. Health Connect
+ * comes last since it depends on nothing else and nothing else depends
+ * on it.
  *
- * Deliberately no skip option and no way to back out past step 0 -- see
- * design discussion: every new item / the rest of the app assumes a
- * complete profile + active goal exist, so this is required, not
- * optional, the first time through.
+ * Deliberately no skip option and no way to back out past step 0 for
+ * steps 0-3 -- see design discussion: every new item / the rest of the
+ * app assumes a complete profile + active goal exist, so those are
+ * required, not optional, the first time through. Step 4 (Health
+ * Connect) is the one exception -- see HealthConnectOnboardingStep's
+ * own doc comment for why that one IS skippable.
  */
 @Composable
 fun OnboardingScreen(onComplete: () -> Unit) {
@@ -54,8 +58,9 @@ fun OnboardingScreen(onComplete: () -> Unit) {
                 )
                 3 -> MacronutrientsScreen(
                     onBack = { step = 2 },
-                    onSaved = onComplete
+                    onSaved = { step = 4 }
                 )
+                4 -> HealthConnectOnboardingStep(onDone = onComplete)
             }
         }
         PageIndicator(pageCount = STEP_COUNT, currentPage = step)

@@ -213,6 +213,32 @@ fun AddItemScreen(
         }
     }
 
+    // Camera option for the same button -- this used to only offer
+    // gallery picking, per design discussion. Same TakePicture()+
+    // FileProvider pattern as MealDetailScreen's ItemLogPageDialog (see
+    // that file's launchCamera() -- file.createNewFile() matters there,
+    // some camera apps silently fail to write into a content:// Uri
+    // otherwise).
+    var pendingFormPhotoCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncherForFormPhoto = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingFormPhotoCameraUri
+        if (success && uri != null) {
+            startCrop(uri) { viewModel.attachPhotoToForm(it) }
+        }
+    }
+    fun launchCameraForFormPhoto() {
+        val file = java.io.File(context.cacheDir, "item_photo_${System.currentTimeMillis()}.jpg")
+        file.createNewFile()
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+        pendingFormPhotoCameraUri = uri
+        cameraLauncherForFormPhoto.launch(uri)
+    }
+    var showFormPhotoMenu by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -384,11 +410,7 @@ fun AddItemScreen(
                 state = state,
                 isSaving = state.phase == AddItemPhase.SAVING,
                 viewModel = viewModel,
-                onAddPhoto = {
-                    galleryPickerForFormPhoto.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                }
+                onAddPhoto = { showFormPhotoMenu = true }
             )
             AddItemPhase.SAVED -> SavedContent(
                 itemName = state.createdItem?.name ?: "",
@@ -417,6 +439,31 @@ fun AddItemScreen(
                 callback?.invoke(stream.toByteArray())
             },
             onCancel = { clearCropState() }
+        )
+    }
+
+    if (showFormPhotoMenu) {
+        // Used to jump straight to the gallery picker with no camera
+        // option at all -- per design discussion, offering both here
+        // matches every other photo-capture point in this flow.
+        AlertDialog(
+            onDismissRequest = { showFormPhotoMenu = false },
+            title = { Text("Add photo") },
+            text = { Text("Take a photo or pick one from your gallery.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFormPhotoMenu = false
+                    launchCameraForFormPhoto()
+                }) { Text("Take Photo") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showFormPhotoMenu = false
+                    galleryPickerForFormPhoto.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }) { Text("Choose from Gallery") }
+            }
         )
     }
     }

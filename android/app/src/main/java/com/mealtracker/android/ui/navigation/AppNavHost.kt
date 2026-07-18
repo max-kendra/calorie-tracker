@@ -196,8 +196,12 @@ fun AppNavHost() {
                     onNavigateToCalorieGoal = { navController.navigate("profile_settings/calorie_goal") },
                     onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
                     onNavigateToMacronutrients = { navController.navigate("macronutrients") },
-                    onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") }
+                    onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") },
+                    onNavigateToHealthConnect = { navController.navigate("profile_settings/health_connect") }
                 )
+            }
+            composable("profile_settings/health_connect") {
+                HealthConnectSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable("profile_settings/edit") {
                 EditProfileScreen(onBack = { navController.popBackStack() })
