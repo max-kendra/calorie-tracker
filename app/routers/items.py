@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Item, ServingSize
 from app.ocr import extract_label_from_image
+from app.ocr_metrics import record_ocr_scan
 from app.schemas import (
     BarcodeScanResult,
     ItemCreate,
@@ -163,7 +164,12 @@ async def scan_label(image: UploadFile = File(...)):
     # table, not just guessing a product name), it's the more likely
     # place for OCR failures to actually surface in practice.
     try:
-        result = extract_label_from_image(image_bytes)
+        with record_ocr_scan("easyocr", "scan_label", len(image_bytes)) as metrics:
+            result = extract_label_from_image(image_bytes)
+            metrics["detected_language"] = result.detected_language
+            metrics["per_100g_confirmed"] = result.per_100g_confirmed
+            metrics["macros_found"] = bool(result.macros)
+            metrics["raw_text_length"] = len(result.raw_text)
         # Logged on EVERY call now, not just a crash -- a clean label
         # that still fails to parse (no exception, just insufficient/
         # garbled recognized text or a language that didn't hit the

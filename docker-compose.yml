@@ -30,6 +30,28 @@ services:
     volumes:
       - ./media:/app/media
       - ./easyocr_models:/app/easyocr_models
+      # OCR scan metrics (timing, memory) for comparing OCR engines --
+      # see app/ocr_metrics.py. Same persistence reasoning as media/
+      # easyocr_models above. Point this at an external drive instead
+      # of the SD card if you have one mounted and want to spare the SD
+      # card the write volume, e.g.:
+      #   - /mnt/external-hdd/ocr_metrics:/app/ocr_metrics
+      - ./ocr_metrics:/app/ocr_metrics
+    # Caps the CONTAINER's own stdout/stderr logs (everything
+    # logging.basicConfig writes, in app/main.py) at 30MB total across 3
+    # rotated files. Docker's default json-file driver has NO size limit
+    # or rotation at all otherwise -- it just grows forever on the SD
+    # card, which is a real, easy-to-miss way to slowly run out of disk
+    # space (the exact problem already hit once with unpruned build
+    # cache, just in a different place). Separate from and much smaller
+    # than the dedicated OCR metrics file above -- that one's meant to
+    # be kept and analyzed; these are just routine app logs, fine to
+    # lose the oldest ones once they roll over.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # Note: if you ever containerize Postgres too, you'd switch back to
 # bridge networking with an explicit `ports: ["8000:8000"]` mapping and
