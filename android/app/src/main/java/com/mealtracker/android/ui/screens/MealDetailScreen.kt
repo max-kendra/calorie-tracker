@@ -1,905 +1,1672 @@
 package com.mealtracker.android.ui.screens
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
-import com.mealtracker.android.network.models.ItemMacrosUpdateRequest
-import com.mealtracker.android.network.models.Log
-import com.mealtracker.android.network.models.LogCreateRequest
-import com.mealtracker.android.network.models.LogFromMealRequest
-import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.Recipe
-import com.mealtracker.android.network.models.RecipeCreateRequest
-import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import com.mealtracker.android.network.models.Log
+import com.mealtracker.android.ui.components.CatalogVisuals
+import com.mealtracker.android.ui.components.CropDialog
+import com.mealtracker.android.ui.components.MacroColors
+import com.mealtracker.android.ui.components.MacroRingsRow
+import com.mealtracker.android.ui.components.MealVisuals
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import kotlin.math.roundToInt
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
-private val MEAL_DISPLAY_NAMES = mapOf(
-    "breakfast" to "Breakfast",
-    "lunch" to "Lunch",
-    "dinner" to "Dinner",
-    "snack" to "Snacks"
-)
-
-/** Which method the Add Item sheet is currently showing -- see
- * MealDetailScreen's sheetContent. Search and "Saved" merged into one
- * mode (SEARCH) per earlier design discussion -- both showed a search
- * bar and a results list, the only difference was what populated that
- * list before you typed anything, so there's no reason for them to be
- * separate screens. The search bar in SEARCH mode shows recentItems
- * when the query is blank, searchResults once you type.
- *
- * BARCODE now embeds the FULL AddItemScreen flow directly (camera scan
- * -> match/no-match -> product photo -> crop -> label -> form -> save),
- * not a separate simplified quick-scan -- that simplified version used
- * to live here (onBarcodeScanned/onGalleryBarcodeResult/
- * barcodeNotFound, now removed) but was fully superseded once the whole
- * flow could be embedded inline (see design discussion: "we want it
- * inside the card", not navigating to a separate screen). */
-enum class AddItemSheetMode { SEARCH, BARCODE }
+private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+private val SEARCH_BAR_SHAPE = RoundedCornerShape(24.dp)
 
 /**
- * Flat default for the sheet's "quick log" flows (tap a Saved/Search
- * result, or a barcode match) -- no quantity/serving picker yet, so
- * every quick-logged item is recorded as exactly 100g (grams directly,
- * since no serving_size_id is sent -- see LoggableEntryBase's docstring
- * on the backend). This is a genuine simplification, not a smart
- * default: a "1 banana" item quick-logged this way will NOT come out to
- * one banana's worth of calories. Users can still get an accurate
- * amount via the full barcode/OCR flow (AddItemScreen), which asks for
- * real quantities -- revisit this once a quantity-picker step exists
- * for the quick-log paths too.
+ * Opens for ANY meal card tap, even an empty one (per design doc).
+ *
+ *   - DEFAULT (sheet collapsed): plain white background, no colored
+ *     hero -- per design discussion, the pastel treatment was dropped
+ *     from the main screen entirely. Back button, meal name/star, a
+ *     kcal+macro white Card, and a logged-items white Card, same as
+ *     before, just no colored wrapper behind them anymore.
+ *   - EXPANDED (sheet dragged/tapped open): the header REARRANGES into
+ *     a compact version -- meal name + a minimalist kcal bar, laid out
+ *     side by side -- and THIS compact header is the only place the
+ *     pastel hero color (MealVisuals, status-bar-tinted) still appears.
+ *     Everything else scrolls out of view under the now-mostly-full-
+ *     screen sheet. Driven off the sheet's targetValue (see below) and
+ *     wrapped in a Crossfade, so it fades between the two header states
+ *     as you drag rather than snapping instantly.
+ *   - the draggable BottomSheetScaffold sheet is the ADD-ITEM picker,
+ *     replacing the app's normal nav bar on this screen (see
+ *     AppNavHost's routesWithoutBottomBar). Two equal-weight method
+ *     icons: Search (merged with what used to be a separate "Saved"
+ *     tab -- both showed a search bar + results list, the only
+ *     difference was what populated it before typing, so there's no
+ *     reason for them to be different screens) and Barcode. Tapping
+ *     either now also programmatically expands the sheet. Search bar
+ *     is a pill shape (SEARCH_BAR_SHAPE). Barcode embeds the FULL
+ *     AddItemScreen flow directly (camera -> match/no-match -> product
+ *     photo -> crop -> label -> form -> save) -- NOT a navigation to a
+ *     separate screen, per design discussion ("we want it inside the
+ *     card"). AddItemViewModel.attachToMeal() tells that flow which
+ *     meal to actually log the result to once it's done.
  */
-private const val QUICK_LOG_QUANTITY_G = 100.0
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MealDetailScreen(
+    date: LocalDate,
+    mealType: String,
+    viewModel: MealDetailViewModel = viewModel(),
+    onBack: () -> Unit = {}
+) {
+    val state by viewModel.uiState.collectAsState()
+    val heroColor = MealVisuals.backgroundFor(mealType)
 
-// Same conversion AddItemViewModel uses (EU labels round salt = sodium
-// x 2.5). Kept as a separate constant here rather than sharing
-// AddItemViewModel's private one since these are two different files/
-// ViewModels -- see saveItemEdit()'s doc comment.
-private const val SALT_TO_SODIUM_RATIO = 2.5
+    val scaffoldState = rememberBottomSheetScaffoldState()
+    val coroutineScope = rememberCoroutineScope()
+    // targetValue (not currentValue) updates as soon as the drag gesture
+    // is predicted to settle past the halfway point -- i.e. partway
+    // through the drag, before it's released/settled -- which is what
+    // lets the Crossfade below actually respond WHILE dragging rather
+    // than only snapping once the drag fully finishes.
+    val isSheetExpanded = scaffoldState.bottomSheetState.targetValue == SheetValue.Expanded
 
-/** "200" instead of "200.0" for whole numbers, but still shows real
- * decimals (e.g. "37.5") when the value actually has one -- used
- * anywhere a quantity gets shown/pre-filled as text, per design
- * discussion ("only show whole grams, not fractions"). Not private --
- * MealDetailScreen's logged-items row list uses it too. */
-fun formatQuantity(value: Double): String =
-    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+    // BottomSheetScaffold normally sizes "Expanded" to the sheet
+    // CONTENT's own height -- with sparse content (a couple of icons +
+    // a short list) that meant Expanded barely moved past the peek
+    // height (see design discussion: "doesn't go higher than ~25%").
+    // Forcing a minimum height here makes Expanded a fixed, predictable
+    // amount of the screen regardless of how much is actually in it.
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
+    val expandedSheetMinHeight = screenHeightDp * 0.82f
 
-/** Remembers what quantity/serving was last used to log a given item,
- * in-memory only (per app session, not persisted) -- backs both the
- * "X Cal, Yg" preview in the search list and what the "+" quick-add
- * button actually logs, so the two stay consistent with each other (see
- * design discussion: "we should display kcal and g that would be added
- * if the user pressed plus"). Falls back to 100g/no-serving the first
- * time an item is logged, same as the old flat QUICK_LOG_QUANTITY_G
- * default. */
-/** Which kind of thing the search tab is filtering to -- see
- * MealDetailUiState.searchFilter's doc comment for why RECIPE/MEAL take
- * a completely different query/results path than ALL/PRODUCT/
- * INGREDIENT. */
-enum class SearchFilter(val label: String) {
-    ALL("All"), PRODUCT("Product"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
+    fun selectMethod(mode: AddItemSheetMode) {
+        viewModel.setSheetMode(mode)
+        coroutineScope.launch { scaffoldState.bottomSheetState.expand() }
+    }
+
+    LaunchedEffect(date, mealType) {
+        viewModel.load(date, mealType)
+    }
+
+    if (state.showSaveMealDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissSaveMealDialog() },
+            title = { Text("Save this meal") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = state.mealNameInput,
+                        onValueChange = { viewModel.updateMealNameInput(it) },
+                        label = { Text("Meal name") }
+                    )
+                    if (state.saveMealError != null) {
+                        Text(
+                            state.saveMealError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.saveAsMeal() },
+                    enabled = state.mealNameInput.isNotBlank() && !state.isSavingMeal
+                ) {
+                    Text(if (state.isSavingMeal) "Saving..." else "Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissSaveMealDialog() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    val itemToLog = state.itemToLog
+    if (itemToLog != null) {
+        ItemLogPageDialog(
+            item = itemToLog,
+            goalFat = state.goalFat,
+            goalProtein = state.goalProtein,
+            goalCarbs = state.goalCarbs,
+            goalFiber = state.goalFiber,
+            quantityInput = state.logQuantityInput,
+            servingSizeId = state.logServingSizeId,
+            isLogging = state.isLoggingItem,
+            error = state.logItemError,
+            isEditing = state.editingLogId != null,
+            onQuantityChange = { viewModel.updateLogQuantityInput(it) },
+            onServingChange = { viewModel.updateLogServingSize(it) },
+            onCreateNewServing = { viewModel.openCreateServingDialog() },
+            onConfirm = { viewModel.confirmLogItemQuantity() },
+            onDelete = {
+                state.editingLogId?.let { viewModel.deleteLog(it) }
+                viewModel.dismissItemQuantityPicker()
+            },
+            onDismiss = { viewModel.dismissItemQuantityPicker() },
+            onImageUpdated = { updated -> viewModel.onItemImageUpdated(updated) },
+            onEditClick = { viewModel.openEditItemDialog() }
+        )
+
+        if (state.showCreateServingDialog) {
+            CreateServingDialog(
+                name = state.newServingName,
+                weightG = state.newServingWeightG,
+                isCreating = state.isCreatingServing,
+                error = state.createServingError,
+                onNameChange = { viewModel.updateNewServingName(it) },
+                onWeightChange = { viewModel.updateNewServingWeight(it) },
+                onConfirm = { viewModel.createNewServing() },
+                onDismiss = { viewModel.dismissCreateServingDialog() }
+            )
+        }
+
+        if (state.showEditItemDialog) {
+            EditItemDialog(
+                name = state.editItemName,
+                kcal = state.editItemKcal,
+                protein = state.editItemProtein,
+                carbs = state.editItemCarbs,
+                fat = state.editItemFat,
+                fiber = state.editItemFiber,
+                sugar = state.editItemSugar,
+                saturatedFat = state.editItemSaturatedFat,
+                saltG = state.editItemSaltG,
+                isSaving = state.isSavingItemEdit,
+                error = state.editItemError,
+                onNameChange = { viewModel.updateEditItemName(it) },
+                onKcalChange = { viewModel.updateEditItemKcal(it) },
+                onProteinChange = { viewModel.updateEditItemProtein(it) },
+                onCarbsChange = { viewModel.updateEditItemCarbs(it) },
+                onFatChange = { viewModel.updateEditItemFat(it) },
+                onFiberChange = { viewModel.updateEditItemFiber(it) },
+                onSugarChange = { viewModel.updateEditItemSugar(it) },
+                onSaturatedFatChange = { viewModel.updateEditItemSaturatedFat(it) },
+                onSaltChange = { viewModel.updateEditItemSalt(it) },
+                onConfirm = { viewModel.saveItemEdit() },
+                onDismiss = { viewModel.dismissEditItemDialog() }
+            )
+        }
+    }
+
+    val selectedLog = state.selectedLog
+    if (selectedLog != null) {
+        LogDetailDialog(
+            log = selectedLog,
+            goalKcal = state.goalKcal,
+            goalFat = state.goalFat,
+            goalProtein = state.goalProtein,
+            goalCarbs = state.goalCarbs,
+            goalFiber = state.goalFiber,
+            editQuantityInput = state.editQuantityInput,
+            isSaving = state.isSavingLogEdit,
+            error = state.logEditError,
+            onQuantityChange = { viewModel.updateEditQuantityInput(it) },
+            onSave = { viewModel.saveLogQuantity() },
+            onDelete = { viewModel.deleteLog(selectedLog.id) },
+            onDismiss = { viewModel.dismissLogDetail() }
+        )
+    }
+
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        // Was 88.dp -- the icon+label content was taller than that once
+        // padding was accounted for, clipping the labels at the bottom
+        // of the peeked sheet (see design discussion).
+        sheetPeekHeight = 110.dp,
+        sheetContent = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = expandedSheetMinHeight)
+                    .padding(top = 4.dp, bottom = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    AddMethodIcon(
+                        Icons.Filled.Search, "Search",
+                        selected = state.sheetMode == AddItemSheetMode.SEARCH || state.enteredAddFlowViaUsdaLink,
+                        onClick = { selectMethod(AddItemSheetMode.SEARCH) }
+                    )
+                    AddMethodIcon(
+                        Icons.Filled.QrCodeScanner, "Barcode",
+                        selected = state.sheetMode == AddItemSheetMode.BARCODE && !state.enteredAddFlowViaUsdaLink,
+                        onClick = { selectMethod(AddItemSheetMode.BARCODE) }
+                    )
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+
+                when (state.sheetMode) {
+                    AddItemSheetMode.SEARCH -> {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        OutlinedTextField(
+                            value = state.searchQuery,
+                            onValueChange = { viewModel.updateSearchQuery(it) },
+                            label = { Text("Search for a food") },
+                            shape = SEARCH_BAR_SHAPE,
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        )
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SearchFilter.entries.forEach { filter ->
+                                FilterChip(
+                                    selected = state.searchFilter == filter,
+                                    onClick = { viewModel.updateSearchFilter(filter) },
+                                    label = { Text(filter.label) }
+                                )
+                            }
+                        }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                        // Defaults to recently added/updated catalog
+                        // items when the query is blank -- this IS the
+                        // old "Saved" tab, now just the empty-query state
+                        // of Search (see loadRecentItems' doc comment for
+                        // why "recent" changed meaning from "logged" to
+                        // "added").
+                        val showingRecent = state.searchQuery.isBlank()
+                        if (state.searchFilter == SearchFilter.RECIPE || state.searchFilter == SearchFilter.MEAL) {
+                            RecipeResultsList(
+                                recipes = if (showingRecent) state.recentRecipes else state.recipeSearchResults,
+                                isLoading = if (showingRecent) false else state.isSearchingRecipes,
+                                emptyMessage = if (showingRecent) "No recipes yet" else "No matches",
+                                quickLoggingRecipeId = state.quickLoggingRecipeId,
+                                onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
+                            )
+                        } else {
+                            ItemResultsList(
+                                items = if (showingRecent) state.recentItems else state.searchResults,
+                                isLoading = if (showingRecent) state.isLoadingRecentItems else state.isSearching,
+                                emptyMessage = if (showingRecent) "No items yet" else "No matches",
+                                quickLoggingItemId = state.quickLoggingItemId,
+                                lastLoggedAmounts = state.lastLoggedAmounts,
+                                onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
+                                onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) }
+                            )
+                        }
+                        // USDA lookup lives ONLY here now, not in the
+                        // barcode flow (see design discussion) -- for
+                        // raw/whole ingredients our own catalog and
+                        // barcodes won't have.
+                        Text(
+                            "Can't find it? Search USDA for a raw ingredient",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                                .clickable { viewModel.requestUsdaSearch() }
+                        )
+                    }
+                    }
+                    AddItemSheetMode.BARCODE -> {
+                        // Scoped by date+mealType so switching meals (or
+                        // re-entering after a save) gets a fresh flow
+                        // rather than resuming mid-scan from a different
+                        // meal's attempt.
+                        val addItemViewModel: AddItemViewModel =
+                            viewModel(key = "add_item_${date}_$mealType")
+                        LaunchedEffect(date, mealType) {
+                            addItemViewModel.attachToMeal(date, mealType)
+                        }
+                        LaunchedEffect(state.requestedUsdaSearchQuery) {
+                            val query = state.requestedUsdaSearchQuery
+                            if (query != null) {
+                                addItemViewModel.jumpToUsdaSearch(query)
+                                viewModel.clearUsdaSearchRequest()
+                            }
+                        }
+                        AddItemScreen(
+                            viewModel = addItemViewModel,
+                            onBack = {
+                                // Drop the in-progress flow entirely --
+                                // previously only onDone reset it, so
+                                // backing out mid-scan/mid-form and then
+                                // tapping Barcode again would resume
+                                // wherever you left off instead of
+                                // starting fresh.
+                                addItemViewModel.resetToScanChoice()
+                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                            },
+                            onDone = {
+                                addItemViewModel.resetToScanChoice()
+                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                                viewModel.load(date, mealType)
+                                viewModel.refreshSearchAfterAdd()
+                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                            },
+                            onOpenItemDetail = { item ->
+                                addItemViewModel.resetToScanChoice()
+                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                                viewModel.openItemQuantityPicker(item)
+                            }
+                        )
+                    }
+                }
+
+                if (state.quickLogError != null) {
+                    Text(
+                        state.quickLogError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    ) { innerPadding ->
+        // meal_detail is in AppNavHost's edgeToEdgeStatusBarRoutes, so
+        // unlike most screens it does NOT get an automatic status-bar
+        // inset here -- CompactMealHeader (below) is the one place that
+        // deliberately bleeds color up behind the status bar; everywhere
+        // else in this screen still needs its own statusBarsPadding so
+        // content doesn't render under the system clock/icons.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .let { if (isSheetExpanded) it else it.statusBarsPadding() }
+        ) {
+            if (state.isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (state.error != null) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Couldn't load this meal", style = MaterialTheme.typography.titleMedium)
+                    Text(state.error!!, style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                Crossfade(
+                    targetState = isSheetExpanded,
+                    animationSpec = tween(220),
+                    label = "meal_header_crossfade"
+                ) { expanded ->
+                    if (expanded) {
+                        CompactMealHeader(
+                            displayName = state.displayName,
+                            eatenKcal = state.eatenKcal,
+                            goalKcal = state.goalKcal,
+                            heroColor = heroColor
+                        )
+                    } else {
+                        DefaultMealContent(
+                            state = state,
+                            onBack = onBack,
+                            onOpenSaveMealDialog = { viewModel.openSaveMealDialog() },
+                            onLogClick = { log -> viewModel.openLogDetail(log) },
+                            onLogDelete = { logId -> viewModel.deleteLog(logId) }
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
-data class LoggedAmount(val quantity: Double, val servingSizeId: Int?)
+/** The full default-state header + kcal/macro card + logged-items card
+ * -- extracted out so it can be one branch of the Crossfade in
+ * MealDetailScreen, the other branch being CompactMealHeader. */
+@Composable
+private fun DefaultMealContent(
+    state: MealDetailUiState,
+    onBack: () -> Unit,
+    onOpenSaveMealDialog: () -> Unit,
+    onLogClick: (Log) -> Unit,
+    onLogDelete: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+            }
+        }
 
-data class MealDetailUiState(
-    val isLoading: Boolean = true,
-    val date: LocalDate? = null,
-    val mealType: String = "",
-    val displayName: String = "",
-    val logs: List<Log> = emptyList(),
-    val eatenKcal: Int = 0,
-    val goalKcal: Int = 0,
-    val eatenFat: Int = 0,
-    val goalFat: Int = 0,
-    val eatenProtein: Int = 0,
-    val goalProtein: Int = 0,
-    val eatenCarbs: Int = 0,
-    val goalCarbs: Int = 0,
-    val eatenFiber: Int = 0,
-    val goalFiber: Int = 0,
-    val error: String? = null,
-    // "Save this meal" (star icon) state
-    val showSaveMealDialog: Boolean = false,
-    val mealNameInput: String = "",
-    val isSavingMeal: Boolean = false,
-    val saveMealError: String? = null,
-    val saveMealSuccess: Boolean = false,
-    // Add Item sheet state
-    val sheetMode: AddItemSheetMode = AddItemSheetMode.SEARCH,
-    // See requestUsdaSearch()'s doc comment. Non-null (possibly blank)
-    // means a jump is pending; carries over whatever the user already
-    // typed in this screen's own search box.
-    val requestedUsdaSearchQuery: String? = null,
-    // Entering the embedded AddItemScreen via "Search USDA" reuses the
-    // BARCODE sheetMode slot to render it (see that mode's doc comment)
-    // -- but that made the Barcode icon incorrectly look "selected" even
-    // though the user came from Search, not by tapping Barcode
-    // themselves (see design discussion). This tracks that distinction
-    // separately, for icon highlighting ONLY -- content rendering still
-    // goes purely off sheetMode.
-    val enteredAddFlowViaUsdaLink: Boolean = false,
-    val recentItems: List<Item> = emptyList(),
-    val isLoadingRecentItems: Boolean = false,
-    val searchQuery: String = "",
-    val searchResults: List<Item> = emptyList(),
-    val isSearching: Boolean = false,
-    // Filter chips above the search results -- ALL/PRODUCT/INGREDIENT
-    // search Items (with an optional type= param); RECIPE/MEAL search
-    // Recipes instead (recipe_type= param), a completely different
-    // result list/quick-log path since Recipes don't have per-100g
-    // macros or serving sizes the way Items do.
-    val searchFilter: SearchFilter = SearchFilter.ALL,
-    val recentRecipes: List<Recipe> = emptyList(),
-    val recipeSearchResults: List<Recipe> = emptyList(),
-    val isSearchingRecipes: Boolean = false,
-    // Same idea as quickLoggingItemId but for the recipe list.
-    val quickLoggingRecipeId: Int? = null,
-    // Set while a quick-log request for THIS item id is in flight, so
-    // the UI can show a per-row spinner instead of a global one.
-    val quickLoggingItemId: Int? = null,
-    val quickLogError: String? = null,
-    // Log detail/edit sheet -- fallback for RECIPE-based logs only (see
-    // openLogDetail's doc comment for why item-based logs go through
-    // itemToLog/ItemLogPageDialog instead, same screen as logging a new
-    // item).
-    val selectedLog: Log? = null,
-    val editQuantityInput: String = "",
-    val isSavingLogEdit: Boolean = false,
-    val logEditError: String? = null,
+        // Meal name, centered, with the star/bookmark icon right next
+        // to it -- plain (no hero color) in this default state.
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.align(Alignment.Center),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(state.displayName, style = MaterialTheme.typography.headlineSmall)
+                IconButton(onClick = onOpenSaveMealDialog) {
+                    Icon(Icons.Filled.BookmarkBorder, contentDescription = "Save as a meal")
+                }
+            }
+        }
+        if (state.saveMealSuccess) {
+            Text(
+                "\u2705 Saved as a reusable meal",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+        }
 
-    // Opens ItemLogPageDialog -- used for BOTH logging a new item
-    // (tapping a search result) AND editing an already-logged item
-    // (tapping a row in "Logged items"), same screen either way. Which
-    // mode it's in is just whether editingLogId is set.
-    val itemToLog: Item? = null,
-    // Non-null = editing that existing log (confirm PATCHes + can
-    // delete); null = logging a new one (confirm POSTs).
-    val editingLogId: Int? = null,
-    val logQuantityInput: String = "1",
-    // null = raw grams; otherwise the chosen ServingSize's id. The
-    // dropdown always has "g" as an option alongside whatever named
-    // servings the item has (see ServingSize.name -- e.g. "slice").
-    val logServingSizeId: Int? = null,
-    val isLoggingItem: Boolean = false,
-    val logItemError: String? = null,
-    // See LoggedAmount's doc comment.
-    val lastLoggedAmounts: Map<Int, LoggedAmount> = emptyMap(),
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
 
-    // "Create new serving" -- reached from the unit/serving dropdown on
-    // the item log page. Nested under itemToLog (only relevant while
-    // that page is open).
-    val showCreateServingDialog: Boolean = false,
-    val newServingName: String = "",
-    val newServingWeightG: String = "",
-    val isCreatingServing: Boolean = false,
-    val createServingError: String? = null,
+        val kcalFraction = if (state.goalKcal > 0) {
+            (state.eatenKcal.toFloat() / state.goalKcal.toFloat()).coerceIn(0f, 1f)
+        } else 0f
 
-    // Edit (pencil) button on the item info page -- name + macros only.
-    // Nested under itemToLog same as the serving-creation state above.
-    val showEditItemDialog: Boolean = false,
-    val editItemName: String = "",
-    val editItemKcal: String = "",
-    val editItemProtein: String = "",
-    val editItemCarbs: String = "",
-    val editItemFat: String = "",
-    val editItemFiber: String = "",
-    val editItemSugar: String = "",
-    val editItemSaturatedFat: String = "",
-    // Grams, not mg -- same reasoning as AddItemViewModel's saltG100g
-    // (food labels show salt, not sodium; converted at the boundary,
-    // see saveItemEdit()).
-    val editItemSaltG: String = "",
-    val isSavingItemEdit: Boolean = false,
-    val editItemError: String? = null
-)
+        Card(
+            colors = WhiteCardColors,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "${state.eatenKcal} / ${state.goalKcal} Cal",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                LinearProgressIndicator(
+                    progress = { kcalFraction },
+                    modifier = Modifier.fillMaxWidth().height(10.dp)
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+
+                MacroRingsRow(
+                    fatEaten = state.eatenFat, fatGoal = state.goalFat,
+                    proteinEaten = state.eatenProtein, proteinGoal = state.goalProtein,
+                    carbsEaten = state.eatenCarbs, carbsGoal = state.goalCarbs,
+                    fiberEaten = state.eatenFiber, fiberGoal = state.goalFiber,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Card(
+            colors = WhiteCardColors,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Logged items", style = MaterialTheme.typography.titleMedium)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                if (state.logs.isEmpty()) {
+                    Text(
+                        "Nothing logged yet",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    state.logs.forEach { log ->
+                        LogRow(
+                            log = log,
+                            onClick = { onLogClick(log) },
+                            onDelete = { onLogDelete(log.id) }
+                        )
+                    }
+                }
+            }
+        }
+
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 24.dp))
+    }
+}
+
+/** Shown instead of the full header while the sheet is dragged/tapped
+ * open -- meal name off to the side + a thin, unlabeled progress bar
+ * next to it (not stacked below, per design discussion). This is the
+ * ONLY place the meal-type hero color still appears in the default
+ * flow (see design discussion: dropped from the main screen). */
+@Composable
+private fun CompactMealHeader(displayName: String, eatenKcal: Int, goalKcal: Int, heroColor: Color) {
+    val kcalFraction = if (goalKcal > 0) (eatenKcal.toFloat() / goalKcal.toFloat()).coerceIn(0f, 1f) else 0f
+    Column(modifier = Modifier.fillMaxWidth().background(heroColor)) {
+        // Background bleeds to y=0; this pushes the readable content
+        // down below the status bar icons without clipping the color
+        // itself -- same approach as JournalScreen's hero.
+        androidx.compose.foundation.layout.Spacer(
+            modifier = Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp, horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(displayName, style = MaterialTheme.typography.headlineSmall)
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 16.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.4f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(kcalFraction)
+                        .height(6.dp)
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
+                )
+            }
+        }
+    }
+}
+
+/** Small, subtle, equal-weight icon for each add-item method -- neither
+ * should read as THE prominent action, they're just different doors
+ * into the same sheet. Slightly tinted when it's the active mode. */
+@Composable
+private fun AddMethodIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    // Was primaryContainer (a light teal tint) when selected -- too
+    // close to the unselected surfaceVariant color to tell apart at a
+    // glance, especially in dark mode. Using the actual primary teal
+    // now, with onPrimary (light) icon tint for contrast against it --
+    // see design discussion ("darker green color when selected, but
+    // still vibrant enough to tell apart from the background").
+    val background = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val iconTint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier
+                .size(48.dp)
+                .background(background, CircleShape)
+        ) {
+            Icon(icon, contentDescription = label, tint = iconTint)
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** "142 Cal, 100g" preview of what tapping "+" would actually log for
+ * this item right now -- see MealDetailViewModel.LoggedAmount. Returns
+ * null if there's not enough info to compute a preview (no kcal_100g on
+ * the item, or a remembered serving that's since been deleted). */
+private fun quickAddPreview(item: Item, remembered: LoggedAmount?): String? {
+    val quantity = remembered?.quantity ?: 100.0
+    val grams = if (remembered?.servingSizeId != null) {
+        val serving = item.servingSizes.find { it.id == remembered.servingSizeId } ?: return null
+        quantity * (serving.weightG.toDoubleOrNull() ?: return null)
+    } else {
+        quantity
+    }
+    val kcal = item.kcal100g?.toDoubleOrNull()?.times(grams / 100.0) ?: return null
+    return "${kcal.roundToInt()} Cal, ${"%.0f".format(grams)}g"
+}
+
+/** Recipe/Meal filter's results list -- separate from ItemResultsList
+ * since Recipes have a totally different shape (servings + totals_per_
+ * serving, no per-100g macros or ServingSizes), and quick-log always
+ * uses a flat 1-serving default (see logRecipeQuickly's doc comment)
+ * rather than the item-quantity-picker page -- recipes don't have one
+ * yet. */
+@Composable
+private fun RecipeResultsList(
+    recipes: List<Recipe>,
+    isLoading: Boolean,
+    emptyMessage: String,
+    quickLoggingRecipeId: Int?,
+    onQuickAddClick: (Recipe) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 500.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        when {
+            isLoading -> {
+                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            recipes.isEmpty() -> {
+                Text(
+                    emptyMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+            else -> {
+                recipes.forEach { recipe ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = quickLoggingRecipeId == null) { onQuickAddClick(recipe) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CatalogVisuals.backgroundFor(recipe.recipeType)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (recipe.imagePath != null) {
+                                coil3.compose.AsyncImage(
+                                    model = com.mealtracker.android.BuildConfig.BASE_URL + recipe.imagePath,
+                                    contentDescription = null,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    CatalogVisuals.iconFor(recipe.recipeType),
+                                    contentDescription = null,
+                                    tint = CatalogVisuals.iconTint(),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(recipe.name, style = MaterialTheme.typography.bodyLarge)
+                            if (recipe.totalsPerServing != null) {
+                                Text(
+                                    "${recipe.totalsPerServing.kcal} Cal / serving",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (quickLoggingRecipeId == recipe.recipeId) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            IconButton(onClick = { onQuickAddClick(recipe) }) {
+                                Icon(Icons.Filled.Add, contentDescription = "Quick add")
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+}
+
+/** Results list backing Search (recent items when blank, search results
+ * once typing) -- bounded height + its own scroll so a long list
+ * doesn't fight the sheet's own drag gesture. */
+@Composable
+private fun ItemResultsList(
+    items: List<Item>,
+    isLoading: Boolean,
+    emptyMessage: String,
+    quickLoggingItemId: Int?,
+    lastLoggedAmounts: Map<Int, LoggedAmount>,
+    onItemClick: (Item) -> Unit,
+    onQuickAddClick: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 500.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        when {
+            isLoading -> {
+                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            items.isEmpty() -> {
+                Text(
+                    emptyMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+            else -> {
+                items.forEach { item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // Tapping the ROW opens the quantity/serving
+                            // picker (see MealDetailViewModel.
+                            // openItemQuantityPicker) -- the separate "+"
+                            // button below is still the flat-quantity
+                            // quick-add shortcut, kept for when you just
+                            // want the default fast without picking
+                            // anything.
+                            .clickable(enabled = quickLoggingItemId == null) { onItemClick(item) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CatalogVisuals.backgroundFor(item.type)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (item.imagePath != null) {
+                                coil3.compose.AsyncImage(
+                                    model = com.mealtracker.android.BuildConfig.BASE_URL + item.imagePath,
+                                    contentDescription = null,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    CatalogVisuals.iconFor(item.type),
+                                    contentDescription = null,
+                                    tint = CatalogVisuals.iconTint(),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.name, style = MaterialTheme.typography.bodyLarge)
+                            if (item.brand != null) {
+                                Text(
+                                    item.brand,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            // What tapping "+" would actually log -- the
+                            // last quantity/serving used for this item,
+                            // or 100g the first time (see
+                            // MealDetailViewModel.LoggedAmount).
+                            val preview = quickAddPreview(item, lastLoggedAmounts[item.itemId])
+                            if (preview != null) {
+                                Text(
+                                    preview,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (quickLoggingItemId == item.itemId) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            IconButton(onClick = { onQuickAddClick(item.itemId) }) {
+                                Icon(Icons.Filled.Add, contentDescription = "Quick add 100g")
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+}
 
 /**
- * Fetches independently from JournalViewModel (its own /logs +
- * /goals/active calls, scoped to just this one meal/date) rather than
- * receiving data passed through navigation -- simpler than threading
- * complex state through nav arguments, and keeps this screen's data
- * fresh if the user navigates back and forth.
+ * Full-page item log screen -- same hero-image/scrollable-card/macro-bar
+ * treatment as LogDetailDialog below, reused here for an item that
+ * ISN'T logged yet (per design discussion: "you almost had it before,
+ * you just had to add the unit/serving picker to the existing page").
+ * Unlike LogDetailDialog, macros here ARE live-recomputed as you change
+ * quantity/unit (item.kcal100g etc. * grams/100) since there's no saved
+ * log snapshot yet to fall back on.
+ *
+ * Unit is either raw grams or one of the item's named ServingSizes. With
+ * a serving selected, the quantity typed is a MULTIPLIER of that
+ * serving's weight (2 x "slice" @ 37.5g = 75g) -- mirrors
+ * LoggableEntryBase's quantity semantics on the backend exactly.
+ *
+ * The dropdown's last option, "+ Create new serving", opens
+ * CreateServingDialog (backend already supported this via POST
+ * /items/{id}/serving-sizes -- just wasn't wired up client-side before).
  */
-class MealDetailViewModel : ViewModel() {
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun ItemLogPageDialog(
+    item: Item,
+    goalFat: Int,
+    goalProtein: Int,
+    goalCarbs: Int,
+    goalFiber: Int,
+    quantityInput: String,
+    servingSizeId: Int?,
+    isLogging: Boolean,
+    error: String?,
+    // Non-null when editing an already-logged item (see
+    // MealDetailViewModel.editingLogId) -- shows "Save changes" +
+    // a Delete button instead of "Add to meal".
+    isEditing: Boolean,
+    onQuantityChange: (String) -> Unit,
+    onServingChange: (Int?) -> Unit,
+    onCreateNewServing: () -> Unit,
+    onConfirm: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+    onImageUpdated: (Item) -> Unit,
+    onEditClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
-    private val _uiState = MutableStateFlow(MealDetailUiState())
-    val uiState: StateFlow<MealDetailUiState> = _uiState
+    // Long-press-to-change-photo -- self-contained crop staging, same
+    // pattern AddItemScreen uses for its own capture/gallery/crop flow
+    // (see that file's pendingCropSourceUri/cropSourceBitmap/
+    // onCropComplete). Kept local to this Composable rather than in the
+    // ViewModel since it's purely a UI-side capture pipeline before
+    // anything gets uploaded.
+    var showImageChangeMenu by remember { mutableStateOf(false) }
+    var pendingCropSourceUri by remember { mutableStateOf<Uri?>(null) }
+    var cropSourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var isUploadingImage by remember { mutableStateOf(false) }
+    var imageUpdateError by remember { mutableStateOf<String?>(null) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
-    fun load(date: LocalDate, mealType: String) {
-        // Preserves sheet state (mode, search query/results, recent
-        // items) across this reset -- logItemQuickly() calls load()
-        // again afterward just to refresh totals/logs, and resetting the
-        // whole state back to MealDetailUiState() defaults there would
-        // jarringly snap the sheet back to its initial mode/empty state
-        // every time someone logs something.
-        //
-        // isLoading only flips to true when there's nothing on screen
-        // yet (first load, or recovering from an error) -- otherwise
-        // adding/removing/editing an item would blank the whole screen
-        // to a spinner for a split second on every single change, since
-        // this function gets called again after each of those to
-        // refresh totals.
-        val alreadyHasData = !_uiState.value.isLoading && _uiState.value.error == null &&
-            _uiState.value.date != null
-        _uiState.value = _uiState.value.copy(
-            isLoading = !alreadyHasData,
-            date = date,
-            mealType = mealType,
-            displayName = MEAL_DISPLAY_NAMES[mealType] ?: mealType,
-            error = null
-        )
+    fun clearCropState() {
+        pendingCropSourceUri = null
+        cropSourceBitmap = null
+    }
 
-        viewModelScope.launch {
+    LaunchedEffect(pendingCropSourceUri) {
+        val uri = pendingCropSourceUri ?: return@LaunchedEffect
+        val bitmap = withContext(Dispatchers.IO) {
             try {
-                val dateString = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                val logs = ApiClient.service.getLogs(dateString, mealType)
-                val goal = ApiClient.service.getActiveGoal()
-                val goalTotals = goal.mealSplits.find { it.mealType == mealType }?.computedTotals
-
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    logs = logs,
-                    eatenKcal = logs.sumOf { it.kcalLogged },
-                    goalKcal = goalTotals?.kcal ?: 0,
-                    eatenFat = logs.sumOf { it.fatGLogged },
-                    goalFat = goalTotals?.fatG ?: 0,
-                    eatenProtein = logs.sumOf { it.proteinGLogged },
-                    goalProtein = goalTotals?.proteinG ?: 0,
-                    eatenCarbs = logs.sumOf { it.carbsGLogged },
-                    goalCarbs = goalTotals?.carbsG ?: 0,
-                    eatenFiber = logs.sumOf { it.fiberGLogged },
-                    goalFiber = goalTotals?.fiberG ?: 0
-                )
+                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = e.message ?: "Unknown error"
-                )
+                null
             }
         }
-
-        loadRecentItems()
+        if (bitmap == null) {
+            clearCropState()
+            imageUpdateError = "Couldn't read that image"
+        } else {
+            cropSourceBitmap = bitmap
+        }
     }
 
-    // ----- Add Item sheet -----
-
-    fun setSheetMode(mode: AddItemSheetMode) {
-        // A deliberate tap on either icon means the user is explicitly
-        // choosing that mode -- clears the "came from the USDA link"
-        // distinction so Barcode's highlight goes back to reflecting
-        // sheetMode normally (see enteredAddFlowViaUsdaLink's doc
-        // comment).
-        _uiState.value = _uiState.value.copy(sheetMode = mode, enteredAddFlowViaUsdaLink = false)
-    }
-
-    /** "Can't find it? Search USDA" link at the bottom of the text
-     * Search tab -- switches to the embedded add-item flow (BARCODE
-     * mode/AddItemScreen) and requests it jump straight to USDA_SEARCH
-     * rather than starting at SCAN_BARCODE. See design discussion:
-     * USDA lookup should be reachable ONLY from text search, not
-     * injected into barcode scanning. MealDetailScreen consumes and
-     * clears requestedUsdaSearch once it's actually triggered the jump
-     * on the embedded AddItemViewModel. */
-    fun requestUsdaSearch() {
-        _uiState.value = _uiState.value.copy(
-            sheetMode = AddItemSheetMode.BARCODE,
-            requestedUsdaSearchQuery = _uiState.value.searchQuery,
-            enteredAddFlowViaUsdaLink = true
-        )
-    }
-
-    fun clearUsdaSearchRequest() {
-        _uiState.value = _uiState.value.copy(requestedUsdaSearchQuery = null)
-    }
-
-    /** "Add Another Item" on the embedded flow's SAVED screen -- returns
-     * to this sheet's Search tab rather than resetting back into
-     * barcode-scanning specifically, since the next item the user wants
-     * isn't necessarily barcode-scannable (an already-known item via
-     * search, or another raw ingredient via USDA search again). See
-     * design discussion: "default to Search, in case the user wants to
-     * add a saved item". Also refreshes the meal, same as finishing the
-     * flow normally -- an item WAS just added. */
-    fun returnToSearchAfterAdd() {
-        _uiState.value = _uiState.value.copy(
-            sheetMode = AddItemSheetMode.SEARCH,
-            enteredAddFlowViaUsdaLink = false
-        )
-        val date = _uiState.value.date
-        if (date != null) load(date, _uiState.value.mealType)
-    }
-
-    /** "Recent" here means recently added/updated in the catalog (GET
-     * /items with no query is already ordered by updated_at desc
-     * server-side -- see design discussion), NOT recently logged. Was
-     * previously /logs/recent-items (recency of LOGGING); switched
-     * because the search tab is about finding an item to log, and what
-     * you just created/edited is more relevant there than what you
-     * happened to eat most recently. */
-    /** "Recent" here means recently added/updated in the catalog (GET
-     * /items with no query is already ordered by updated_at desc
-     * server-side -- see design discussion), NOT recently logged. Loads
-     * BOTH items and recipes up front (cheap, both lists are small/
-     * capped) so switching filters doesn't need a fresh network call
-     * just to show the blank-query state. */
-    private fun loadRecentItems() {
-        _uiState.value = _uiState.value.copy(isLoadingRecentItems = true)
-        viewModelScope.launch {
+    fun uploadNewImage(bytes: ByteArray) {
+        isUploadingImage = true
+        imageUpdateError = null
+        coroutineScope.launch {
             try {
-                val items = ApiClient.service.searchItems(query = null)
-                _uiState.value = _uiState.value.copy(isLoadingRecentItems = false, recentItems = items)
-            } catch (e: Exception) {
-                // Not core functionality -- fails quietly to an empty
-                // list rather than blocking the sheet from working.
-                _uiState.value = _uiState.value.copy(isLoadingRecentItems = false)
-            }
-        }
-        viewModelScope.launch {
-            try {
-                val recipes = ApiClient.service.searchRecipes(query = null)
-                _uiState.value = _uiState.value.copy(recentRecipes = recipes)
-            } catch (e: Exception) {
-                // Same reasoning as the items catch above.
-            }
-        }
-    }
-
-    /** ALL/PRODUCT/INGREDIENT switch which type= filter (or none) gets
-     * passed to the ITEMS search; RECIPE/MEAL switch to searching
-     * RECIPES instead via recipe_type=, a completely different
-     * endpoint/result list (see MealDetailUiState.searchFilter's doc
-     * comment). Re-runs whatever query is currently typed against the
-     * newly-selected filter. */
-    fun updateSearchFilter(filter: SearchFilter) {
-        _uiState.value = _uiState.value.copy(searchFilter = filter)
-        updateSearchQuery(_uiState.value.searchQuery)
-    }
-
-    fun updateSearchQuery(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
-        val filter = _uiState.value.searchFilter
-
-        if (query.isBlank()) {
-            _uiState.value = _uiState.value.copy(
-                searchResults = emptyList(),
-                isSearching = false,
-                recipeSearchResults = emptyList(),
-                isSearchingRecipes = false
-            )
-            return
-        }
-
-        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
-            _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
-            val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
-            viewModelScope.launch {
-                try {
-                    val results = ApiClient.service.searchRecipes(query = query, recipeType = recipeType)
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
-                    }
-                } catch (e: Exception) {
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false)
-                    }
-                }
-            }
-            return
-        }
-
-        val itemType = when (filter) {
-            SearchFilter.PRODUCT -> "product"
-            SearchFilter.INGREDIENT -> "ingredient"
-            else -> null
-        }
-        _uiState.value = _uiState.value.copy(isSearching = true)
-        viewModelScope.launch {
-            try {
-                val results = ApiClient.service.searchItems(query = query, type = itemType)
-                // Guard against a slower earlier search response landing
-                // after a newer one -- only apply if the query is still
-                // current.
-                if (_uiState.value.searchQuery == query) {
-                    _uiState.value = _uiState.value.copy(isSearching = false, searchResults = results)
-                }
-            } catch (e: Exception) {
-                if (_uiState.value.searchQuery == query) {
-                    _uiState.value = _uiState.value.copy(isSearching = false)
-                }
-            }
-        }
-    }
-
-    /** Recipes/meals log by recipe_id with a flat 1-serving default --
-     * same "quick add, not precise" tradeoff as logItemQuickly's flat
-     * 100g for items (see QUICK_LOG_QUANTITY_G's doc comment). Recipe
-     * quantity semantics are "number of servings consumed", so 1 here
-     * means one full recipe serving, not "the whole recipe". */
-    /** Recipes log atomically (one log entry referencing recipe_id, flat
-     * 1-serving default -- same "quick add, not precise" tradeoff as
-     * logItemQuickly's flat 100g). Meals expand into one log PER
-     * INGREDIENT instead (see LogFromMealRequest's doc comment) -- each
-     * lands individually editable/removable, which is the whole
-     * functional distinction between the two (see design discussion). */
-    fun logRecipeQuickly(recipe: Recipe) {
-        val state = _uiState.value
-        val date = state.date ?: return
-        if (state.mealType.isEmpty()) return
-
-        _uiState.value = state.copy(quickLoggingRecipeId = recipe.recipeId, quickLogError = null)
-        viewModelScope.launch {
-            try {
-                if (recipe.recipeType == "meal") {
-                    ApiClient.service.createLogsFromMeal(
-                        LogFromMealRequest(
-                            recipeId = recipe.recipeId,
-                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                            mealType = state.mealType
-                        )
-                    )
-                } else {
-                    ApiClient.service.createLog(
-                        LogCreateRequest(
-                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                            mealType = state.mealType,
-                            recipeId = recipe.recipeId,
-                            quantity = 1.0
-                        )
-                    )
-                }
-                _uiState.value = _uiState.value.copy(quickLoggingRecipeId = null)
-                load(date, state.mealType)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    quickLoggingRecipeId = null,
-                    quickLogError = e.message ?: "Couldn't log that recipe"
-                )
-            }
-        }
-    }
-
-    /** Tap-to-log from Saved or Search results -- see QUICK_LOG_QUANTITY_G
-     * for the flat-100g simplification this currently uses. */
-    /** Uses whatever quantity/serving was last used for THIS item (see
-     * LoggedAmount), defaulting to 100g the first time. This is what the
-     * "+" button in the search list actually logs -- kept consistent
-     * with the preview text shown next to it (see ItemResultsList). */
-    fun logItemQuickly(itemId: Int) {
-        val state = _uiState.value
-        val date = state.date ?: return
-        if (state.mealType.isEmpty()) return
-
-        val remembered = state.lastLoggedAmounts[itemId]
-        val quantity = remembered?.quantity ?: QUICK_LOG_QUANTITY_G
-        val servingSizeId = remembered?.servingSizeId
-
-        _uiState.value = state.copy(quickLoggingItemId = itemId, quickLogError = null)
-        viewModelScope.launch {
-            try {
-                ApiClient.service.createLog(
-                    LogCreateRequest(
-                        date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                        mealType = state.mealType,
-                        itemId = itemId,
-                        servingSizeId = servingSizeId,
-                        quantity = quantity
-                    )
-                )
-                _uiState.value = _uiState.value.copy(
-                    quickLoggingItemId = null,
-                    lastLoggedAmounts = _uiState.value.lastLoggedAmounts +
-                        (itemId to LoggedAmount(quantity, servingSizeId))
-                )
-                // Refresh this meal's totals/logs AND the recent-items
-                // ordering (this item just became the most recent).
-                load(date, state.mealType)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    quickLoggingItemId = null,
-                    quickLogError = e.message ?: "Couldn't log that item"
-                )
-            }
-        }
-    }
-
-    // ----- Quantity/serving picker (tapping a search result, not its "+") -----
-
-    /** Called after ItemLogPageDialog's long-press image-change flow
-     * (retake/gallery + crop + upload) succeeds. Swaps in the updated
-     * Item so the open dialog's hero image refreshes immediately, AND
-     * reloads the meal -- without that reload, the change genuinely did
-     * save (PATCH /items/{id} succeeded), but the "Logged items" list's
-     * thumbnails are denormalized onto each Log at fetch time and
-     * wouldn't pick up the new image_path until the next unrelated
-     * reload, which read exactly like "changing the image doesn't save"
-     * even though it had. */
-    fun onItemImageUpdated(item: Item) {
-        val date = _uiState.value.date
-        _uiState.value = _uiState.value.copy(itemToLog = item)
-        if (date != null) load(date, _uiState.value.mealType)
-    }
-
-    fun openItemQuantityPicker(item: Item) {
-        val remembered = _uiState.value.lastLoggedAmounts[item.itemId]
-        _uiState.value = _uiState.value.copy(
-            itemToLog = item,
-            logQuantityInput = remembered?.quantity?.let { formatQuantity(it) } ?: formatQuantity(QUICK_LOG_QUANTITY_G),
-            logServingSizeId = remembered?.servingSizeId,
-            logItemError = null
-        )
-    }
-
-    fun dismissItemQuantityPicker() {
-        _uiState.value = _uiState.value.copy(itemToLog = null, editingLogId = null, logItemError = null)
-    }
-
-    fun updateLogQuantityInput(value: String) {
-        _uiState.value = _uiState.value.copy(logQuantityInput = value)
-    }
-
-    /** null = switch to raw grams. */
-    fun updateLogServingSize(servingSizeId: Int?) {
-        _uiState.value = _uiState.value.copy(logServingSizeId = servingSizeId)
-    }
-
-    /** Confirms ItemLogPageDialog -- POSTs a new log, or PATCHes an
-     * existing one if editingLogId is set (see that field's doc
-     * comment). Either way, unlike logItemQuickly's flat 100g, this
-     * sends whatever quantity+unit the user actually chose. With a
-     * serving selected, quantity is a MULTIPLIER of that serving's
-     * weight_g (e.g. serving="slice" @ 37.5g, quantity=2 -> the backend
-     * computes 75g worth of macros) -- see LoggableEntryBase's
-     * quantity-semantics doc comment on the backend for why this isn't
-     * grams in that case. */
-    fun confirmLogItemQuantity() {
-        val state = _uiState.value
-        val item = state.itemToLog ?: return
-        val date = state.date ?: return
-        val quantity = state.logQuantityInput.toDoubleOrNull()
-        if (quantity == null || quantity <= 0.0) {
-            _uiState.value = state.copy(logItemError = "Enter a valid quantity")
-            return
-        }
-
-        _uiState.value = state.copy(isLoggingItem = true, logItemError = null)
-        viewModelScope.launch {
-            try {
-                val editingLogId = state.editingLogId
-                if (editingLogId != null) {
-                    ApiClient.service.updateLog(
-                        editingLogId,
-                        LogUpdateRequest(quantity = quantity, servingSizeId = state.logServingSizeId)
-                    )
-                } else {
-                    ApiClient.service.createLog(
-                        LogCreateRequest(
-                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                            mealType = state.mealType,
-                            itemId = item.itemId,
-                            servingSizeId = state.logServingSizeId,
-                            quantity = quantity
-                        )
-                    )
-                }
-                _uiState.value = _uiState.value.copy(
-                    isLoggingItem = false,
-                    itemToLog = null,
-                    editingLogId = null,
-                    lastLoggedAmounts = _uiState.value.lastLoggedAmounts +
-                        (item.itemId to LoggedAmount(quantity, state.logServingSizeId))
-                )
-                load(date, state.mealType)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoggingItem = false,
-                    logItemError = e.message ?: "Couldn't save that log"
-                )
-            }
-        }
-    }
-
-    // ----- Create new serving (from the item log page's unit dropdown) -----
-
-    fun openCreateServingDialog() {
-        _uiState.value = _uiState.value.copy(
-            showCreateServingDialog = true,
-            newServingName = "",
-            newServingWeightG = "",
-            createServingError = null
-        )
-    }
-
-    fun dismissCreateServingDialog() {
-        _uiState.value = _uiState.value.copy(showCreateServingDialog = false, createServingError = null)
-    }
-
-    fun updateNewServingName(value: String) {
-        _uiState.value = _uiState.value.copy(newServingName = value)
-    }
-
-    fun updateNewServingWeight(value: String) {
-        _uiState.value = _uiState.value.copy(newServingWeightG = value)
-    }
-
-    /** Creates the serving, then updates itemToLog with the returned
-     * Item (which includes the new serving in serving_sizes) and
-     * selects it -- so the log page's dropdown immediately reflects it
-     * without a separate reload. */
-    fun createNewServing() {
-        val state = _uiState.value
-        val item = state.itemToLog ?: return
-        val name = state.newServingName.trim()
-        val weightG = state.newServingWeightG.toDoubleOrNull()
-        if (name.isEmpty()) {
-            _uiState.value = state.copy(createServingError = "Enter a name")
-            return
-        }
-        if (weightG == null || weightG <= 0.0) {
-            _uiState.value = state.copy(createServingError = "Enter a valid weight in grams")
-            return
-        }
-
-        _uiState.value = state.copy(isCreatingServing = true, createServingError = null)
-        viewModelScope.launch {
-            try {
-                val updatedItem = ApiClient.service.createServingSize(item.itemId, name, weightG)
-                val newServing = updatedItem.servingSizes.find { it.name == name && it.weightG.toDoubleOrNull() == weightG }
-                _uiState.value = _uiState.value.copy(
-                    isCreatingServing = false,
-                    showCreateServingDialog = false,
-                    itemToLog = updatedItem,
-                    logServingSizeId = newServing?.id
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isCreatingServing = false,
-                    createServingError = e.message ?: "Couldn't create that serving"
-                )
-            }
-        }
-    }
-
-    // ----- Edit item (pencil button on the item info page) -----
-
-    fun openEditItemDialog() {
-        val item = _uiState.value.itemToLog ?: return
-        _uiState.value = _uiState.value.copy(
-            showEditItemDialog = true,
-            editItemName = item.name,
-            editItemKcal = item.kcal100g ?: "",
-            editItemProtein = item.protein100g ?: "",
-            editItemCarbs = item.carbs100g ?: "",
-            editItemFat = item.fat100g ?: "",
-            editItemFiber = item.fiber100g ?: "",
-            editItemSugar = item.sugar100g ?: "",
-            editItemSaturatedFat = item.saturatedFat100g ?: "",
-            // Item stores sodium (mg) -- show as salt (g), same
-            // conversion/reasoning as AddItemViewModel's form.
-            editItemSaltG = item.sodiumMg100g?.toDoubleOrNull()
-                ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: "",
-            editItemError = null
-        )
-    }
-
-    fun dismissEditItemDialog() {
-        _uiState.value = _uiState.value.copy(showEditItemDialog = false, editItemError = null)
-    }
-
-    fun updateEditItemName(value: String) { _uiState.value = _uiState.value.copy(editItemName = value) }
-    fun updateEditItemKcal(value: String) { _uiState.value = _uiState.value.copy(editItemKcal = value) }
-    fun updateEditItemProtein(value: String) { _uiState.value = _uiState.value.copy(editItemProtein = value) }
-    fun updateEditItemCarbs(value: String) { _uiState.value = _uiState.value.copy(editItemCarbs = value) }
-    fun updateEditItemFat(value: String) { _uiState.value = _uiState.value.copy(editItemFat = value) }
-    fun updateEditItemFiber(value: String) { _uiState.value = _uiState.value.copy(editItemFiber = value) }
-    fun updateEditItemSugar(value: String) { _uiState.value = _uiState.value.copy(editItemSugar = value) }
-    fun updateEditItemSaturatedFat(value: String) {
-        _uiState.value = _uiState.value.copy(editItemSaturatedFat = value)
-    }
-    fun updateEditItemSalt(value: String) { _uiState.value = _uiState.value.copy(editItemSaltG = value) }
-
-    fun saveItemEdit() {
-        val state = _uiState.value
-        val item = state.itemToLog ?: return
-        val name = state.editItemName.trim()
-        if (name.isEmpty()) {
-            _uiState.value = state.copy(editItemError = "Name can't be empty")
-            return
-        }
-
-        _uiState.value = state.copy(isSavingItemEdit = true, editItemError = null)
-        viewModelScope.launch {
-            try {
-                val updatedItem = ApiClient.service.updateItemMacros(
+                val requestBody = bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+                val part = MultipartBody.Part.createFormData("image", "photo.jpg", requestBody)
+                val scanResult = ApiClient.service.scanProductPhoto(part)
+                val updatedItem = ApiClient.service.updateItemImage(
                     item.itemId,
-                    ItemMacrosUpdateRequest(
-                        name = name,
-                        kcal100g = state.editItemKcal.toDoubleOrNull(),
-                        protein100g = state.editItemProtein.toDoubleOrNull(),
-                        carbs100g = state.editItemCarbs.toDoubleOrNull(),
-                        fat100g = state.editItemFat.toDoubleOrNull(),
-                        fiber100g = state.editItemFiber.toDoubleOrNull(),
-                        sugar100g = state.editItemSugar.toDoubleOrNull(),
-                        saturatedFat100g = state.editItemSaturatedFat.toDoubleOrNull(),
-                        // Salt (g) -> sodium (mg): same math as
-                        // AddItemViewModel's saveItem().
-                        sodiumMg100g = state.editItemSaltG.toDoubleOrNull()?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO)
-                    )
+                    com.mealtracker.android.network.models.ItemImagePathUpdateRequest(scanResult.imagePath)
                 )
-                val date = _uiState.value.date
-                _uiState.value = _uiState.value.copy(
-                    isSavingItemEdit = false,
-                    showEditItemDialog = false,
-                    itemToLog = updatedItem
-                )
-                if (date != null) load(date, _uiState.value.mealType)
+                isUploadingImage = false
+                onImageUpdated(updatedItem)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isSavingItemEdit = false,
-                    editItemError = e.message ?: "Couldn't save changes"
-                )
+                isUploadingImage = false
+                imageUpdateError = e.message ?: "Couldn't update the photo"
             }
         }
     }
 
-    // ----- Log detail / edit / delete -----
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) pendingCropSourceUri = pendingCameraUri
+    }
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) pendingCropSourceUri = uri
+    }
 
-    /** Item-based logs open the SAME page used to log a new item
-     * (ItemLogPageDialog) -- fetches the full Item (Log itself only has
-     * denormalized name/image, not per-100g macros or serving_sizes)
-     * and pre-fills quantity/serving from what's already saved on the
-     * log, with editingLogId set so confirming PATCHes instead of
-     * POSTing a new one.
-     *
-     * Recipe-based logs (log.itemId == null) fall back to the simpler
-     * selectedLog/AlertDialog flow below -- recipes don't have
-     * per-100g macros or serving sizes the same way items do, so the
-     * unified page doesn't apply to them. Not extended to cover recipes
-     * in this pass. */
-    fun openLogDetail(log: Log) {
-        val itemId = log.itemId
-        if (itemId != null) {
-            viewModelScope.launch {
-                try {
-                    val item = ApiClient.service.getItem(itemId)
-                    _uiState.value = _uiState.value.copy(
-                        itemToLog = item,
-                        editingLogId = log.id,
-                        logQuantityInput = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity,
-                        logServingSizeId = log.servingSizeId,
-                        logItemError = null
+    fun launchCamera() {
+        val file = java.io.File(context.cacheDir, "item_photo_${System.currentTimeMillis()}.jpg")
+        // Many camera apps (including stock/AOSP camera on some OEMs)
+        // silently fail to write into a content:// Uri if the
+        // underlying file doesn't already exist -- File(...) alone only
+        // builds a path reference, it doesn't touch the filesystem.
+        // This was the actual bug behind "retake doesn't work for
+        // changing an existing item's photo" (this is the only place in
+        // the app using ActivityResultContracts.TakePicture() at all --
+        // AddItemScreen's camera capture goes through CameraX's live
+        // preview instead, which never hit this).
+        file.createNewFile()
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+
+    val bitmapToCrop = cropSourceBitmap
+    // CropDialog itself now renders inline where the Dialog's content Box
+    // is built below (as a later sibling of the main Column there), not
+    // here -- see CropDialog's doc comment for why it needs a Box
+    // sibling structure to overlay correctly now that it's not
+    // self-wrapping in its own Dialog window anymore.
+
+    if (showImageChangeMenu) {
+        AlertDialog(
+            onDismissRequest = { showImageChangeMenu = false },
+            title = { Text("Change photo") },
+            text = { Text("Retake a photo or pick one from your gallery.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImageChangeMenu = false
+                    launchCamera()
+                }) { Text("Retake Photo") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImageChangeMenu = false
+                    galleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
-                } catch (e: Exception) {
-                    _uiState.value = _uiState.value.copy(
-                        logItemError = e.message ?: "Couldn't load that item"
-                    )
-                }
+                }) { Text("Choose from Gallery") }
             }
-            return
-        }
-
-        _uiState.value = _uiState.value.copy(
-            selectedLog = log,
-            editQuantityInput = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity,
-            logEditError = null
         )
     }
 
-    fun dismissLogDetail() {
-        _uiState.value = _uiState.value.copy(selectedLog = null, logEditError = null)
-    }
+    var unitMenuExpanded by remember { mutableStateOf(false) }
+    val selectedServing = item.servingSizes.find { it.id == servingSizeId }
+    val unitLabel = selectedServing?.name ?: "g"
 
-    fun updateEditQuantityInput(value: String) {
-        _uiState.value = _uiState.value.copy(editQuantityInput = value)
+    val quantityValue = quantityInput.toDoubleOrNull()
+    val effectiveGrams = when {
+        quantityValue == null -> 0.0
+        selectedServing != null -> quantityValue * (selectedServing.weightG.toDoubleOrNull() ?: 0.0)
+        else -> quantityValue
     }
+    fun per100(value: String?): Int = ((value?.toDoubleOrNull() ?: 0.0) * effectiveGrams / 100.0).roundToInt()
 
-    fun saveLogQuantity() {
-        val state = _uiState.value
-        val log = state.selectedLog ?: return
-        val date = state.date ?: return
-        val quantity = state.editQuantityInput.toDoubleOrNull()
-        if (quantity == null || quantity <= 0.0) {
-            _uiState.value = state.copy(logEditError = "Enter a valid quantity")
-            return
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        val view = LocalView.current
+        SideEffect {
+            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            window?.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.MATCH_PARENT
+            )
         }
 
-        _uiState.value = state.copy(isSavingLogEdit = true, logEditError = null)
-        viewModelScope.launch {
-            try {
-                ApiClient.service.updateLog(log.id, LogUpdateRequest(quantity = quantity))
-                _uiState.value = _uiState.value.copy(isSavingLogEdit = false, selectedLog = null)
-                load(date, state.mealType)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isSavingLogEdit = false,
-                    logEditError = e.message ?: "Couldn't save"
-                )
-            }
-        }
-    }
-
-    /** Used both by the detail sheet's Delete button AND by swiping a
-     * row left in the logged-items list -- same action either way. */
-    fun deleteLog(logId: Int) {
-        val state = _uiState.value
-        val date = state.date ?: return
-        viewModelScope.launch {
-            try {
-                ApiClient.service.deleteLog(logId)
-                if (state.selectedLog?.id == logId) {
-                    _uiState.value = _uiState.value.copy(selectedLog = null)
+        Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(240.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { showImageChangeMenu = true }
+                    )
+            ) {
+                if (item.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + item.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(CatalogVisuals.backgroundFor(item.type)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            CatalogVisuals.iconFor(item.type),
+                            contentDescription = null,
+                            tint = CatalogVisuals.iconTint(),
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
                 }
-                load(date, state.mealType)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(logEditError = e.message ?: "Couldn't delete")
+                if (isUploadingImage) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(8.dp)
+                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                ) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                }
+            }
+            if (imageUpdateError != null) {
+                Text(
+                    imageUpdateError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        item.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onEditClick) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit name and macros")
+                    }
+                }
+                if (item.brand != null) {
+                    Text(
+                        item.brand,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = quantityInput,
+                        onValueChange = onQuantityChange,
+                        label = { Text("Quantity") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+
+                    Box {
+                        androidx.compose.material3.AssistChip(
+                            onClick = { unitMenuExpanded = true },
+                            label = { Text(unitLabel) }
+                        )
+                        DropdownMenu(expanded = unitMenuExpanded, onDismissRequest = { unitMenuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("g") },
+                                onClick = { onServingChange(null); unitMenuExpanded = false }
+                            )
+                            item.servingSizes.forEach { serving ->
+                                DropdownMenuItem(
+                                    text = { Text("${serving.name} (${serving.weightG}g)") },
+                                    onClick = { onServingChange(serving.id); unitMenuExpanded = false }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("+ Create new serving") },
+                                onClick = { unitMenuExpanded = false; onCreateNewServing() }
+                            )
+                        }
+                    }
+                }
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                Text(
+                    "${per100(item.kcal100g)} Cal for ${effectiveGrams.roundToInt()}g",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
+                Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                LogMacroBar("Fat", per100(item.fat100g), goalFat, MacroColors.Fat)
+                LogMacroBar("Protein", per100(item.protein100g), goalProtein, MacroColors.Protein)
+                LogMacroBar("Carbs", per100(item.carbs100g), goalCarbs, MacroColors.Carbs)
+                LogMacroBar("Fiber", per100(item.fiber100g), goalFiber, MacroColors.Fiber)
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
+
+                Button(onClick = onConfirm, enabled = !isLogging, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        when {
+                            isLogging && isEditing -> "Saving..."
+                            isLogging -> "Adding..."
+                            isEditing -> "Save changes"
+                            else -> "Add to meal"
+                        }
+                    )
+                }
+                if (isEditing) {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                    TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 24.dp))
+            }
+        }
+
+        if (bitmapToCrop != null) {
+            CropDialog(
+                sourceBitmap = bitmapToCrop,
+                onCropped = { cropped ->
+                    val stream = java.io.ByteArrayOutputStream()
+                    cropped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                    clearCropState()
+                    uploadNewImage(stream.toByteArray())
+                },
+                onCancel = { clearCropState() }
+            )
+        }
+        }
+    }
+}
+
+/** Reached from ItemLogPageDialog's pencil button -- edits the item's
+ * name and per-100g macros. Salt (g) shown/entered instead of sodium,
+ * same convention as AddItemScreen's form -- converted to sodium mg at
+ * save time (see MealDetailViewModel.saveItemEdit). */
+@Composable
+private fun EditItemDialog(
+    name: String,
+    kcal: String,
+    protein: String,
+    carbs: String,
+    fat: String,
+    fiber: String,
+    sugar: String,
+    saturatedFat: String,
+    saltG: String,
+    isSaving: Boolean,
+    error: String?,
+    onNameChange: (String) -> Unit,
+    onKcalChange: (String) -> Unit,
+    onProteinChange: (String) -> Unit,
+    onCarbsChange: (String) -> Unit,
+    onFatChange: (String) -> Unit,
+    onFiberChange: (String) -> Unit,
+    onSugarChange: (String) -> Unit,
+    onSaturatedFatChange: (String) -> Unit,
+    onSaltChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit item") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Per 100g",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                EditNumberField("Calories", kcal, onKcalChange)
+                EditNumberField("Protein (g)", protein, onProteinChange)
+                EditNumberField("Carbs (g)", carbs, onCarbsChange)
+                EditNumberField("Fat (g)", fat, onFatChange)
+                EditNumberField("Fiber (g)", fiber, onFiberChange)
+                EditNumberField("Sugar (g)", sugar, onSugarChange)
+                EditNumberField("Saturated Fat (g)", saturatedFat, onSaturatedFatChange)
+                EditNumberField("Salt (g)", saltG, onSaltChange)
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = !isSaving) {
+                Text(if (isSaving) "Saving..." else "Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun EditNumberField(label: String, value: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+    )
+}
+
+/** Reached from ItemLogPageDialog's unit dropdown -- backend already had
+ * full CRUD for this (POST/PATCH/DELETE /items/{id}/serving-sizes),
+ * just no client UI to reach it. */
+@Composable
+private fun CreateServingDialog(
+    name: String,
+    weightG: String,
+    isCreating: Boolean,
+    error: String?,
+    onNameChange: (String) -> Unit,
+    onWeightChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New serving") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    label = { Text("Name (e.g. \"slice\")") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                OutlinedTextField(
+                    value = weightG,
+                    onValueChange = onWeightChange,
+                    label = { Text("Weight (g)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = !isCreating) {
+                Text(if (isCreating) "Creating..." else "Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+/**
+ * Full-screen log detail: hero image up top, scrollable card below with
+ * kcal for the CURRENTLY SAVED quantity, an editable quantity field, and
+ * macro progress bars shown as a fraction of the MEAL's goal (not the
+ * day's) -- matches design reference. Deliberately does not include
+ * "Customize" or "Input and benefits" sections from that reference, per
+ * design discussion ("ignore" those).
+ *
+ * KNOWN SIMPLIFICATION: the kcal/macro numbers shown reflect the log's
+ * last-SAVED snapshot, not a live recompute as you type a new quantity
+ * in the field below -- there's no client-side per-gram macro data to
+ * recompute against without a round-trip. They update once you tap Save
+ * and the meal reloads. A live preview would need either shipping the
+ * item's per-100g macros down to this dialog, or a debounced preview
+ * call to the backend -- not done here.
+ */
+@Composable
+private fun LogDetailDialog(
+    log: Log,
+    goalKcal: Int,
+    goalFat: Int,
+    goalProtein: Int,
+    goalCarbs: Int,
+    goalFiber: Int,
+    editQuantityInput: String,
+    isSaving: Boolean,
+    error: String?,
+    onQuantityChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        val view = LocalView.current
+        SideEffect {
+            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            window?.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+            Box(modifier = Modifier.fillMaxWidth().height(240.dp)) {
+                if (log.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + log.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // This dialog only ever shows recipe-based logs (see
+                    // its own doc comment) -- "recipe" is a reasonable
+                    // fixed default here since Log doesn't carry
+                    // recipe_type (recipe vs meal) the way a full Recipe
+                    // object would.
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(CatalogVisuals.backgroundFor("recipe")),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            CatalogVisuals.iconFor("recipe"),
+                            contentDescription = null,
+                            tint = CatalogVisuals.iconTint(),
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(8.dp)
+                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                ) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                Text(
+                    log.itemName ?: log.recipeName ?: "Item",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+
+                OutlinedTextField(
+                    value = editQuantityInput,
+                    onValueChange = onQuantityChange,
+                    label = { Text("Quantity (g)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (error != null) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                Text(
+                    "${log.kcalLogged} Cal for this quantity",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
+                Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                LogMacroBar("Fat", log.fatGLogged, goalFat, MacroColors.Fat)
+                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
+                LogMacroBar("Carbs", log.carbsGLogged, goalCarbs, MacroColors.Carbs)
+                LogMacroBar("Fiber", log.fiberGLogged, goalFiber, MacroColors.Fiber)
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
+
+                Button(onClick = onSave, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (isSaving) "Saving..." else "Save Quantity")
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                TextButton(
+                    onClick = onDelete,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 24.dp))
             }
         }
     }
+}
 
-    fun openSaveMealDialog() {
-        _uiState.value = _uiState.value.copy(showSaveMealDialog = true, mealNameInput = "")
+@Composable
+private fun LogMacroBar(label: String, amountG: Int, goalG: Int, color: Color) {
+    val fraction = if (goalG > 0) (amountG.toFloat() / goalG.toFloat()).coerceIn(0f, 1f) else 0f
+    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "${amountG}g / ${goalG}g",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(color.copy(alpha = 0.25f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(color, RoundedCornerShape(4.dp))
+            )
+        }
     }
+}
 
-    fun dismissSaveMealDialog() {
-        _uiState.value = _uiState.value.copy(showSaveMealDialog = false)
-    }
-
-    fun updateMealNameInput(value: String) {
-        _uiState.value = _uiState.value.copy(mealNameInput = value)
-    }
-
-    /**
-     * Snapshots the currently-logged items into a new Recipe with
-     * recipe_type="meal" (see backend design doc: a saved Meal is just a
-     * recipe with servings=1, editable afterward like any recipe).
-     *
-     * LIMITATION: only logs that reference a real item AND were logged
-     * directly in grams (no serving_size_id) are included -- converting
-     * a serving-size-based quantity to grams needs an extra lookup
-     * (the ServingSize's weight_g) that isn't fetched here. Recipe-based
-     * logs are also skipped, since recipe_ingredients can only reference
-     * items, not other recipes. Both are real gaps, not silent bugs --
-     * worth fixing if this turns out to matter in practice once logging
-     * itself is built (this screen currently has no way to create logs
-     * yet, so `logs` will typically be empty regardless).
-     */
-    fun saveAsMeal() {
-        val state = _uiState.value
-        val name = state.mealNameInput.trim()
-        if (name.isEmpty()) return
-
-        val ingredients = state.logs
-            .filter { it.itemId != null && it.servingSizeId == null }
-            .mapNotNull { log ->
-                val itemId = log.itemId ?: return@mapNotNull null
-                val grams = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
-                RecipeIngredientCreateRequest(itemId = itemId, quantityG = grams)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
+    // Swipe LEFT (EndToStart) to delete -- StartToEnd disabled so a
+    // stray right-swipe doesn't accidentally trigger it, per design
+    // discussion ("swiping the item to the left").
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                true
+            } else {
+                false
             }
+        }
+    )
 
-        _uiState.value = state.copy(isSavingMeal = true, saveMealError = null)
-
-        viewModelScope.launch {
-            try {
-                ApiClient.service.createRecipe(
-                    RecipeCreateRequest(name = name, recipeType = "meal", servings = 1.0, ingredients = ingredients)
-                )
-                _uiState.value = _uiState.value.copy(
-                    isSavingMeal = false,
-                    saveMealSuccess = true,
-                    showSaveMealDialog = false
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isSavingMeal = false,
-                    saveMealError = e.message ?: "Failed to save meal"
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.error)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Color.White)
+            }
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable(onClick = onClick)
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        // Log doesn't carry the source item's/recipe's
+                        // type (product/ingredient/recipe/meal), only
+                        // denormalized name/image -- recipeId presence
+                        // is the only signal available here, so this can
+                        // only distinguish "some recipe" from "some
+                        // item", not the finer type. Good enough for a
+                        // fallback icon; the search results list (which
+                        // DOES have the real type) is more precise.
+                        CatalogVisuals.backgroundFor(if (log.recipeId != null) "recipe" else "product")
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (log.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + log.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        CatalogVisuals.iconFor(if (log.recipeId != null) "recipe" else "product"),
+                        contentDescription = null,
+                        tint = CatalogVisuals.iconTint(),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(log.itemName ?: log.recipeName ?: "Unknown", style = MaterialTheme.typography.bodyLarge)
+                // Assumes grams -- true whenever serving_size_id is null,
+                // which is every logging path this app currently has (all
+                // go through quick-log or the item form, never a serving-
+                // size picker). If a serving-size UI gets added later,
+                // this needs to become serving-aware (see
+                // LoggableEntryBase's quantity-semantics doc comment).
+                Text(
+                    "${log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity}g",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Text("${log.kcalLogged} Cal", style = MaterialTheme.typography.bodyLarge)
         }
     }
 }

@@ -12,7 +12,7 @@ from app.barcode import decode_barcode_from_image_bytes
 from app.config import settings
 from app.database import get_db
 from app.models import Item, ServingSize
-from app.ocr import extract_label_from_image, guess_name_and_brand, run_ocr
+from app.ocr import extract_label_from_image
 from app.schemas import (
     BarcodeScanResult,
     ItemCreate,
@@ -90,18 +90,25 @@ async def scan_product_photo(image: UploadFile = File(...)):
     """
     Second step of the Add Item flow (between barcode scan and nutrition
     label scan) -- upload a (client-cropped) photo of the product
-    package itself. Two things happen:
+    package itself, saved to disk under `settings.media_dir` and
+    returned as `image_path` for the client to carry through into the
+    eventual POST /items call, so the photo gets attached to the item
+    (e.g. shown later in My Foods).
 
-    1. The image is saved to disk under `settings.media_dir` and its
-       path is returned as `image_path` -- the client should carry this
-       through and include it in the eventual POST /items call so the
-       photo gets attached to the item (e.g. shown later in My Foods).
-    2. OCR runs over the photo and we take a best-effort guess at name/
-       brand from whatever text is on the packaging (see
-       guess_name_and_brand's docstring in app/ocr.py for exactly how
-       rough this heuristic is) -- client pre-fills the Add Item form's
-       Name/Brand fields with these, editable, same review-before-save
-       pattern as every other OCR-derived value in this app.
+    Purely visual now -- no OCR runs against this endpoint at all. It
+    used to also run OCR here for a best-effort name/brand guess
+    (guess_name_and_brand), but that guessing was unreliable in general
+    and especially hopeless for non-Latin packaging (e.g. Japanese/
+    Korean/Chinese), since EasyOCR here only knows Latin-script
+    languages. The Add Item flow now asks the user for name/brand
+    directly instead (see design discussion) -- the client has never
+    read guessed_name/guessed_brand since that redesign, making this
+    endpoint's OCR pass pure wasted work. Worse: it was also the source
+    of confusing OCR errors showing up in the logs for a step that
+    doesn't OCR anything from the client's point of view (see design
+    discussion: "I wasn't even OCR'ing anything... I thought we took the
+    OCR out from there?") -- removing it fixes both the waste and the
+    confusion at once.
 
     Like scan-label, this NEVER writes to our DB directly -- saving the
     image file to disk is the one exception (needed so we have something
@@ -124,25 +131,11 @@ async def scan_product_photo(image: UploadFile = File(...)):
     # /media -- e.g. "media/<filename>" is reachable at GET /media/<filename>.
     image_path = f"{settings.media_dir}/{filename}"
 
-    # OCR is a best-effort pre-fill, NOT essential to this step succeeding
-    # -- the image is already safely saved above regardless of what
-    # happens here. Deliberately NOT letting an OCR failure (EasyOCR/
-    # PyTorch issues, out-of-memory, a corrupted/unreadable image, etc.)
-    # 500 the whole request and lose that saved image_path -- degrade to
-    # "no guess" instead, same as if OCR just didn't find any text.
-    try:
-        text = run_ocr(image_bytes)
-        guessed_name, guessed_brand = guess_name_and_brand(text)
-    except Exception as exc:
-        logger.exception("OCR failed during scan_product_photo (image still saved to %s)", image_path)
-        text = ""
-        guessed_name, guessed_brand = None, None
-
     return ProductPhotoScanResult(
         image_path=image_path,
-        raw_text=text,
-        guessed_name=guessed_name,
-        guessed_brand=guessed_brand,
+        raw_text="",
+        guessed_name=None,
+        guessed_brand=None,
     )
 
 

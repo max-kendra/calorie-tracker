@@ -71,7 +71,12 @@ _EASYOCR_LANG_CODES = {
     "deu": "de",
     "eng": "en",
     "swe": "sv",
-    "fin": "fi",
+    # "fin": "fi" removed -- EasyOCR doesn't actually support Finnish
+    # (raises ValueError({'fi'}, 'is not supported') at Reader
+    # construction, confirmed against a real error in production logs).
+    # LANGUAGE_CONFIGS' "fin" keyword dictionary is removed too, below --
+    # keeping it would've been genuinely dead weight once OCR itself
+    # can never recognize Finnish text to begin with.
     "nor": "no",
     "spa": "es",
     "slk": "sk",
@@ -197,19 +202,6 @@ LANGUAGE_CONFIGS: dict[str, LabelLanguageConfig] = {
         fiber_keyword="fibrer",
         protein_keyword="protein",
         salt_keyword="salt",
-    ),
-    "fin": LabelLanguageConfig(
-        per_100g_markers=["100 g"],
-        energy_keyword="energia",
-        fat_keyword="rasva",
-        fat_exclude_prefixes=["josta"],
-        saturated_fat_keyword="tyydyttynyttä",
-        carbs_keyword="hiilihydraatti",
-        carbs_exclude_prefixes=["josta"],
-        sugar_keyword="sokereita",
-        fiber_keyword="kuitu",
-        protein_keyword="proteiini",
-        salt_keyword="suola",
     ),
     "nor": LabelLanguageConfig(
         per_100g_markers=["100 g"],

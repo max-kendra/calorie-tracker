@@ -7,6 +7,8 @@ import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemCreateRequest
 import com.mealtracker.android.network.models.LogCreateRequest
 import com.mealtracker.android.network.models.UsdaFoodSummary
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -24,6 +26,10 @@ import java.time.format.DateTimeFormatter
 // reason: this is a fast-path convenience, not a substitute for
 // accurate quantity entry. Revisit once a quantity step exists.
 private const val MEAL_LOG_QUANTITY_G = 100.0
+
+// How long to wait after the last keystroke before actually firing a
+// USDA search request -- see updateUsdaQuery's doc comment.
+private const val USDA_SEARCH_DEBOUNCE_MS = 350L
 
 // Standard rounded salt<->sodium conversion (salt is ~39.3% sodium by
 // mass; EU nutrition labels round this to salt = sodium x 2.5, i.e.
@@ -151,7 +157,9 @@ data class AddItemUiState(
     val saltG100g: String = "",
 
     val saveError: String? = null,
-    val createdItem: Item? = null
+    val createdItem: Item? = null,
+    // SAVED screen's "Add Item" text -- see logCreatedItemToMeal.
+    val isLoggingToMeal: Boolean = false
 )
 
 class AddItemViewModel : ViewModel() {
@@ -183,28 +191,46 @@ class AddItemViewModel : ViewModel() {
         )
     }
 
+    /** SAVED screen's small "Add Item" text -- the explicit, opt-in way
+     * to log the just-saved/matched item to this meal, now that saving/
+     * matching itself no longer does this automatically (see design
+     * discussion: "would you like to add this item to your meal?",
+     * asked rather than assumed). onComplete fires either way (success
+     * or failure) since a logging hiccup here shouldn't trap the user
+     * on this screen -- matches the "unobtrusive" framing this was
+     * asked for. */
+    fun logCreatedItemToMeal(onComplete: () -> Unit) {
+        val item = _uiState.value.createdItem
+        if (item == null) {
+            onComplete()
+            return
+        }
+        _uiState.value = _uiState.value.copy(isLoggingToMeal = true)
+        viewModelScope.launch {
+            try {
+                logToMealIfAttached(item.itemId)
+            } catch (e: Exception) {
+                // Best-effort -- still proceed, see doc comment above.
+            }
+            _uiState.value = _uiState.value.copy(isLoggingToMeal = false)
+            onComplete()
+        }
+    }
+
     fun resetToScanChoice() {
         _uiState.value = AddItemUiState()
     }
 
     /** Matched an existing item via barcode (BARCODE_RESULT phase) --
-     * previously this just ended the flow with no further action; now
-     * logs it to the attached meal (if any) same as a newly-saved item
-     * does, then shows the same SAVED confirmation screen. */
+     * just shows the SAVED confirmation screen now, same as a newly-
+     * saved item. Used to auto-log it to the attached meal here, but
+     * logging is decoupled from matching/saving now -- see SAVED
+     * screen's explicit "Add Item" action (logCreatedItemToMeal) for
+     * why ("would you like to add this item to your meal?", asked
+     * rather than assumed, per design discussion). */
     fun useMatchedItem() {
         val item = _uiState.value.matchedItem ?: return
-        viewModelScope.launch {
-            try {
-                logToMealIfAttached(item.itemId)
-            } catch (e: Exception) {
-                // Logging is the point of embedding this flow in a meal
-                // context, but the item match itself is still valid --
-                // don't block showing it as done over a logging hiccup,
-                // just surface the error alongside.
-                _uiState.value = _uiState.value.copy(saveError = e.message ?: "Couldn't log this item to the meal")
-            }
-            _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
-        }
+        _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
     }
 
     private fun imageBytesToPart(bytes: ByteArray): MultipartBody.Part {
@@ -423,19 +449,32 @@ class AddItemViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.CAPTURE_LABEL)
     }
 
+    // Cancelled and relaunched on every keystroke -- see updateUsdaQuery's
+    // debounce below.
+    private var usdaSearchJob: Job? = null
+
+    /** Debounced now -- this was firing a request on every single
+     * keystroke (see design discussion: "I think it's because we send a
+     * request every single stroke"), which was very likely a real
+     * contributor to the USDA 502s seen in practice -- FDC's API is
+     * already rate-limited (especially on the shared DEMO_KEY, see
+     * app/routers/usda.py's error message), and typing a 10-character
+     * search term used to mean 10 separate requests instead of one. */
     fun updateUsdaQuery(query: String) {
         _uiState.value = _uiState.value.copy(usdaQuery = query)
+        usdaSearchJob?.cancel()
         if (query.isBlank()) {
             _uiState.value = _uiState.value.copy(usdaResults = emptyList(), isSearchingUsda = false)
             return
         }
         _uiState.value = _uiState.value.copy(isSearchingUsda = true, usdaError = null)
-        viewModelScope.launch {
+        usdaSearchJob = viewModelScope.launch {
+            delay(USDA_SEARCH_DEBOUNCE_MS)
             try {
                 val results = ApiClient.service.searchUsda(query = query)
                 // Guard against a slower earlier search landing after a
-                // newer one, same pattern as MealDetailViewModel's item
-                // search.
+                // newer one -- mostly redundant now that the job itself
+                // gets cancelled, kept as an extra safety net.
                 if (_uiState.value.usdaQuery == query) {
                     _uiState.value = _uiState.value.copy(isSearchingUsda = false, usdaResults = results)
                 }
@@ -611,14 +650,6 @@ class AddItemViewModel : ViewModel() {
                         }
                     )
                 )
-                try {
-                    logToMealIfAttached(item.itemId)
-                } catch (e: Exception) {
-                    // Same reasoning as useMatchedItem(): the item itself
-                    // saved fine, don't lose that over a logging hiccup.
-                    _uiState.value = _uiState.value.copy(saveError = e.message ?: "Couldn't log this item to the meal")
-                }
-
                 _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)
             } catch (e: HttpException) {
                 val message = if (e.code() == 409) {

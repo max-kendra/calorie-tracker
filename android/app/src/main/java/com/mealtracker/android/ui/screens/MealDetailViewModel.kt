@@ -12,6 +12,8 @@ import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -55,6 +57,10 @@ enum class AddItemSheetMode { SEARCH, BARCODE }
  * for the quick-log paths too.
  */
 private const val QUICK_LOG_QUANTITY_G = 100.0
+
+// How long to wait after the last keystroke before actually firing a
+// search request -- see updateSearchQuery's doc comment.
+private const val SEARCH_DEBOUNCE_MS = 350L
 
 // Same conversion AddItemViewModel uses (EU labels round salt = sodium
 // x 2.5). Kept as a separate constant here rather than sharing
@@ -212,6 +218,25 @@ class MealDetailViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(MealDetailUiState())
     val uiState: StateFlow<MealDetailUiState> = _uiState
 
+    /** Called after something gets ADDED to this meal (quick-add, the
+     * quantity picker's confirm, a recipe/meal, or finishing the
+     * embedded AddItemScreen flow) -- resets the search box and
+     * refetches "recent" so the just-added/just-updated item shows up
+     * there too (recent items are ordered by updated_at server-side).
+     * Previously the search query/results were deliberately preserved
+     * across a plain load() (see that function's own doc comment) --
+     * that's still correct for load() itself, but specifically after an
+     * ADD, per design discussion, the search field should reset and
+     * "recent" should reflect the new item, not just stay stale. */
+    fun refreshSearchAfterAdd() {
+        _uiState.value = _uiState.value.copy(
+            searchQuery = "",
+            searchResults = emptyList(),
+            recipeSearchResults = emptyList()
+        )
+        loadRecentItems()
+    }
+
     fun load(date: LocalDate, mealType: String) {
         // Preserves sheet state (mode, search query/results, recent
         // items) across this reset -- logItemQuickly() calls load()
@@ -299,23 +324,6 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(requestedUsdaSearchQuery = null)
     }
 
-    /** "Add Another Item" on the embedded flow's SAVED screen -- returns
-     * to this sheet's Search tab rather than resetting back into
-     * barcode-scanning specifically, since the next item the user wants
-     * isn't necessarily barcode-scannable (an already-known item via
-     * search, or another raw ingredient via USDA search again). See
-     * design discussion: "default to Search, in case the user wants to
-     * add a saved item". Also refreshes the meal, same as finishing the
-     * flow normally -- an item WAS just added. */
-    fun returnToSearchAfterAdd() {
-        _uiState.value = _uiState.value.copy(
-            sheetMode = AddItemSheetMode.SEARCH,
-            enteredAddFlowViaUsdaLink = false
-        )
-        val date = _uiState.value.date
-        if (date != null) load(date, _uiState.value.mealType)
-    }
-
     /** "Recent" here means recently added/updated in the catalog (GET
      * /items with no query is already ordered by updated_at desc
      * server-side -- see design discussion), NOT recently logged. Was
@@ -329,24 +337,46 @@ class MealDetailViewModel : ViewModel() {
      * BOTH items and recipes up front (cheap, both lists are small/
      * capped) so switching filters doesn't need a fresh network call
      * just to show the blank-query state. */
+    /** "Recent" here means recently added/updated in the catalog (GET
+     * /items with no query is already ordered by updated_at desc
+     * server-side -- see design discussion), NOT recently logged. Now
+     * respects the current filter (type=/recipe_type=) -- it used to
+     * always fetch everything regardless of which filter chip was
+     * selected, which is why switching filters while the search box was
+     * blank appeared to do nothing (see design discussion: "if I have a
+     * list with products and ingredients and select ingredient,
+     * everything stays the same" -- that's this blank-query "recent"
+     * state specifically, non-blank search already filtered correctly). */
     private fun loadRecentItems() {
+        val filter = _uiState.value.searchFilter
+
+        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
+            val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
+            viewModelScope.launch {
+                try {
+                    val recipes = ApiClient.service.searchRecipes(query = null, recipeType = recipeType)
+                    _uiState.value = _uiState.value.copy(recentRecipes = recipes)
+                } catch (e: Exception) {
+                    // Not core functionality -- fails quietly.
+                }
+            }
+            return
+        }
+
+        val itemType = when (filter) {
+            SearchFilter.PRODUCT -> "product"
+            SearchFilter.INGREDIENT -> "ingredient"
+            else -> null
+        }
         _uiState.value = _uiState.value.copy(isLoadingRecentItems = true)
         viewModelScope.launch {
             try {
-                val items = ApiClient.service.searchItems(query = null)
+                val items = ApiClient.service.searchItems(query = null, type = itemType)
                 _uiState.value = _uiState.value.copy(isLoadingRecentItems = false, recentItems = items)
             } catch (e: Exception) {
                 // Not core functionality -- fails quietly to an empty
                 // list rather than blocking the sheet from working.
                 _uiState.value = _uiState.value.copy(isLoadingRecentItems = false)
-            }
-        }
-        viewModelScope.launch {
-            try {
-                val recipes = ApiClient.service.searchRecipes(query = null)
-                _uiState.value = _uiState.value.copy(recentRecipes = recipes)
-            } catch (e: Exception) {
-                // Same reasoning as the items catch above.
             }
         }
     }
@@ -356,15 +386,38 @@ class MealDetailViewModel : ViewModel() {
      * RECIPES instead via recipe_type=, a completely different
      * endpoint/result list (see MealDetailUiState.searchFilter's doc
      * comment). Re-runs whatever query is currently typed against the
-     * newly-selected filter. */
+     * newly-selected filter -- or, if the query is blank, refetches
+     * "recent" instead (loadRecentItems is filter-aware now too, see
+     * its own doc comment for why that refetch didn't used to happen
+     * at all). */
     fun updateSearchFilter(filter: SearchFilter) {
         _uiState.value = _uiState.value.copy(searchFilter = filter)
-        updateSearchQuery(_uiState.value.searchQuery)
+        if (_uiState.value.searchQuery.isBlank()) {
+            loadRecentItems()
+        } else {
+            updateSearchQuery(_uiState.value.searchQuery)
+        }
     }
 
+    // Cancelled and relaunched on every keystroke -- see updateSearchQuery's
+    // debounce below.
+    private var searchJob: Job? = null
+
+    /** Debounced now -- previously fired a request on EVERY keystroke
+     * (see design discussion: "we send a request every single stroke",
+     * observed hammering USDA search this way too -- see
+     * AddItemViewModel.updateUsdaQuery for that side). Cancels any
+     * still-pending search and waits SEARCH_DEBOUNCE_MS of no further
+     * typing before actually querying, same debounce pattern in both
+     * places. The searchQuery== guard in each result handler is now
+     * mostly redundant (cancelling the job already prevents a stale
+     * response from ever landing) but kept as a harmless extra safety
+     * net. */
     fun updateSearchQuery(query: String) {
         _uiState.value = _uiState.value.copy(searchQuery = query)
         val filter = _uiState.value.searchFilter
+
+        searchJob?.cancel()
 
         if (query.isBlank()) {
             _uiState.value = _uiState.value.copy(
@@ -379,7 +432,8 @@ class MealDetailViewModel : ViewModel() {
         if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
             _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
             val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
-            viewModelScope.launch {
+            searchJob = viewModelScope.launch {
+                delay(SEARCH_DEBOUNCE_MS)
                 try {
                     val results = ApiClient.service.searchRecipes(query = query, recipeType = recipeType)
                     if (_uiState.value.searchQuery == query) {
@@ -400,7 +454,8 @@ class MealDetailViewModel : ViewModel() {
             else -> null
         }
         _uiState.value = _uiState.value.copy(isSearching = true)
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
             try {
                 val results = ApiClient.service.searchItems(query = query, type = itemType)
                 // Guard against a slower earlier search response landing
@@ -456,6 +511,7 @@ class MealDetailViewModel : ViewModel() {
                 }
                 _uiState.value = _uiState.value.copy(quickLoggingRecipeId = null)
                 load(date, state.mealType)
+                refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     quickLoggingRecipeId = null,
@@ -497,9 +553,11 @@ class MealDetailViewModel : ViewModel() {
                     lastLoggedAmounts = _uiState.value.lastLoggedAmounts +
                         (itemId to LoggedAmount(quantity, servingSizeId))
                 )
-                // Refresh this meal's totals/logs AND the recent-items
-                // ordering (this item just became the most recent).
+                // Refresh this meal's totals/logs, reset search, and
+                // refetch recent items (this item just became the most
+                // recent) -- see refreshSearchAfterAdd's doc comment.
                 load(date, state.mealType)
+                refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     quickLoggingItemId = null,
@@ -596,6 +654,10 @@ class MealDetailViewModel : ViewModel() {
                         (item.itemId to LoggedAmount(quantity, state.logServingSizeId))
                 )
                 load(date, state.mealType)
+                // Only for the new-log case -- editing an existing log's
+                // quantity isn't "adding" (see refreshSearchAfterAdd's
+                // doc comment).
+                if (editingLogId == null) refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoggingItem = false,

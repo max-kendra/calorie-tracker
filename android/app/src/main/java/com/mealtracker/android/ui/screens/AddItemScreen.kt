@@ -91,11 +91,7 @@ fun AddItemScreen(
     // AddItemViewModel has no access to that (separate ViewModel/
     // screen), so this can't be handled locally the way onDone/onBack
     // are.
-    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {},
-    // "Add Another Item" on the SAVED screen -- bubbles up so
-    // MealDetailScreen can decide where "another" should start (Search,
-    // not straight back into barcode-scanning -- see design discussion).
-    onAddAnother: () -> Unit = {}
+    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -395,7 +391,8 @@ fun AddItemScreen(
             )
             AddItemPhase.SAVED -> SavedContent(
                 itemName = state.createdItem?.name ?: "",
-                onAddAnother = onAddAnother,
+                isLoggingToMeal = state.isLoggingToMeal,
+                onAddItem = { viewModel.logCreatedItemToMeal(onComplete = onDone) },
                 onDone = onDone
             )
         }
@@ -962,7 +959,7 @@ private fun NumberField(label: String, value: String, onValueChange: (String) ->
 }
 
 @Composable
-private fun SavedContent(itemName: String, onAddAnother: () -> Unit, onDone: () -> Unit) {
+private fun SavedContent(itemName: String, isLoggingToMeal: Boolean, onAddItem: () -> Unit, onDone: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -970,17 +967,26 @@ private fun SavedContent(itemName: String, onAddAnother: () -> Unit, onDone: () 
     ) {
         Text("\u2705 Saved", style = MaterialTheme.typography.headlineMedium)
         Text(itemName, style = MaterialTheme.typography.titleMedium)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
-        // Ask rather than assume -- previously this just had "Done",
-        // closing the flow immediately after every single item. Adding
-        // several items in a row (a full plate, a multi-ingredient
-        // snack) meant re-opening the sheet from scratch each time.
-        Button(onClick = onAddAnother, modifier = Modifier.fillMaxWidth()) {
-            Text("Add Another Item")
-        }
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
-        TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+        Text(
+            "Would you like to add this item to your meal?",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(16.dp))
+        // "Add Another Item" is gone -- saving/matching an item no
+        // longer auto-logs it to the meal either (see design
+        // discussion), so the only decision left here is whether THIS
+        // item should also get logged, framed as a low-key, easy-to-
+        // ignore option rather than an equally-weighted second button.
+        // Done is the one obvious, big action; Add Item is a small,
+        // clearly-secondary text underneath it.
+        Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
             Text("Done")
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+        TextButton(onClick = onAddItem, enabled = !isLoggingToMeal) {
+            Text(if (isLoggingToMeal) "Adding..." else "Add Item")
         }
     }
 }
