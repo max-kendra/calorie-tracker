@@ -962,6 +962,14 @@ class MealDetailViewModel : ViewModel() {
                     saveMealSuccess = true,
                     showSaveMealDialog = false
                 )
+                // Otherwise the newly-saved meal doesn't show up in
+                // search/recent until something unrelated happens to
+                // trigger a reload (e.g. switching filters back and
+                // forth) - every other add-flow in this ViewModel
+                // (logItemQuickly, confirmLogItemQuantity, etc) already
+                // calls this after a successful save; this one just
+                // hadn't been wired up to do the same.
+                refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isSavingMeal = false,
