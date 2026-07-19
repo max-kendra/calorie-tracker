@@ -712,9 +712,12 @@ class MealDetailViewModel : ViewModel() {
             return
         }
         // Meals are always exactly 1 serving (see recipeLogQuantityInput's
-        // doc comment) -- servings isn't editable for that type, so skip
-        // parsing/sending it at all rather than validate a field the
-        // user never saw.
+        // doc comment) -- servings isn't editable for that type, so this
+        // is left null, which (with ApiClient's default encodeDefaults
+        // behavior) omits the field from the request entirely rather
+        // than sending it - the backend's exclude_unset=True then leaves
+        // the existing value untouched, same "omit = don't change"
+        // convention every partial-update endpoint in this app relies on.
         val servings = if (recipe.recipeType == "meal") null else state.editRecipeServings.toDoubleOrNull()
         if (recipe.recipeType != "meal" && (servings == null || servings <= 0.0)) {
             _uiState.value = state.copy(recipeEditError = "Enter a valid number of servings")
@@ -829,10 +832,19 @@ class MealDetailViewModel : ViewModel() {
      * again"). */
     fun openIngredientQuantityPicker(item: Item) {
         val remembered = _uiState.value.lastLoggedAmounts[item.itemId]
+        val quantity: Double?
+        val servingSizeId: Int?
+        if (remembered != null) {
+            quantity = remembered.quantity
+            servingSizeId = remembered.servingSizeId
+        } else {
+            quantity = item.lastLoggedQuantity?.toDoubleOrNull()
+            servingSizeId = item.lastLoggedServingSizeId
+        }
         _uiState.value = _uiState.value.copy(
             itemForIngredientPicker = item,
-            ingredientQuantityInput = remembered?.quantity?.let { formatQuantity(it) } ?: "100",
-            ingredientServingSizeId = remembered?.servingSizeId,
+            ingredientQuantityInput = quantity?.let { formatQuantity(it) } ?: "100",
+            ingredientServingSizeId = servingSizeId,
             editingIngredientItemId = null,
             addIngredientError = null
         )
@@ -1019,8 +1031,23 @@ class MealDetailViewModel : ViewModel() {
         if (state.mealType.isEmpty()) return
 
         val remembered = state.lastLoggedAmounts[itemId]
-        val quantity = remembered?.quantity ?: QUICK_LOG_QUANTITY_G
-        val servingSizeId = remembered?.servingSizeId
+        // Same "session memory first, then the item's own persisted
+        // fields" fallback as openItemQuantityPicker -- this function
+        // only has an id, not the full Item, so looks it up from
+        // whichever list it's currently visible in (recent or search
+        // results) to reach those persisted fields. See design
+        // discussion: "if i logged 12g of something for lunch and then
+        // go to log dinner, it's 100g again".
+        val item = state.recentItems.find { it.itemId == itemId } ?: state.searchResults.find { it.itemId == itemId }
+        val quantity: Double
+        val servingSizeId: Int?
+        if (remembered != null) {
+            quantity = remembered.quantity
+            servingSizeId = remembered.servingSizeId
+        } else {
+            quantity = item?.lastLoggedQuantity?.toDoubleOrNull() ?: QUICK_LOG_QUANTITY_G
+            servingSizeId = item?.lastLoggedServingSizeId
+        }
 
         _uiState.value = state.copy(quickLoggingItemId = itemId, quickLogError = null)
         viewModelScope.launch {
@@ -1070,12 +1097,29 @@ class MealDetailViewModel : ViewModel() {
         if (date != null) load(date, _uiState.value.mealType)
     }
 
+    /** Prefers, in order: this session's own lastLoggedAmounts map
+     * (freshest, e.g. if this exact item was just logged moments ago
+     * and the item object passed in hasn't been re-fetched since), then
+     * the Item's own persisted last-logged fields (survives across
+     * meals/days/app restarts - see design discussion: "if i logged
+     * 12g of something for lunch and then go to log dinner, it's 100g
+     * again", which was because lastLoggedAmounts alone never survived
+     * crossing a meal boundary), then finally the flat 100g default. */
     fun openItemQuantityPicker(item: Item) {
         val remembered = _uiState.value.lastLoggedAmounts[item.itemId]
+        val quantity: Double?
+        val servingSizeId: Int?
+        if (remembered != null) {
+            quantity = remembered.quantity
+            servingSizeId = remembered.servingSizeId
+        } else {
+            quantity = item.lastLoggedQuantity?.toDoubleOrNull()
+            servingSizeId = item.lastLoggedServingSizeId
+        }
         _uiState.value = _uiState.value.copy(
             itemToLog = item,
-            logQuantityInput = remembered?.quantity?.let { formatQuantity(it) } ?: formatQuantity(QUICK_LOG_QUANTITY_G),
-            logServingSizeId = remembered?.servingSizeId,
+            logQuantityInput = quantity?.let { formatQuantity(it) } ?: formatQuantity(QUICK_LOG_QUANTITY_G),
+            logServingSizeId = servingSizeId,
             logItemError = null
         )
     }

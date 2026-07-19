@@ -71,8 +71,19 @@ class Item(Base):
     # way or another (creation, or the backfill migration for
     # pre-existing rows), so in practice it's never actually null.
     last_logged_at = Column(DateTime(timezone=True), nullable=True)
+    # Remembers the quantity/serving this item was last logged with (see
+    # last_logged_at's doc comment for the same "why this needs to live
+    # on the row itself, not just in client memory" reasoning) -- lets
+    # the quantity/serving picker default to whatever was actually used
+    # last time, across ANY meal/day/app session, rather than a flat
+    # 100g every time. None serving_size_id = grams directly, same dual
+    # semantics as everywhere else quantity is stored in this app.
+    last_logged_quantity = Column(Numeric, nullable=True)
+    last_logged_serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
 
-    serving_sizes = relationship("ServingSize", back_populates="item", cascade="all, delete-orphan")
+    serving_sizes = relationship(
+        "ServingSize", back_populates="item", cascade="all, delete-orphan", foreign_keys="ServingSize.item_id"
+    )
 
     __table_args__ = (
         CheckConstraint("type IN ('product', 'ingredient')", name="ck_items_type"),
@@ -96,7 +107,7 @@ class ServingSize(Base):
     name = Column(String, nullable=False)  # e.g. "slice", "cup", "label serving"
     weight_g = Column(Numeric, nullable=False)
 
-    item = relationship("Item", back_populates="serving_sizes")
+    item = relationship("Item", back_populates="serving_sizes", foreign_keys=[item_id])
 
 
 class RawIngredientReference(Base):
@@ -139,6 +150,12 @@ class Recipe(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Set at recipe creation AND whenever this recipe/meal is actually
+    # logged (see design discussion, same reasoning as Item's own
+    # last_logged_at) -- backs "recently logged" ordering in the
+    # unfiltered recipe/meal list, distinct from updated_at (catalog-
+    # edit recency).
+    last_logged_at = Column(DateTime(timezone=True), nullable=True)
 
     ingredients = relationship(
         "RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan"
@@ -214,6 +231,8 @@ class Log(Base):
 
     # Precise moment, for ordering/audit purposes.
     logged_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    serving_size = relationship("ServingSize")
 
     __table_args__ = (
         CheckConstraint(

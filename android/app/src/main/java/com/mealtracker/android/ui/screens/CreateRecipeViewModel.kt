@@ -151,25 +151,35 @@ class CreateRecipeViewModel : ViewModel() {
 
     // --- Ingredients phase: quantity picker (opened by tapping a search result) ---
 
-    /** Defaults to whatever quantity/serving this item already has IN
-     * THIS recipe if it's already an ingredient here, otherwise the
-     * last quantity/serving it was actually logged with anywhere (see
-     * lastLoggedAmounts' doc comment) -- falls back to a flat 100g only
-     * if neither is available (this item has never been logged at
-     * all). Previously always defaulted to 100g for any item not
-     * already in THIS specific recipe, meaning literally every new
-     * recipe/meal started from scratch regardless of how many times
-     * that item had been logged before (see design discussion: "each
-     * time i go to make a new meal, it's 100g again"). */
+    /** Priority order: this ingredient's existing quantity IN THIS
+     * recipe (if already added), then this session's lastLoggedAmounts
+     * map, then the item's own persisted last-logged fields (survives
+     * across meals/days/sessions - see design discussion: "if i logged
+     * 12g of something for lunch and then go to log dinner, it's 100g
+     * again"), then finally a flat 100g default. */
     fun openQuantityPicker(item: Item, lastLoggedAmounts: Map<Int, LoggedAmount> = emptyMap()) {
         val existing = _uiState.value.ingredients.find { it.item.itemId == item.itemId }
         val remembered = lastLoggedAmounts[item.itemId]
+        val quantity: Double?
+        val servingSizeId: Int?
+        when {
+            existing != null -> {
+                quantity = existing.quantityG
+                servingSizeId = null
+            }
+            remembered != null -> {
+                quantity = remembered.quantity
+                servingSizeId = remembered.servingSizeId
+            }
+            else -> {
+                quantity = item.lastLoggedQuantity?.toDoubleOrNull()
+                servingSizeId = item.lastLoggedServingSizeId
+            }
+        }
         _uiState.value = _uiState.value.copy(
             itemForQuantityPicker = item,
-            quantityPickerInput = existing?.quantityG?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() }
-                ?: remembered?.quantity?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() }
-                ?: "100",
-            quantityPickerServingSizeId = existing?.let { null } ?: remembered?.servingSizeId
+            quantityPickerInput = quantity?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "100",
+            quantityPickerServingSizeId = servingSizeId
         )
     }
 

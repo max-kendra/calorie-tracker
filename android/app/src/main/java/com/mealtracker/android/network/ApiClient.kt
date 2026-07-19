@@ -16,21 +16,30 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
  */
 object ApiClient {
 
-    // encodeDefaults = true is critical, not cosmetic -- without it,
-    // kotlinx.serialization silently OMITS any field whose value equals
-    // its declared default, even when that value was explicitly set by
-    // calling code. This caused a real, hard-to-spot bug: saveAsMeal()
-    // explicitly passed recipeType = "meal", which happened to equal
-    // RecipeCreateRequest's OWN default value for that field -- so it
-    // never actually got sent, and the backend silently fell back to
-    // ITS OWN default ("recipe") instead. Every "Save as Meal" saved as
-    // a recipe, with completely correct-looking source on both ends,
-    // because the request body genuinely never contained recipe_type at
-    // all. encodeDefaults = true means an explicit value is always
-    // sent, regardless of whether it happens to match the field's own
-    // default -- the only sane behavior for a REQUEST body, where
-    // omission and "matches the default" are not the same thing.
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    // encodeDefaults defaults to false (i.e. omitted here) -- values
+    // equal to a field's declared default, including null for a
+    // nullable field, are NOT sent over the wire. This used to be
+    // flipped to true to work around a specific bug (RecipeCreateRequest
+    // explicitly setting recipeType = "meal" was being silently dropped
+    // because "meal" happened to equal that field's OWN declared
+    // default) -- but the actual fix for that was changing
+    // RecipeCreateRequest's default to "recipe" (matching the backend's
+    // own default), which independently fixes it without touching this
+    // setting at all. encodeDefaults = true turned out to have a much
+    // worse side effect: EVERY partial-update request in this app
+    // (RecipeUpdateRequest, ItemMacrosUpdateRequest,
+    // UserProfileUpdateRequest, GoalUpdateRequest, LogUpdateRequest...)
+    // relies on "omitted field = don't change this", matching the
+    // backend's exclude_unset=True on each of those endpoints. With
+    // encodeDefaults = true, a field deliberately left at its null
+    // default (meaning "don't touch this") got explicitly sent as null
+    // instead of omitted, and exclude_unset=True correctly treats an
+    // explicitly-sent null as "set this to null" -- which then violates
+    // a NOT NULL column the moment that field isn't nullable server-
+    // side (see design discussion: PATCH /recipes/{id} 500,
+    // NotNullViolation on servings, from editing a meal's name without
+    // touching servings).
+    private val json = Json { ignoreUnknownKeys = true }
 
     // Adds the X-API-Key header to EVERY request automatically, so
     // individual API calls never need to think about auth - matches

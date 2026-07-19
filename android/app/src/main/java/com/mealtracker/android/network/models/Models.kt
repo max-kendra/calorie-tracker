@@ -47,7 +47,16 @@ data class Item(
     val origin: String,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
-    @SerialName("serving_sizes") val servingSizes: List<ServingSize> = emptyList()
+    @SerialName("serving_sizes") val servingSizes: List<ServingSize> = emptyList(),
+    // Persisted server-side, updated every time this item is actually
+    // logged (create/edit) -- lets the quantity/serving picker default
+    // to whatever was used last across ANY meal/day/session, not just
+    // within one screen's lifetime (see design discussion: "if i
+    // logged 12g of something for lunch and then go to log dinner,
+    // it's 100g again" - that was purely an in-memory map scoped to a
+    // single MealDetailViewModel instance, which is fresh per meal).
+    @SerialName("last_logged_quantity") val lastLoggedQuantity: String? = null,
+    @SerialName("last_logged_serving_size_id") val lastLoggedServingSizeId: Int? = null
 )
 
 /**

@@ -79,6 +79,15 @@ class ItemOut(ItemBase):
     created_at: datetime
     updated_at: datetime
     serving_sizes: list[ServingSizeOut] = Field(default_factory=list)
+    # Lets the quantity/serving picker default to whatever this item was
+    # actually last logged with, persisted here rather than in client
+    # memory scoped to a single screen/session (see design discussion:
+    # "if i logged 12g of something for lunch and then go to log
+    # dinner, it's 100g again" - that in-memory map never survived
+    # crossing a meal boundary, since each meal gets its own fresh
+    # ViewModel instance).
+    last_logged_quantity: Optional[Decimal] = None
+    last_logged_serving_size_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

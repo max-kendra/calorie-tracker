@@ -149,8 +149,15 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     if payload.item_id is not None:
         # Backs "recently logged" ordering in the search/recent item
         # list (see items.py's list_items) - this is the actual moment
-        # an item gets logged, as opposed to just edited.
-        db.query(Item).filter(Item.item_id == payload.item_id).update({"last_logged_at": func.now()})
+        # an item gets logged, as opposed to just edited. Also
+        # remembers the quantity/serving actually used (see
+        # ItemOut.last_logged_quantity's doc comment) so the picker can
+        # default to it next time, across ANY meal/day/session.
+        db.query(Item).filter(Item.item_id == payload.item_id).update({
+            "last_logged_at": func.now(),
+            "last_logged_quantity": payload.quantity,
+            "last_logged_serving_size_id": payload.serving_size_id,
+        })
     elif payload.recipe_id is not None:
         # Same reasoning, for the unfiltered recipe/meal list (see
         # recipes.py's list_recipes).
@@ -226,6 +233,8 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
         # different code path (doesn't go through that function), so
         # needs its own update rather than relying on that one's.
         item.last_logged_at = func.now()
+        item.last_logged_quantity = ingredient.quantity
+        item.last_logged_serving_size_id = ingredient.serving_size_id
         created.append((log, item.name, item.image_path))
 
     if not created:
@@ -443,6 +452,15 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
     log.sugar_g_logged = totals.sugar_g
     log.saturated_fat_g_logged = totals.saturated_fat_g
     log.sodium_mg_logged = totals.sodium_mg
+    if log.item_id is not None:
+        # Same reasoning as create_log's bump - adjusting an existing
+        # log's quantity is just as valid a signal of "this is the
+        # amount actually used" as logging fresh.
+        db.query(Item).filter(Item.item_id == log.item_id).update({
+            "last_logged_at": func.now(),
+            "last_logged_quantity": log.quantity,
+            "last_logged_serving_size_id": log.serving_size_id,
+        })
     db.commit()
     db.refresh(log)
     return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)
