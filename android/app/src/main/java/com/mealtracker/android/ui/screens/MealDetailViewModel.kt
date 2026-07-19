@@ -11,6 +11,7 @@ import com.mealtracker.android.network.models.LogFromMealRequest
 import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
+import com.mealtracker.android.network.models.RecipeDetail
 import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -147,6 +148,20 @@ data class MealDetailUiState(
     val isSearchingRecipes: Boolean = false,
     // Same idea as quickLoggingItemId but for the recipe list.
     val quickLoggingRecipeId: Int? = null,
+    // Recipe/meal info screen -- tapping a recipe/meal row (not its "+")
+    // opens this instead of silently quick-logging, same reasoning as
+    // items having ItemLogPageDialog (see design discussion: "recipes
+    // and meals not opening their info screens" was a real gap, tapping
+    // used to just call the same quick-add the "+" button does).
+    val recipeToView: RecipeDetail? = null,
+    val isLoadingRecipeDetail: Boolean = false,
+    val recipeDetailError: String? = null,
+    // Only meaningful for recipe_type="recipe" -- a "meal" logs its
+    // originally-captured per-ingredient quantities as-is (see
+    // LogFromMealRequest's doc comment), there's no "how many servings"
+    // concept to adjust for that type.
+    val recipeLogQuantityInput: String = "1",
+    val isLoggingRecipeDetail: Boolean = false,
     // Set while a quick-log request for THIS item id is in flight, so
     // the UI can show a per-row spinner instead of a global one.
     val quickLoggingItemId: Int? = null,
@@ -516,6 +531,93 @@ class MealDetailViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(
                     quickLoggingRecipeId = null,
                     quickLogError = e.message ?: "Couldn't log that recipe"
+                )
+            }
+        }
+    }
+
+    // --- Recipe/meal info screen (tapping a row, not its "+") ---
+
+    /** Fetches full detail (ingredients, totals) for a tapped recipe/meal
+     * -- the search/recent list's own Recipe model doesn't carry enough
+     * for this, see RecipeDetail's doc comment. */
+    fun openRecipeDetail(recipeId: Int) {
+        _uiState.value = _uiState.value.copy(
+            isLoadingRecipeDetail = true,
+            recipeDetailError = null,
+            recipeLogQuantityInput = "1"
+        )
+        viewModelScope.launch {
+            try {
+                val detail = ApiClient.service.getRecipe(recipeId)
+                _uiState.value = _uiState.value.copy(isLoadingRecipeDetail = false, recipeToView = detail)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoadingRecipeDetail = false,
+                    recipeDetailError = e.message ?: "Couldn't load that recipe"
+                )
+            }
+        }
+    }
+
+    fun dismissRecipeDetail() {
+        _uiState.value = _uiState.value.copy(recipeToView = null, recipeDetailError = null)
+    }
+
+    fun updateRecipeLogQuantityInput(value: String) {
+        _uiState.value = _uiState.value.copy(recipeLogQuantityInput = value)
+    }
+
+    /** Confirms logging from the info screen -- same recipe-vs-meal
+     * branching as logRecipeQuickly, except a "recipe" here logs
+     * whatever quantity (servings) was actually chosen on this screen,
+     * rather than logRecipeQuickly's flat 1-serving default. A "meal"
+     * still has no quantity to adjust (see recipeLogQuantityInput's doc
+     * comment on MealDetailUiState), so ignores the input entirely and
+     * behaves identically to logRecipeQuickly for that type. */
+    fun confirmRecipeLog() {
+        val state = _uiState.value
+        val recipe = state.recipeToView ?: return
+        val date = state.date ?: return
+        if (state.mealType.isEmpty()) return
+
+        val quantity = state.recipeLogQuantityInput.toDoubleOrNull()
+        if (recipe.recipeType != "meal" && (quantity == null || quantity <= 0.0)) {
+            _uiState.value = state.copy(recipeDetailError = "Enter a valid quantity")
+            return
+        }
+
+        _uiState.value = state.copy(isLoggingRecipeDetail = true, recipeDetailError = null)
+        viewModelScope.launch {
+            try {
+                if (recipe.recipeType == "meal") {
+                    ApiClient.service.createLogsFromMeal(
+                        LogFromMealRequest(
+                            recipeId = recipe.recipeId,
+                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                            mealType = state.mealType
+                        )
+                    )
+                } else {
+                    ApiClient.service.createLog(
+                        LogCreateRequest(
+                            date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                            mealType = state.mealType,
+                            recipeId = recipe.recipeId,
+                            quantity = quantity!!
+                        )
+                    )
+                }
+                _uiState.value = _uiState.value.copy(
+                    isLoggingRecipeDetail = false,
+                    recipeToView = null
+                )
+                load(date, state.mealType)
+                refreshSearchAfterAdd()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoggingRecipeDetail = false,
+                    recipeDetailError = e.message ?: "Couldn't log that recipe"
                 )
             }
         }

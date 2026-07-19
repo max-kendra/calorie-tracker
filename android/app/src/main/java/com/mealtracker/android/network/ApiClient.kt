@@ -16,7 +16,21 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
  */
 object ApiClient {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    // encodeDefaults = true is critical, not cosmetic -- without it,
+    // kotlinx.serialization silently OMITS any field whose value equals
+    // its declared default, even when that value was explicitly set by
+    // calling code. This caused a real, hard-to-spot bug: saveAsMeal()
+    // explicitly passed recipeType = "meal", which happened to equal
+    // RecipeCreateRequest's OWN default value for that field -- so it
+    // never actually got sent, and the backend silently fell back to
+    // ITS OWN default ("recipe") instead. Every "Save as Meal" saved as
+    // a recipe, with completely correct-looking source on both ends,
+    // because the request body genuinely never contained recipe_type at
+    // all. encodeDefaults = true means an explicit value is always
+    // sent, regardless of whether it happens to match the field's own
+    // default -- the only sane behavior for a REQUEST body, where
+    // omission and "matches the default" are not the same thing.
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     // Adds the X-API-Key header to EVERY request automatically, so
     // individual API calls never need to think about auth - matches

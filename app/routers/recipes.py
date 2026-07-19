@@ -1,4 +1,3 @@
-import logging
 from decimal import Decimal
 from typing import Optional
 
@@ -23,8 +22,6 @@ router = APIRouter(
     tags=["recipes"],
     dependencies=[Depends(require_api_key)],
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _build_recipe_out(recipe: Recipe) -> RecipeOut:
@@ -75,14 +72,6 @@ def _validate_items_exist(item_ids: list[int], db: Session):
 
 @router.post("", response_model=RecipeOut, status_code=status.HTTP_201_CREATED)
 def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
-    # TEMPORARY - remove once the "bookmark saves as recipe not meal"
-    # bug is diagnosed. Logs the raw payload FastAPI actually parsed
-    # from the request body, so we can see exactly what recipe_type
-    # (and everything else) the Android app really sent, rather than
-    # inferring it from source code that may not match what's actually
-    # installed/running.
-    logger.info("POST /recipes payload: %s", payload.model_dump())
-
     if payload.ingredients:
         _validate_items_exist([i.item_id for i in payload.ingredients], db)
 

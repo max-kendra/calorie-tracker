@@ -20,6 +20,7 @@ import com.mealtracker.android.network.models.PhysiologicalGuideline
 import com.mealtracker.android.network.models.ProductPhotoScanResult
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
+import com.mealtracker.android.network.models.RecipeDetail
 import com.mealtracker.android.network.models.UsdaFoodDetail
 import com.mealtracker.android.network.models.UsdaFoodSummary
 import com.mealtracker.android.network.models.UserProfile
@@ -240,6 +241,12 @@ interface ApiService {
 
     @POST("recipes")
     suspend fun createRecipe(@Body request: RecipeCreateRequest): Recipe
+
+    // Full detail (ingredients, totals) for the recipe/meal info screen
+    // -- see RecipeDetail's doc comment. The lighter Recipe model above
+    // (from search/recent) doesn't carry enough to show this.
+    @GET("recipes/{recipeId}")
+    suspend fun getRecipe(@Path("recipeId") recipeId: Int): RecipeDetail
 
     // Population-level reference ranges backing the Home screen's
     // sodium/added-sugar/saturated-fat threshold card -- static/seeded

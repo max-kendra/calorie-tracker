@@ -194,10 +194,20 @@ data class RecipeIngredientCreateRequest(
     @SerialName("quantity_g") val quantityG: Double
 )
 
+/**
+ * Request body for POST /recipes. recipeType defaults to "recipe",
+ * matching the backend's own RecipeBase default -- this must stay in
+ * sync with json.encodeDefaults = true in ApiClient (see that setting's
+ * doc comment for the exact bug this combination caused: an explicit
+ * value equal to a field's own default was silently omitted from the
+ * request, so "Save as Meal" always saved a plain "recipe" instead of a
+ * "meal", with correct-looking code on both client and server since the
+ * request body genuinely never contained the field at all).
+ */
 @Serializable
 data class RecipeCreateRequest(
     val name: String,
-    @SerialName("recipe_type") val recipeType: String = "meal",
+    @SerialName("recipe_type") val recipeType: String = "recipe",
     val servings: Double = 1.0,
     val ingredients: List<RecipeIngredientCreateRequest> = emptyList()
 )
@@ -216,6 +226,37 @@ data class Recipe(
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
     @SerialName("totals_per_serving") val totalsPerServing: NutritionTotals? = null
+)
+
+/** Mirrors RecipeIngredientOut from app/schemas.py -- item_name is
+ * denormalized server-side so the info screen can list ingredients by
+ * name without a separate lookup per row. */
+@Serializable
+data class RecipeIngredient(
+    @SerialName("item_id") val itemId: Int,
+    @SerialName("quantity_g") val quantityG: String,
+    @SerialName("item_name") val itemName: String
+)
+
+/**
+ * Mirrors the FULL RecipeOut from app/schemas.py (GET /recipes/{id}) --
+ * richer than Recipe above, which only carries what the search/recent
+ * list needs. Backs the recipe/meal info screen (see design discussion:
+ * tapping a recipe previously did nothing but quick-log it, with no way
+ * to see what was actually in it first, unlike items which have
+ * ItemLogPageDialog for this).
+ */
+@Serializable
+data class RecipeDetail(
+    @SerialName("recipe_id") val recipeId: Int,
+    val name: String,
+    @SerialName("recipe_type") val recipeType: String = "recipe",
+    val instructions: String? = null,
+    @SerialName("image_path") val imagePath: String? = null,
+    val servings: String = "1",
+    val ingredients: List<RecipeIngredient> = emptyList(),
+    val totals: NutritionTotals,
+    @SerialName("totals_per_serving") val totalsPerServing: NutritionTotals
 )
 
 /**

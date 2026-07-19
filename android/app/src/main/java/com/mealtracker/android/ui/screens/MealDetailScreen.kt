@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -60,6 +61,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetScaffoldState
@@ -91,6 +93,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Recipe
+import com.mealtracker.android.network.models.RecipeDetail
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.health.HealthConnectManager
 import com.mealtracker.android.health.HealthConnectPreferences
@@ -291,6 +294,27 @@ fun MealDetailScreen(
         )
     }
 
+    val recipeToView = state.recipeToView
+    if (recipeToView != null) {
+        RecipeInfoDialog(
+            recipe = recipeToView,
+            quantityInput = state.recipeLogQuantityInput,
+            isLogging = state.isLoggingRecipeDetail,
+            error = state.recipeDetailError,
+            onQuantityChange = { viewModel.updateRecipeLogQuantityInput(it) },
+            onConfirm = { viewModel.confirmRecipeLog() },
+            onDismiss = { viewModel.dismissRecipeDetail() }
+        )
+    } else if (state.isLoadingRecipeDetail) {
+        Dialog(onDismissRequest = { viewModel.dismissRecipeDetail() }) {
+            Surface(shape = RoundedCornerShape(20.dp)) {
+                Box(modifier = Modifier.padding(32.dp)) {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+    }
+
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetContainerColor = MaterialTheme.colorScheme.surface,
@@ -384,6 +408,7 @@ fun MealDetailScreen(
                                 isLoading = if (showingRecent) false else state.isSearchingRecipes,
                                 emptyMessage = if (showingRecent) "No recipes yet" else "No matches",
                                 quickLoggingRecipeId = state.quickLoggingRecipeId,
+                                onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
                                 onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
                             )
                         } else {
@@ -818,6 +843,7 @@ private fun RecipeResultsList(
     isLoading: Boolean,
     emptyMessage: String,
     quickLoggingRecipeId: Int?,
+    onRecipeClick: (Recipe) -> Unit,
     onQuickAddClick: (Recipe) -> Unit
 ) {
     Column(
@@ -845,7 +871,7 @@ private fun RecipeResultsList(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = quickLoggingRecipeId == null) { onQuickAddClick(recipe) }
+                            .clickable(enabled = quickLoggingRecipeId == null) { onRecipeClick(recipe) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -893,6 +919,142 @@ private fun RecipeResultsList(
                         }
                     }
                     HorizontalDivider()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Recipe/meal info screen -- opened by tapping a recipe/meal row (see
+ * design discussion: this used to not exist at all, tapping just
+ * silently quick-logged the same as the "+" button, unlike items which
+ * have ItemLogPageDialog for this). Shows what's actually in it
+ * (ingredients, per-serving totals) before logging, same idea as items'
+ * info page just simpler -- no serving/unit picker (recipes don't have
+ * one), no photo editing, no macro-goal progress bars.
+ *
+ * "recipe" type gets an editable quantity (servings) field, since
+ * LoggableEntryBase's quantity semantics for a recipe log are "number of
+ * servings consumed". "meal" type has no such field -- see
+ * MealDetailUiState.recipeLogQuantityInput's doc comment for why (a meal
+ * logs its originally-captured per-ingredient amounts as-is).
+ */
+@Composable
+private fun RecipeInfoDialog(
+    recipe: RecipeDetail,
+    quantityInput: String,
+    isLogging: Boolean,
+    error: String?,
+    onQuantityChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 600.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CatalogVisuals.backgroundFor(recipe.recipeType)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (recipe.imagePath != null) {
+                            coil3.compose.AsyncImage(
+                                model = com.mealtracker.android.BuildConfig.BASE_URL + recipe.imagePath,
+                                contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                CatalogVisuals.iconFor(recipe.recipeType),
+                                contentDescription = null,
+                                tint = CatalogVisuals.iconTint(),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 12.dp))
+                    Text(recipe.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                Text(
+                    "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+                Text("Ingredients", style = MaterialTheme.typography.titleSmall)
+                if (recipe.ingredients.isEmpty()) {
+                    Text(
+                        "No ingredients listed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    recipe.ingredients.forEach { ingredient ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(ingredient.itemName, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${ingredient.quantityG.toDoubleOrNull()?.let { formatQuantity(it) } ?: ingredient.quantityG}g",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+
+                if (recipe.recipeType == "meal") {
+                    Text(
+                        "Logs this meal's original ingredients and amounts.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = quantityInput,
+                        onValueChange = onQuantityChange,
+                        label = { Text("Servings") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (error != null) {
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+                Button(onClick = onConfirm, enabled = !isLogging, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (isLogging) "Logging..." else "Log this ${if (recipe.recipeType == "meal") "meal" else "recipe"}")
                 }
             }
         }
