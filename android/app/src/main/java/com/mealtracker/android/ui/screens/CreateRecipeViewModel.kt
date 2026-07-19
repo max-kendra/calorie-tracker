@@ -168,8 +168,10 @@ class CreateRecipeViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(quantityPickerInput = value)
     }
 
+    /** Resets quantity to "0" whenever the unit changes -- see
+     * createServing's doc comment on this same reasoning. */
     fun updateQuantityPickerServing(servingSizeId: Int?) {
-        _uiState.value = _uiState.value.copy(quantityPickerServingSizeId = servingSizeId)
+        _uiState.value = _uiState.value.copy(quantityPickerServingSizeId = servingSizeId, quantityPickerInput = "0")
     }
 
     /** Adds (or updates, if already in the list) the ingredient with
@@ -261,12 +263,13 @@ class CreateRecipeViewModel : ViewModel() {
                     showCreateServingDialog = false,
                     itemForQuantityPicker = updatedItem,
                     quantityPickerServingSizeId = newServing?.id,
-                    // Reset to 1 -- otherwise whatever gram quantity was
-                    // typed before switching units gets reinterpreted as
-                    // a multiplier of the NEW serving's weight (100 x a
-                    // 62g protein bar = 6200g), which is never what was
-                    // intended (see design discussion).
-                    quantityPickerInput = "1"
+                    // Reset to 0, same reasoning as
+                    // updateQuantityPickerServing -- otherwise whatever
+                    // gram quantity was typed before switching units gets
+                    // reinterpreted as a multiplier of the NEW serving's
+                    // weight (100 x a 62g protein bar = 6200g), which is
+                    // never what was intended (see design discussion).
+                    quantityPickerInput = "0"
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

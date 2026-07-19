@@ -483,17 +483,17 @@ private fun LoggedItemLine(log: Log) {
     }
 }
 
-/** "#gF \u2022 #gC \u2022 #gFi \u2022 #gP", each number+letter colored to
+/** "#gP \u2022 #gF \u2022 #gC \u2022 #gFi", each number+letter colored to
  * match its ring in MacroRingsRow/MacroColors -- a quick per-item macro
  * breakdown without needing to open the item. */
 private fun macroShortcut(log: Log) = buildAnnotatedString {
+    withStyle(SpanStyle(color = MacroColors.Protein)) { append("${log.proteinGLogged}P") }
+    append(" \u2022 ")
     withStyle(SpanStyle(color = MacroColors.Fat)) { append("${log.fatGLogged}F") }
     append(" \u2022 ")
     withStyle(SpanStyle(color = MacroColors.Carbs)) { append("${log.carbsGLogged}C") }
     append(" \u2022 ")
     withStyle(SpanStyle(color = MacroColors.Fiber)) { append("${log.fiberGLogged}Fi") }
-    append(" \u2022 ")
-    withStyle(SpanStyle(color = MacroColors.Protein)) { append("${log.proteinGLogged}P") }
 }
 
 /** Small helper so the fade-with-collapse reads cleanly at the call site

@@ -1229,10 +1229,10 @@ private fun ItemLogPageDialog(
                 Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
+                LogMacroBar("Protein", per100(item.protein100g), goalProtein, MacroColors.Protein)
                 LogMacroBar("Fat", per100(item.fat100g), goalFat, MacroColors.Fat)
                 LogMacroBar("Carbs", per100(item.carbs100g), goalCarbs, MacroColors.Carbs)
                 LogMacroBar("Fiber", per100(item.fiber100g), goalFiber, MacroColors.Fiber)
-                LogMacroBar("Protein", per100(item.protein100g), goalProtein, MacroColors.Protein)
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
 
@@ -1486,10 +1486,10 @@ private fun LogDetailDialog(
                 Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
+                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
                 LogMacroBar("Fat", log.fatGLogged, goalFat, MacroColors.Fat)
                 LogMacroBar("Carbs", log.carbsGLogged, goalCarbs, MacroColors.Carbs)
                 LogMacroBar("Fiber", log.fiberGLogged, goalFiber, MacroColors.Fiber)
-                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
 

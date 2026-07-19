@@ -602,9 +602,15 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(logQuantityInput = value)
     }
 
-    /** null = switch to raw grams. */
+    /** null = switch to raw grams. Resets quantity to "0" whenever the
+     * unit changes -- otherwise whatever number was typed for the
+     * PREVIOUS unit gets reinterpreted against the new one (e.g. "100"
+     * grams becomes "100 slices" = 6200g for a 62g protein bar), which
+     * is never what was intended. Forcing back to 0 (rather than
+     * silently guessing 1) makes it obvious a fresh quantity needs to
+     * be entered for whatever was just selected. */
     fun updateLogServingSize(servingSizeId: Int?) {
-        _uiState.value = _uiState.value.copy(logServingSizeId = servingSizeId)
+        _uiState.value = _uiState.value.copy(logServingSizeId = servingSizeId, logQuantityInput = "0")
     }
 
     /** Confirms ItemLogPageDialog - POSTs a new log, or PATCHes an
@@ -718,12 +724,13 @@ class MealDetailViewModel : ViewModel() {
                     showCreateServingDialog = false,
                     itemToLog = updatedItem,
                     logServingSizeId = newServing?.id,
-                    // Reset to 1 -- otherwise whatever gram quantity was
-                    // typed before switching units (e.g. "100") gets
+                    // Reset to 0, same reasoning as updateLogServingSize
+                    // -- otherwise whatever gram quantity was typed
+                    // before switching units (e.g. "100") gets
                     // reinterpreted as a multiplier of the NEW serving's
                     // weight (100 x a 62g protein bar = 6200g), which is
                     // never what was intended (see design discussion).
-                    logQuantityInput = "1"
+                    logQuantityInput = "0"
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

@@ -88,6 +88,23 @@ def get_usda_food(fdc_id: int):
 
     try:
         result = client.get_food(fdc_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            # Not a gateway problem - USDA's own detail endpoint doesn't
+            # always have an entry for every id their search index
+            # returns (seen in practice: search surfaces an fdc_id whose
+            # detail lookup 404s, likely a merged/deprecated record on
+            # USDA's side). A clean "not found" shouldn't look like the
+            # same failure as an actual connectivity/rate-limit issue.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"USDA FoodData Central has no detail entry for fdc_id {fdc_id} "
+                    "(it may have been removed or merged upstream, even though it still "
+                    "appeared in search results)."
+                ),
+            )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=_usda_error_detail(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=_usda_error_detail(e))
 
