@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
@@ -44,7 +45,7 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
                 detail=f"An item with barcode {payload.barcode} already exists (item_id={existing.item_id})",
             )
 
-    item = Item(**payload.model_dump())
+    item = Item(**payload.model_dump(), last_logged_at=func.now())
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -229,7 +230,7 @@ def list_items(
     if type:
         query = query.filter(Item.type == type)
 
-    return query.order_by(Item.updated_at.desc()).offset(offset).limit(limit).all()
+    return query.order_by(Item.last_logged_at.desc().nullslast()).offset(offset).limit(limit).all()
 
 
 @router.patch("/{item_id}", response_model=ItemOut)

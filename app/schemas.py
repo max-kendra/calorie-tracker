@@ -215,13 +215,33 @@ RecipeType = Literal["recipe", "meal"]
 
 class RecipeIngredientCreate(BaseModel):
     item_id: int
-    quantity_g: Decimal
+    # None = quantity is grams directly; set = quantity is a multiplier
+    # of that ServingSize's weight_g -- see RecipeIngredient model's
+    # doc comment for the full reasoning.
+    serving_size_id: Optional[int] = None
+    quantity: Decimal
 
 
 class RecipeIngredientOut(BaseModel):
     item_id: int
-    quantity_g: Decimal
+    serving_size_id: Optional[int] = None
+    quantity: Decimal
     item_name: str  # denormalized for convenience — avoids a second lookup client-side
+    # Same denormalization as LogOut.serving_size_name -- without this,
+    # serving_size_id alone gives the client no way to know what unit
+    # was actually used (e.g. "2 pancakes" vs raw grams), see that
+    # field's doc comment for the exact bug this avoids repeating.
+    serving_size_name: Optional[str] = None
+    # Denormalized from the item, same reasoning as LogOut.image_path --
+    # lets the ingredient list show a thumbnail without a separate
+    # GET /items/{id} per row.
+    image_path: Optional[str] = None
+    # This ingredient's own computed calories (quantity x the item's
+    # macros, resolving serving_size the same way logs do) -- lets the
+    # ingredient list show a per-row calorie figure the same way
+    # Journal's log rows do, without the client needing to fetch each
+    # item and recompute it itself.
+    kcal: int
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -64,6 +64,13 @@ class Item(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Set at item creation AND whenever this item is actually logged
+    # (see design discussion) -- backs "recently logged" ordering in the
+    # search/recent list, distinct from updated_at (catalog-edit
+    # recency). Nullable in principle, but every row gets this set one
+    # way or another (creation, or the backfill migration for
+    # pre-existing rows), so in practice it's never actually null.
+    last_logged_at = Column(DateTime(timezone=True), nullable=True)
 
     serving_sizes = relationship("ServingSize", back_populates="item", cascade="all, delete-orphan")
 
@@ -154,10 +161,17 @@ class RecipeIngredient(Base):
 
     recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), primary_key=True)
     item_id = Column(Integer, ForeignKey("items.item_id"), primary_key=True)
-    quantity_g = Column(Numeric, nullable=False)
+    # None = quantity is grams directly; set = quantity is a multiplier
+    # of that ServingSize's weight_g -- same dual semantics as
+    # LoggableEntryBase (see that schema's docstring), added so an
+    # ingredient originally entered as "2 pancakes" can still be shown
+    # that way later, rather than only ever remembering "150g".
+    serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
+    quantity = Column(Numeric, nullable=False)
 
     recipe = relationship("Recipe", back_populates="ingredients")
     item = relationship("Item")
+    serving_size = relationship("ServingSize")
 
 
 class Log(Base):

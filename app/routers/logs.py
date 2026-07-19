@@ -141,6 +141,11 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         sodium_mg_logged=totals.sodium_mg,
     )
     db.add(log)
+    if payload.item_id is not None:
+        # Backs "recently logged" ordering in the search/recent item
+        # list (see items.py's list_items) - this is the actual moment
+        # an item gets logged, as opposed to just edited.
+        db.query(Item).filter(Item.item_id == payload.item_id).update({"last_logged_at": func.now()})
     db.commit()
     db.refresh(log)
     return _log_to_out(log, item_name, recipe_name, image_path, serving_name)
@@ -190,14 +195,14 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             # one missing item.
             continue
 
-        totals = compute_item_totals(item, ingredient.quantity_g, None)
+        totals = compute_item_totals(item, ingredient.quantity, ingredient.serving_size)
         log = Log(
             date=payload.date,
             meal_type=payload.meal_type,
             item_id=item.item_id,
             recipe_id=None,
-            serving_size_id=None,
-            quantity=ingredient.quantity_g,
+            serving_size_id=ingredient.serving_size_id,
+            quantity=ingredient.quantity,
             kcal_logged=totals.kcal,
             protein_g_logged=totals.protein_g,
             carbs_g_logged=totals.carbs_g,
@@ -208,6 +213,10 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             sodium_mg_logged=totals.sodium_mg,
         )
         db.add(log)
+        # Same "recently logged" bump as create_log - this is a
+        # different code path (doesn't go through that function), so
+        # needs its own update rather than relying on that one's.
+        item.last_logged_at = func.now()
         created.append((log, item.name, item.image_path))
 
     if not created:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import require_api_key
 from app.database import get_db
 from app.models import Item, Recipe, RecipeIngredient
-from app.nutrition import compute_recipe_totals, to_display
+from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals, to_display
 from app.search import multi_column_search_filter
 from app.schemas import (
     RecipeCreate,
@@ -39,7 +39,15 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
         created_at=recipe.created_at,
         updated_at=recipe.updated_at,
         ingredients=[
-            {"item_id": ri.item_id, "quantity_g": ri.quantity_g, "item_name": ri.item.name}
+            {
+                "item_id": ri.item_id,
+                "serving_size_id": ri.serving_size_id,
+                "quantity": ri.quantity,
+                "item_name": ri.item.name,
+                "serving_size_name": ri.serving_size.name if ri.serving_size else None,
+                "image_path": ri.item.image_path,
+                "kcal": ceil_int(compute_item_totals(ri.item, ri.quantity, ri.serving_size).kcal),
+            }
             for ri in recipe.ingredients
         ],
         totals=to_display(totals),
@@ -86,7 +94,12 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
     db.flush()  # get recipe_id before inserting ingredients
 
     for ing in payload.ingredients:
-        db.add(RecipeIngredient(recipe_id=recipe.recipe_id, item_id=ing.item_id, quantity_g=ing.quantity_g))
+        db.add(RecipeIngredient(
+            recipe_id=recipe.recipe_id,
+            item_id=ing.item_id,
+            serving_size_id=ing.serving_size_id,
+            quantity=ing.quantity,
+        ))
 
     db.commit()
     recipe = _get_recipe_or_404(recipe.recipe_id, db)
@@ -161,7 +174,12 @@ def add_ingredient(recipe_id: int, payload: RecipeIngredientCreate, db: Session 
             detail="This item is already an ingredient in this recipe — use PATCH to change its quantity",
         )
 
-    db.add(RecipeIngredient(recipe_id=recipe_id, item_id=payload.item_id, quantity_g=payload.quantity_g))
+    db.add(RecipeIngredient(
+        recipe_id=recipe_id,
+        item_id=payload.item_id,
+        serving_size_id=payload.serving_size_id,
+        quantity=payload.quantity,
+    ))
     db.commit()
     recipe = _get_recipe_or_404(recipe_id, db)
     return _build_recipe_out(recipe)
@@ -169,7 +187,11 @@ def add_ingredient(recipe_id: int, payload: RecipeIngredientCreate, db: Session 
 
 @router.patch("/{recipe_id}/ingredients/{item_id}", response_model=RecipeOut)
 def update_ingredient_quantity(
-    recipe_id: int, item_id: int, quantity_g: Decimal, db: Session = Depends(get_db)
+    recipe_id: int,
+    item_id: int,
+    quantity: Decimal,
+    serving_size_id: Optional[int] = None,
+    db: Session = Depends(get_db),
 ):
     ri = (
         db.query(RecipeIngredient)
@@ -179,7 +201,8 @@ def update_ingredient_quantity(
     if not ri:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingredient not in this recipe")
 
-    ri.quantity_g = quantity_g
+    ri.quantity = quantity
+    ri.serving_size_id = serving_size_id
     db.commit()
     recipe = _get_recipe_or_404(recipe_id, db)
     return _build_recipe_out(recipe)

@@ -93,7 +93,16 @@ private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containe
 @Composable
 fun JournalScreen(
     viewModel: JournalViewModel = viewModel(),
-    onNavigateToMealDetail: (String) -> Unit = {}
+    // Was previously (String) -> Unit, mealType only -- the caller
+    // (AppNavHost) then had no way to know which date was actually being
+    // viewed here, and hardcoded LocalDate.now() as a result. That meant
+    // tapping ANY meal bucket, on ANY day being browsed via prev/next-day
+    // navigation or the date picker, always opened TODAY's log for that
+    // meal type instead of the day actually being viewed (see design
+    // discussion: "every single day's breakfast log appears to also
+    // have it" -- they were all actually showing today's, regardless of
+    // which day's Journal you were looking at when you tapped it).
+    onNavigateToMealDetail: (LocalDate, String) -> Unit = { _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val calendarMonthState by viewModel.calendarState.collectAsState()
@@ -259,7 +268,7 @@ fun JournalScreen(
                             // MealRow's own internal padding provides the
                             // separation instead.
                             state.buckets.forEach { bucket ->
-                                MealRow(bucket, onClick = { onNavigateToMealDetail(bucket.mealType) })
+                                MealRow(bucket, onClick = { onNavigateToMealDetail(state.date, bucket.mealType) })
                             }
                         }
                     }

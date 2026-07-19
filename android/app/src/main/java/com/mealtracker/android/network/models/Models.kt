@@ -191,7 +191,8 @@ data class MealGoalSplitsUpdateRequest(
 @Serializable
 data class RecipeIngredientCreateRequest(
     @SerialName("item_id") val itemId: Int,
-    @SerialName("quantity_g") val quantityG: Double
+    @SerialName("serving_size_id") val servingSizeId: Int? = null,
+    val quantity: Double
 )
 
 /**
@@ -212,6 +213,15 @@ data class RecipeCreateRequest(
     val ingredients: List<RecipeIngredientCreateRequest> = emptyList()
 )
 
+/** Partial update for recipe metadata -- mirrors RecipeUpdate on the
+ * backend. All fields optional, send only what changed. */
+@Serializable
+data class RecipeUpdateRequest(
+    val name: String? = null,
+    val servings: Double? = null,
+    @SerialName("image_path") val imagePath: String? = null
+)
+
 /** Mirrors RecipeOut from app/schemas.py. recipeType distinguishes an
  * actual recipe from a saved reusable "meal" (same underlying table -
  * see RecipeType on the backend) - backs the search filter's
@@ -230,12 +240,20 @@ data class Recipe(
 
 /** Mirrors RecipeIngredientOut from app/schemas.py -- item_name is
  * denormalized server-side so the info screen can list ingredients by
- * name without a separate lookup per row. */
+ * name without a separate lookup per row. servingSizeName is
+ * denormalized the same way logs' is -- servingSizeId alone gives no
+ * way to know what unit was actually used (e.g. "2 pancakes" vs raw
+ * grams). imagePath is denormalized from the source item, backing the
+ * thumbnail in the ingredient list. */
 @Serializable
 data class RecipeIngredient(
     @SerialName("item_id") val itemId: Int,
-    @SerialName("quantity_g") val quantityG: String,
-    @SerialName("item_name") val itemName: String
+    @SerialName("serving_size_id") val servingSizeId: Int? = null,
+    val quantity: String,
+    @SerialName("item_name") val itemName: String,
+    @SerialName("serving_size_name") val servingSizeName: String? = null,
+    @SerialName("image_path") val imagePath: String? = null,
+    val kcal: Int
 )
 
 /**

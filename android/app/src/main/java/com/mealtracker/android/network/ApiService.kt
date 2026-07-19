@@ -21,6 +21,7 @@ import com.mealtracker.android.network.models.ProductPhotoScanResult
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeDetail
+import com.mealtracker.android.network.models.RecipeUpdateRequest
 import com.mealtracker.android.network.models.UsdaFoodDetail
 import com.mealtracker.android.network.models.UsdaFoodSummary
 import com.mealtracker.android.network.models.UserProfile
@@ -247,6 +248,21 @@ interface ApiService {
     // (from search/recent) doesn't carry enough to show this.
     @GET("recipes/{recipeId}")
     suspend fun getRecipe(@Path("recipeId") recipeId: Int): RecipeDetail
+
+    @PATCH("recipes/{recipeId}")
+    suspend fun updateRecipe(@Path("recipeId") recipeId: Int, @Body request: RecipeUpdateRequest): RecipeDetail
+
+    @DELETE("recipes/{recipeId}")
+    suspend fun deleteRecipe(@Path("recipeId") recipeId: Int)
+
+    @POST("recipes/{recipeId}/ingredients")
+    suspend fun addRecipeIngredient(
+        @Path("recipeId") recipeId: Int,
+        @Body request: RecipeIngredientCreateRequest
+    ): RecipeDetail
+
+    @DELETE("recipes/{recipeId}/ingredients/{itemId}")
+    suspend fun removeRecipeIngredient(@Path("recipeId") recipeId: Int, @Path("itemId") itemId: Int): RecipeDetail
 
     // Population-level reference ranges backing the Home screen's
     // sodium/added-sugar/saturated-fat threshold card -- static/seeded

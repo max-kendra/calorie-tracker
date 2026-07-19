@@ -12,6 +12,8 @@ import com.mealtracker.android.network.models.LogUpdateRequest
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeDetail
+import com.mealtracker.android.network.models.RecipeIngredient
+import com.mealtracker.android.network.models.RecipeUpdateRequest
 import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -162,6 +164,46 @@ data class MealDetailUiState(
     // concept to adjust for that type.
     val recipeLogQuantityInput: String = "1",
     val isLoggingRecipeDetail: Boolean = false,
+
+    // Edit mode (pencil button) on the recipe info screen -- name and
+    // servings only, same "edit metadata separately from ingredients"
+    // split the backend already has (RecipeUpdate vs the ingredient
+    // endpoints).
+    val isEditingRecipe: Boolean = false,
+    val editRecipeName: String = "",
+    val editRecipeServings: String = "",
+    val isSavingRecipeEdit: Boolean = false,
+    val recipeEditError: String? = null,
+
+    // Delete recipe -- small red text + confirm, same pattern as
+    // deleting a logged item elsewhere in the app.
+    val showDeleteRecipeConfirm: Boolean = false,
+    val isDeletingRecipe: Boolean = false,
+
+    // Add-ingredient search (edit mode only) -- reuses the same shared
+    // ItemResultsList/ItemQuantityDialog components CreateRecipeScreen's
+    // ingredient picker uses, rather than building a second search UI.
+    val ingredientSearchQuery: String = "",
+    val ingredientSearchResults: List<Item> = emptyList(),
+    val isSearchingIngredients: Boolean = false,
+    val itemForIngredientPicker: Item? = null,
+    val ingredientQuantityInput: String = "100",
+    val ingredientServingSizeId: Int? = null,
+    val isAddingIngredient: Boolean = false,
+    val addIngredientError: String? = null,
+
+    // Remove-ingredient confirm -- small red text under each ingredient
+    // row in edit mode, same "are you sure" pattern as deleting the
+    // whole recipe.
+    val ingredientPendingRemoval: RecipeIngredient? = null,
+    val isRemovingIngredient: Boolean = false,
+
+    // Tap-hero-to-change-image (recipe/meal info screen) -- same
+    // camera/gallery/crop/upload pipeline as ItemLogPageDialog's own
+    // image change, just targeting the recipe's image_path instead of
+    // an item's.
+    val isUploadingRecipeImage: Boolean = false,
+    val recipeImageError: String? = null,
     // Set while a quick-log request for THIS item id is in flight, so
     // the UI can show a per-row spinner instead of a global one.
     val quickLoggingItemId: Int? = null,
@@ -623,6 +665,246 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
+    // --- Edit recipe (pencil button) ---
+
+    fun openRecipeEdit() {
+        val recipe = _uiState.value.recipeToView ?: return
+        _uiState.value = _uiState.value.copy(
+            isEditingRecipe = true,
+            editRecipeName = recipe.name,
+            editRecipeServings = recipe.servings,
+            recipeEditError = null
+        )
+    }
+
+    fun dismissRecipeEdit() {
+        _uiState.value = _uiState.value.copy(isEditingRecipe = false, recipeEditError = null)
+    }
+
+    fun updateEditRecipeName(value: String) {
+        _uiState.value = _uiState.value.copy(editRecipeName = value)
+    }
+
+    fun updateEditRecipeServings(value: String) {
+        _uiState.value = _uiState.value.copy(editRecipeServings = value)
+    }
+
+    fun saveRecipeEdit() {
+        val state = _uiState.value
+        val recipe = state.recipeToView ?: return
+        val name = state.editRecipeName.trim()
+        if (name.isEmpty()) {
+            _uiState.value = state.copy(recipeEditError = "Name can't be empty")
+            return
+        }
+        // Meals are always exactly 1 serving (see recipeLogQuantityInput's
+        // doc comment) -- servings isn't editable for that type, so skip
+        // parsing/sending it at all rather than validate a field the
+        // user never saw.
+        val servings = if (recipe.recipeType == "meal") null else state.editRecipeServings.toDoubleOrNull()
+        if (recipe.recipeType != "meal" && (servings == null || servings <= 0.0)) {
+            _uiState.value = state.copy(recipeEditError = "Enter a valid number of servings")
+            return
+        }
+
+        _uiState.value = state.copy(isSavingRecipeEdit = true, recipeEditError = null)
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.updateRecipe(
+                    recipe.recipeId,
+                    RecipeUpdateRequest(name = name, servings = servings)
+                )
+                _uiState.value = _uiState.value.copy(
+                    isSavingRecipeEdit = false,
+                    isEditingRecipe = false,
+                    recipeToView = updated
+                )
+                refreshSearchAfterAdd()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isSavingRecipeEdit = false,
+                    recipeEditError = e.message ?: "Couldn't save changes"
+                )
+            }
+        }
+    }
+
+    // --- Delete recipe ---
+
+    fun requestDeleteRecipe() {
+        _uiState.value = _uiState.value.copy(showDeleteRecipeConfirm = true)
+    }
+
+    fun dismissDeleteRecipeConfirm() {
+        _uiState.value = _uiState.value.copy(showDeleteRecipeConfirm = false)
+    }
+
+    fun confirmDeleteRecipe() {
+        val recipe = _uiState.value.recipeToView ?: return
+        _uiState.value = _uiState.value.copy(isDeletingRecipe = true)
+        viewModelScope.launch {
+            try {
+                ApiClient.service.deleteRecipe(recipe.recipeId)
+                _uiState.value = _uiState.value.copy(
+                    isDeletingRecipe = false,
+                    showDeleteRecipeConfirm = false,
+                    recipeToView = null
+                )
+                refreshSearchAfterAdd()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isDeletingRecipe = false,
+                    showDeleteRecipeConfirm = false,
+                    recipeDetailError = e.message ?: "Couldn't delete that recipe"
+                )
+            }
+        }
+    }
+
+    // --- Add ingredient (edit mode) -- reuses ItemResultsList/
+    // ItemQuantityDialog, same shared components CreateRecipeScreen's
+    // ingredient picker already uses, rather than a second search UI. ---
+
+    private var ingredientSearchJob: Job? = null
+
+    fun updateIngredientSearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(ingredientSearchQuery = query)
+        ingredientSearchJob?.cancel()
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(ingredientSearchResults = emptyList(), isSearchingIngredients = false)
+            return
+        }
+        _uiState.value = _uiState.value.copy(isSearchingIngredients = true)
+        ingredientSearchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            try {
+                val results = ApiClient.service.searchItems(query = query, type = null)
+                if (_uiState.value.ingredientSearchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearchingIngredients = false, ingredientSearchResults = results)
+                }
+            } catch (e: Exception) {
+                if (_uiState.value.ingredientSearchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearchingIngredients = false)
+                }
+            }
+        }
+    }
+
+    fun openIngredientQuantityPicker(item: Item) {
+        _uiState.value = _uiState.value.copy(
+            itemForIngredientPicker = item,
+            ingredientQuantityInput = "100",
+            ingredientServingSizeId = null,
+            addIngredientError = null
+        )
+    }
+
+    fun dismissIngredientQuantityPicker() {
+        _uiState.value = _uiState.value.copy(itemForIngredientPicker = null, addIngredientError = null)
+    }
+
+    fun updateIngredientQuantityInput(value: String) {
+        _uiState.value = _uiState.value.copy(ingredientQuantityInput = value)
+    }
+
+    /** Resets quantity to "0" on unit change -- same reasoning as
+     * MealDetailViewModel's other quantity/serving pickers (see
+     * updateLogServingSize's doc comment). */
+    fun updateIngredientServingSize(servingSizeId: Int?) {
+        _uiState.value = _uiState.value.copy(ingredientServingSizeId = servingSizeId, ingredientQuantityInput = "0")
+    }
+
+    fun confirmAddIngredient() {
+        val state = _uiState.value
+        val recipe = state.recipeToView ?: return
+        val item = state.itemForIngredientPicker ?: return
+        val quantity = state.ingredientQuantityInput.toDoubleOrNull()
+        if (quantity == null || quantity <= 0.0) {
+            _uiState.value = state.copy(addIngredientError = "Enter a valid quantity")
+            return
+        }
+
+        _uiState.value = state.copy(isAddingIngredient = true, addIngredientError = null)
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.addRecipeIngredient(
+                    recipe.recipeId,
+                    RecipeIngredientCreateRequest(
+                        itemId = item.itemId,
+                        servingSizeId = state.ingredientServingSizeId,
+                        quantity = quantity
+                    )
+                )
+                _uiState.value = _uiState.value.copy(
+                    isAddingIngredient = false,
+                    itemForIngredientPicker = null,
+                    recipeToView = updated,
+                    ingredientSearchQuery = "",
+                    ingredientSearchResults = emptyList()
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isAddingIngredient = false,
+                    addIngredientError = e.message ?: "Couldn't add that ingredient"
+                )
+            }
+        }
+    }
+
+    // --- Remove ingredient (edit mode) ---
+
+    fun requestRemoveIngredient(ingredient: RecipeIngredient) {
+        _uiState.value = _uiState.value.copy(ingredientPendingRemoval = ingredient)
+    }
+
+    fun dismissRemoveIngredientConfirm() {
+        _uiState.value = _uiState.value.copy(ingredientPendingRemoval = null)
+    }
+
+    fun confirmRemoveIngredient() {
+        val recipe = _uiState.value.recipeToView ?: return
+        val ingredient = _uiState.value.ingredientPendingRemoval ?: return
+        _uiState.value = _uiState.value.copy(isRemovingIngredient = true)
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.removeRecipeIngredient(recipe.recipeId, ingredient.itemId)
+                _uiState.value = _uiState.value.copy(
+                    isRemovingIngredient = false,
+                    ingredientPendingRemoval = null,
+                    recipeToView = updated
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isRemovingIngredient = false,
+                    ingredientPendingRemoval = null,
+                    recipeDetailError = e.message ?: "Couldn't remove that ingredient"
+                )
+            }
+        }
+    }
+
+    // --- Change recipe/meal image (tap the hero card) ---
+
+    fun updateRecipeImage(imagePath: String) {
+        val recipe = _uiState.value.recipeToView ?: return
+        _uiState.value = _uiState.value.copy(isUploadingRecipeImage = true, recipeImageError = null)
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.updateRecipe(
+                    recipe.recipeId,
+                    RecipeUpdateRequest(imagePath = imagePath)
+                )
+                _uiState.value = _uiState.value.copy(isUploadingRecipeImage = false, recipeToView = updated)
+                refreshSearchAfterAdd()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isUploadingRecipeImage = false,
+                    recipeImageError = e.message ?: "Couldn't update the photo"
+                )
+            }
+        }
+    }
+
     /** Tap-to-log from Saved or Search results - see QUICK_LOG_QUANTITY_G
      * for the flat-100g simplification this currently uses. */
     /** Uses whatever quantity/serving was last used for THIS item (see
@@ -1036,17 +1318,12 @@ class MealDetailViewModel : ViewModel() {
      * recipe_type="meal" (see backend design doc: a saved Meal is just a
      * recipe with servings=1, editable afterward like any recipe).
      *
-     * Converts EVERY item-based log to grams, whether it was logged
-     * directly in grams or via a named serving (e.g. "2 pancakes") -
-     * the latter needs an extra per-item lookup (the ServingSize's
-     * weight_g) to compute quantity x weight_g, which is why this whole
-     * function now needs to be async even before the actual POST
-     * /recipes call. This used to silently DROP any log that used a
-     * serving size instead of raw grams (documented here as a known
-     * limitation, but in practice this meant "Save as Meal" produced an
-     * empty ingredients list for the very common case of logging
-     * something in servings rather than typing grams - e.g. exactly
-     * "2 pancakes").
+     * Passes each log's quantity/servingSizeId straight through --
+     * recipe_ingredients can now natively store a serving the same way
+     * logs do (see the "custom servings for recipe ingredients" schema
+     * change), so there's no longer a need to fetch each item and
+     * convert servings to grams here; the backend/display layer handles
+     * that the same way it already does for logs.
      *
      * Recipe-based logs are still skipped, since recipe_ingredients can
      * only reference items, not other recipes.
@@ -1056,31 +1333,16 @@ class MealDetailViewModel : ViewModel() {
         val name = state.mealNameInput.trim()
         if (name.isEmpty()) return
 
-        val itemLogs = state.logs.filter { it.itemId != null }
+        val ingredients = state.logs.mapNotNull { log ->
+            val itemId = log.itemId ?: return@mapNotNull null
+            val quantity = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
+            RecipeIngredientCreateRequest(itemId = itemId, servingSizeId = log.servingSizeId, quantity = quantity)
+        }
 
         _uiState.value = state.copy(isSavingMeal = true, saveMealError = null)
 
         viewModelScope.launch {
             try {
-                // Cache one Item fetch per distinct itemId that actually
-                // needs it (has at least one serving-based log) - avoids
-                // re-fetching the same item once per log if it appears
-                // more than once with different servings.
-                val itemCache = mutableMapOf<Int, Item>()
-                val ingredients = itemLogs.mapNotNull { log ->
-                    val itemId = log.itemId ?: return@mapNotNull null
-                    val quantity = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
-                    val grams = if (log.servingSizeId == null) {
-                        quantity
-                    } else {
-                        val item = itemCache.getOrPut(itemId) { ApiClient.service.getItem(itemId) }
-                        val serving = item.servingSizes.find { it.id == log.servingSizeId } ?: return@mapNotNull null
-                        val weightG = serving.weightG.toDoubleOrNull() ?: return@mapNotNull null
-                        quantity * weightG
-                    }
-                    RecipeIngredientCreateRequest(itemId = itemId, quantityG = grams)
-                }
-
                 ApiClient.service.createRecipe(
                     RecipeCreateRequest(name = name, recipeType = "meal", servings = 1.0, ingredients = ingredients)
                 )

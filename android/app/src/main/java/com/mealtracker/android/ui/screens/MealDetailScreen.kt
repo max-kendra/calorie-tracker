@@ -13,6 +13,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -61,7 +61,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetScaffoldState
@@ -94,11 +93,13 @@ import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeDetail
+import com.mealtracker.android.network.models.RecipeIngredient
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.health.HealthConnectManager
 import com.mealtracker.android.health.HealthConnectPreferences
 import com.mealtracker.android.ui.components.CatalogVisuals
 import com.mealtracker.android.ui.components.CreateServingDialog
+import com.mealtracker.android.ui.components.ItemQuantityDialog
 import com.mealtracker.android.ui.components.ItemResultsList
 import com.mealtracker.android.ui.components.CropDialog
 import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
@@ -176,7 +177,22 @@ fun MealDetailScreen(
     // since Log didn't expose them at all -- now that the backend
     // returns them (see design discussion), this syncs the full set
     // NutritionRecord supports, not a partial picture.
-    LaunchedEffect(state.logs, date, mealType) {
+    LaunchedEffect(state.logs, state.isLoading, date, mealType) {
+        // Critical guard, not an optimization: state.logs defaults to
+        // emptyList() and isLoading defaults to true BEFORE the real
+        // network response arrives (see MealDetailUiState's defaults).
+        // Without this check, this effect fired on every single screen
+        // open with that placeholder empty list, indistinguishable from
+        // "this meal genuinely has nothing logged" -- which called
+        // deleteMealNutrition and wiped whatever was already synced for
+        // that day/meal, before the follow-up effect (once real data
+        // loaded) had a chance to write it back. If the screen was
+        // closed/navigated away before that second effect completed,
+        // the deletion was the only thing that actually took effect,
+        // permanently (see design discussion: "i'm not sure what
+        // triggers the push... and the one log we did have there is
+        // gone" -- this was why).
+        if (state.isLoading) return@LaunchedEffect
         if (!HealthConnectPreferences.isNutritionExportEnabled(healthConnectContext)) return@LaunchedEffect
         if (!HealthConnectManager.isAvailable(healthConnectContext)) return@LaunchedEffect
         if (!HealthConnectManager.hasNutritionPermission(healthConnectContext)) return@LaunchedEffect
@@ -292,27 +308,6 @@ fun MealDetailScreen(
             onDelete = { viewModel.deleteLog(selectedLog.id) },
             onDismiss = { viewModel.dismissLogDetail() }
         )
-    }
-
-    val recipeToView = state.recipeToView
-    if (recipeToView != null) {
-        RecipeInfoDialog(
-            recipe = recipeToView,
-            quantityInput = state.recipeLogQuantityInput,
-            isLogging = state.isLoggingRecipeDetail,
-            error = state.recipeDetailError,
-            onQuantityChange = { viewModel.updateRecipeLogQuantityInput(it) },
-            onConfirm = { viewModel.confirmRecipeLog() },
-            onDismiss = { viewModel.dismissRecipeDetail() }
-        )
-    } else if (state.isLoadingRecipeDetail) {
-        Dialog(onDismissRequest = { viewModel.dismissRecipeDetail() }) {
-            Surface(shape = RoundedCornerShape(20.dp)) {
-                Box(modifier = Modifier.padding(32.dp)) {
-                    CircularProgressIndicator()
-                }
-            }
-        }
     }
 
     BottomSheetScaffold(
@@ -481,31 +476,17 @@ fun MealDetailScreen(
                             }
                         )
                     }
-                    AddItemSheetMode.CREATE -> {
-                        // Same per-meal scoping reasoning as
-                        // AddItemViewModel above -- a fresh build each
-                        // time this meal's Create tab is re-entered,
-                        // rather than resuming a half-finished recipe
-                        // from switching meals and back.
-                        val createRecipeViewModel: CreateRecipeViewModel =
-                            viewModel(key = "create_recipe_${date}_$mealType")
-                        CreateRecipeContent(
-                            viewModel = createRecipeViewModel,
-                            lastLoggedAmounts = state.lastLoggedAmounts,
-                            onLogToMeal = { recipe ->
-                                viewModel.logRecipeQuickly(recipe)
-                                createRecipeViewModel.reset()
-                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
-                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
-                            },
-                            onDone = {
-                                createRecipeViewModel.reset()
-                                viewModel.setSheetMode(AddItemSheetMode.SEARCH)
-                                viewModel.refreshSearchAfterAdd()
-                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
-                            }
-                        )
-                    }
+                    // Renders full-screen instead, as a later Box
+                    // sibling outside BottomSheetScaffold entirely (see
+                    // the createRecipeViewModel block near
+                    // ItemLogPageDialog/RecipeInfoScreen's own mounting
+                    // point) -- this used to render right here, confined
+                    // to the sheet's own height, which meant the
+                    // keyboard ate most of the available space the
+                    // moment any text field inside it (search, barcode
+                    // entry, etc) got focus (see design discussion:
+                    // "the keyboard obscures most of it").
+                    AddItemSheetMode.CREATE -> {}
                 }
                 }
                 SheetModeContent()
@@ -579,6 +560,112 @@ fun MealDetailScreen(
     // wrapping itself in a separate Dialog (which had the same
     // unreliable full-screen sizing issue CropDialog itself used to
     // have, before being fixed the same way).
+    // Same "later Box sibling, not a Dialog()" reasoning as
+    // ItemLogPageDialog just below -- see that composable's own doc
+    // comment for the full history of why.
+    // Full-screen, not confined to the bottom sheet -- see the empty
+    // AddItemSheetMode.CREATE branch inside sheetContent for why (the
+    // keyboard ate most of the sheet's available height whenever any
+    // text field in this flow, including the embedded barcode/search
+    // screen, got focus).
+    if (state.sheetMode == AddItemSheetMode.CREATE) {
+        // Same per-meal scoping reasoning as AddItemViewModel elsewhere
+        // in this screen -- a fresh build each time this meal's Create
+        // tab is re-entered, rather than resuming a half-finished
+        // recipe from switching meals and back.
+        val createRecipeViewModel: CreateRecipeViewModel =
+            viewModel(key = "create_recipe_${date}_$mealType")
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+            CreateRecipeContent(
+                viewModel = createRecipeViewModel,
+                lastLoggedAmounts = state.lastLoggedAmounts,
+                onLogToMeal = { recipe ->
+                    viewModel.logRecipeQuickly(recipe)
+                    createRecipeViewModel.reset()
+                    viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                    coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                },
+                onDone = {
+                    createRecipeViewModel.reset()
+                    viewModel.setSheetMode(AddItemSheetMode.SEARCH)
+                    viewModel.refreshSearchAfterAdd()
+                    coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                }
+            )
+        }
+    }
+
+    val recipeToView = state.recipeToView
+    if (recipeToView != null) {
+        RecipeInfoScreen(
+            recipe = recipeToView,
+            quantityInput = state.recipeLogQuantityInput,
+            isLogging = state.isLoggingRecipeDetail,
+            error = state.recipeDetailError,
+            onQuantityChange = { viewModel.updateRecipeLogQuantityInput(it) },
+            onConfirm = { viewModel.confirmRecipeLog() },
+            onDismiss = { viewModel.dismissRecipeDetail() },
+            isEditing = state.isEditingRecipe,
+            editName = state.editRecipeName,
+            editServings = state.editRecipeServings,
+            isSavingEdit = state.isSavingRecipeEdit,
+            editError = state.recipeEditError,
+            onEditClick = { viewModel.openRecipeEdit() },
+            onEditNameChange = { viewModel.updateEditRecipeName(it) },
+            onEditServingsChange = { viewModel.updateEditRecipeServings(it) },
+            onSaveEdit = { viewModel.saveRecipeEdit() },
+            onCancelEdit = { viewModel.dismissRecipeEdit() },
+            showDeleteConfirm = state.showDeleteRecipeConfirm,
+            isDeleting = state.isDeletingRecipe,
+            onRequestDelete = { viewModel.requestDeleteRecipe() },
+            onConfirmDelete = { viewModel.confirmDeleteRecipe() },
+            onDismissDeleteConfirm = { viewModel.dismissDeleteRecipeConfirm() },
+            ingredientSearchQuery = state.ingredientSearchQuery,
+            ingredientSearchResults = state.ingredientSearchResults,
+            isSearchingIngredients = state.isSearchingIngredients,
+            onIngredientSearchQueryChange = { viewModel.updateIngredientSearchQuery(it) },
+            itemForIngredientPicker = state.itemForIngredientPicker,
+            ingredientQuantityInput = state.ingredientQuantityInput,
+            ingredientServingSizeId = state.ingredientServingSizeId,
+            isAddingIngredient = state.isAddingIngredient,
+            addIngredientError = state.addIngredientError,
+            onOpenIngredientPicker = { viewModel.openIngredientQuantityPicker(it) },
+            onDismissIngredientPicker = { viewModel.dismissIngredientQuantityPicker() },
+            onIngredientQuantityChange = { viewModel.updateIngredientQuantityInput(it) },
+            onIngredientServingChange = { viewModel.updateIngredientServingSize(it) },
+            onConfirmAddIngredient = { viewModel.confirmAddIngredient() },
+            ingredientPendingRemoval = state.ingredientPendingRemoval,
+            isRemovingIngredient = state.isRemovingIngredient,
+            onRequestRemoveIngredient = { viewModel.requestRemoveIngredient(it) },
+            onDismissRemoveIngredientConfirm = { viewModel.dismissRemoveIngredientConfirm() },
+            onConfirmRemoveIngredient = { viewModel.confirmRemoveIngredient() },
+            isUploadingImage = state.isUploadingRecipeImage,
+            imageError = state.recipeImageError,
+            onImageChanged = { viewModel.updateRecipeImage(it) }
+        )
+    } else if (state.isLoadingRecipeDetail) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+            IconButton(onClick = { viewModel.dismissRecipeDetail() }, modifier = Modifier.padding(8.dp)) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+            }
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+    }
+
     val itemToLog = state.itemToLog
     if (itemToLog != null) {
         ItemLogPageDialog(
@@ -930,78 +1017,362 @@ private fun RecipeResultsList(
  * design discussion: this used to not exist at all, tapping just
  * silently quick-logged the same as the "+" button, unlike items which
  * have ItemLogPageDialog for this). Shows what's actually in it
- * (ingredients, per-serving totals) before logging, same idea as items'
- * info page just simpler -- no serving/unit picker (recipes don't have
- * one), no photo editing, no macro-goal progress bars.
+ * (ingredients, per-serving totals) before logging, and now also
+ * supports editing (name/servings), deleting the recipe entirely,
+ * adding/removing ingredients, and changing its photo -- see design
+ * discussion: "we should also be able to edit existing recipes and
+ * delete them".
  *
- * "recipe" type gets an editable quantity (servings) field, since
- * LoggableEntryBase's quantity semantics for a recipe log are "number of
- * servings consumed". "meal" type has no such field -- see
+ * Same hero-image/scrollable-card treatment as ItemLogPageDialog below,
+ * including the same "plain composable, later Box sibling, no Dialog()
+ * wrapper" reasoning (see that composable's own doc comment for the
+ * full history). Tapping the hero (not long-press, unlike
+ * ItemLogPageDialog) opens the same camera/gallery/crop/upload pipeline,
+ * just targeting the recipe's own image_path via PATCH /recipes/{id}
+ * instead of an item's.
+ *
+ * Ingredient rows use the exact same image/name/quantity-or-serving/kcal
+ * layout as LogRow in the Journal, per design discussion ("i'd like the
+ * ingredient list to be the same as the one in the journal") -- see
+ * IngredientRow below.
+ *
+ * "recipe" type gets an editable quantity (servings) field for LOGGING
+ * (not editing), since LoggableEntryBase's quantity semantics for a
+ * recipe log are "number of servings consumed", and shows its total
+ * servings count. "meal" type has neither -- see
  * MealDetailUiState.recipeLogQuantityInput's doc comment for why (a meal
- * logs its originally-captured per-ingredient amounts as-is).
+ * logs its originally-captured per-ingredient amounts as-is, and is
+ * always exactly one serving, so showing/editing a servings count for
+ * it would be showing a number that's never actually meaningful).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecipeInfoDialog(
+private fun RecipeInfoScreen(
     recipe: RecipeDetail,
     quantityInput: String,
     isLogging: Boolean,
     error: String?,
     onQuantityChange: (String) -> Unit,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isEditing: Boolean,
+    editName: String,
+    editServings: String,
+    isSavingEdit: Boolean,
+    editError: String?,
+    onEditClick: () -> Unit,
+    onEditNameChange: (String) -> Unit,
+    onEditServingsChange: (String) -> Unit,
+    onSaveEdit: () -> Unit,
+    onCancelEdit: () -> Unit,
+    showDeleteConfirm: Boolean,
+    isDeleting: Boolean,
+    onRequestDelete: () -> Unit,
+    onConfirmDelete: () -> Unit,
+    onDismissDeleteConfirm: () -> Unit,
+    ingredientSearchQuery: String,
+    ingredientSearchResults: List<Item>,
+    isSearchingIngredients: Boolean,
+    onIngredientSearchQueryChange: (String) -> Unit,
+    itemForIngredientPicker: Item?,
+    ingredientQuantityInput: String,
+    ingredientServingSizeId: Int?,
+    isAddingIngredient: Boolean,
+    addIngredientError: String?,
+    onOpenIngredientPicker: (Item) -> Unit,
+    onDismissIngredientPicker: () -> Unit,
+    onIngredientQuantityChange: (String) -> Unit,
+    onIngredientServingChange: (Int?) -> Unit,
+    onConfirmAddIngredient: () -> Unit,
+    ingredientPendingRemoval: RecipeIngredient?,
+    isRemovingIngredient: Boolean,
+    onRequestRemoveIngredient: (RecipeIngredient) -> Unit,
+    onDismissRemoveIngredientConfirm: () -> Unit,
+    onConfirmRemoveIngredient: () -> Unit,
+    isUploadingImage: Boolean,
+    imageError: String?,
+    onImageChanged: (String) -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Column(
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Same tap-to-change-photo pipeline as ItemLogPageDialog's own
+    // (long-press there, tap here -- see this composable's doc comment
+    // for why the trigger differs) -- capture/crop staging kept local
+    // to this Composable, same reasoning as that one.
+    var showImageChangeMenu by remember { mutableStateOf(false) }
+    var pendingCropSourceUri by remember { mutableStateOf<Uri?>(null) }
+    var cropSourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun clearCropState() {
+        pendingCropSourceUri = null
+        cropSourceBitmap = null
+    }
+
+    LaunchedEffect(pendingCropSourceUri) {
+        val uri = pendingCropSourceUri ?: return@LaunchedEffect
+        val bitmap = withContext(Dispatchers.IO) {
+            try {
+                decodeBitmapWithCorrectOrientation(context, uri)
+            } catch (e: Exception) {
+                null
+            }
+        }
+        if (bitmap == null) {
+            clearCropState()
+        } else {
+            cropSourceBitmap = bitmap
+        }
+    }
+
+    fun uploadNewImage(bytes: ByteArray) {
+        coroutineScope.launch {
+            try {
+                val requestBody = bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+                val part = MultipartBody.Part.createFormData("image", "photo.jpg", requestBody)
+                val scanResult = ApiClient.service.scanProductPhoto(part)
+                onImageChanged(scanResult.imagePath)
+            } catch (e: Exception) {
+                // Surfaced via imageError, already threaded through from
+                // the ViewModel's own catch block around updateRecipe.
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) pendingCropSourceUri = pendingCameraUri
+    }
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) pendingCropSourceUri = uri
+    }
+
+    fun launchCamera() {
+        val file = java.io.File(context.cacheDir, "recipe_photo_${System.currentTimeMillis()}.jpg")
+        file.createNewFile()
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+        pendingCameraUri = uri
+        cameraLauncher.launch(uri)
+    }
+
+    if (showImageChangeMenu) {
+        AlertDialog(
+            onDismissRequest = { showImageChangeMenu = false },
+            title = { Text("Change photo") },
+            text = { Text("Take a photo or pick one from your gallery.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImageChangeMenu = false
+                    launchCamera()
+                }) { Text("Take Photo") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImageChangeMenu = false
+                    galleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }) { Text("Choose from Gallery") }
+            }
+        )
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = onDismissDeleteConfirm,
+            title = { Text("Delete this ${if (recipe.recipeType == "meal") "meal" else "recipe"}?") },
+            text = { Text("This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = onConfirmDelete, enabled = !isDeleting) {
+                    Text(if (isDeleting) "Deleting..." else "Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissDeleteConfirm) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (ingredientPendingRemoval != null) {
+        AlertDialog(
+            onDismissRequest = onDismissRemoveIngredientConfirm,
+            title = { Text("Remove ${ingredientPendingRemoval.itemName}?") },
+            text = { Text("This removes it from the ${if (recipe.recipeType == "meal") "meal" else "recipe"}.") },
+            confirmButton = {
+                TextButton(onClick = onConfirmRemoveIngredient, enabled = !isRemovingIngredient) {
+                    Text(if (isRemovingIngredient) "Removing..." else "Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissRemoveIngredientConfirm) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (itemForIngredientPicker != null) {
+        ItemQuantityDialog(
+            item = itemForIngredientPicker,
+            quantityInput = ingredientQuantityInput,
+            servingSizeId = ingredientServingSizeId,
+            isSaving = isAddingIngredient,
+            error = addIngredientError,
+            confirmLabel = "Add ingredient",
+            onQuantityChange = onIngredientQuantityChange,
+            onServingChange = onIngredientServingChange,
+            onCreateNewServing = {},
+            onConfirm = onConfirmAddIngredient,
+            onDismiss = onDismissIngredientPicker
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 600.dp)
+                    .height(240.dp)
+                    .clickable { showImageChangeMenu = true }
+            ) {
+                if (recipe.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + recipe.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(CatalogVisuals.backgroundFor(recipe.recipeType)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            CatalogVisuals.iconFor(recipe.recipeType),
+                            contentDescription = null,
+                            tint = CatalogVisuals.iconTint(),
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
+                }
+                if (isUploadingImage) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(8.dp)
+                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                ) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                }
+            }
+            if (imageError != null) {
+                Text(
+                    imageError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(20.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(CatalogVisuals.backgroundFor(recipe.recipeType)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (recipe.imagePath != null) {
-                            coil3.compose.AsyncImage(
-                                model = com.mealtracker.android.BuildConfig.BASE_URL + recipe.imagePath,
-                                contentDescription = null,
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(
-                                CatalogVisuals.iconFor(recipe.recipeType),
-                                contentDescription = null,
-                                tint = CatalogVisuals.iconTint(),
-                                modifier = Modifier.size(24.dp)
-                            )
+                if (isEditing) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Edit ${if (recipe.recipeType == "meal") "meal" else "recipe"}", style = MaterialTheme.typography.titleMedium)
+                    }
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                    val focusManager = LocalFocusManager.current
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = onEditNameChange,
+                        label = { Text("Name") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = if (recipe.recipeType == "meal") ImeAction.Done else ImeAction.Next
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { focusManager.moveFocus(FocusDirection.Down) },
+                            onDone = { focusManager.clearFocus() }
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    // Meals are always exactly one serving -- no field
+                    // to edit, see this composable's own doc comment.
+                    if (recipe.recipeType != "meal") {
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                        OutlinedTextField(
+                            value = editServings,
+                            onValueChange = onEditServingsChange,
+                            label = { Text("Servings") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    if (editError != null) {
+                        Text(
+                            editError,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = onCancelEdit, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                        Button(onClick = onSaveEdit, enabled = !isSavingEdit, modifier = Modifier.weight(1f)) {
+                            Text(if (isSavingEdit) "Saving..." else "Save")
                         }
                     }
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 12.dp))
-                    Text(recipe.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(recipe.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                        IconButton(onClick = onEditClick) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit name and servings")
+                        }
                     }
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                    Text(
+                        // Meals are always exactly one serving -- showing
+                        // a servings count for that type would be
+                        // showing a number that's never actually
+                        // meaningful, see this composable's doc comment.
+                        if (recipe.recipeType == "meal") {
+                            "${recipe.totalsPerServing.kcal} Cal"
+                        } else {
+                            "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
-                Text(
-                    "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
                 Text("Ingredients", style = MaterialTheme.typography.titleSmall)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
                 if (recipe.ingredients.isEmpty()) {
                     Text(
                         "No ingredients listed.",
@@ -1010,52 +1381,151 @@ private fun RecipeInfoDialog(
                     )
                 } else {
                     recipe.ingredients.forEach { ingredient ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(ingredient.itemName, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${ingredient.quantityG.toDoubleOrNull()?.let { formatQuantity(it) } ?: ingredient.quantityG}g",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        IngredientRow(
+                            ingredient = ingredient,
+                            showRemove = isEditing,
+                            onRemoveClick = { onRequestRemoveIngredient(ingredient) }
+                        )
                     }
                 }
 
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-
-                if (recipe.recipeType == "meal") {
-                    Text(
-                        "Logs this meal's original ingredients and amounts.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
+                if (isEditing) {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
                     OutlinedTextField(
-                        value = quantityInput,
-                        onValueChange = onQuantityChange,
-                        label = { Text("Servings") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        value = ingredientSearchQuery,
+                        onValueChange = onIngredientSearchQueryChange,
+                        label = { Text("Add ingredient") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                }
+                    if (ingredientSearchQuery.isNotBlank()) {
+                        ItemResultsList(
+                            items = ingredientSearchResults,
+                            isLoading = isSearchingIngredients,
+                            emptyMessage = "No matches",
+                            quickLoggingItemId = null,
+                            lastLoggedAmounts = emptyMap(),
+                            onItemClick = onOpenIngredientPicker,
+                            onQuickAddClick = { itemId ->
+                                ingredientSearchResults.find { it.itemId == itemId }?.let(onOpenIngredientPicker)
+                            }
+                        )
+                    }
 
-                if (error != null) {
-                    Text(
-                        error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp)
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
+                    TextButton(onClick = onRequestDelete) {
+                        Text(
+                            "Delete this ${if (recipe.recipeType == "meal") "meal" else "recipe"}",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
+
+                    if (recipe.recipeType == "meal") {
+                        Text(
+                            "Logs this meal's original ingredients and amounts.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = quantityInput,
+                            onValueChange = onQuantityChange,
+                            label = { Text("Servings") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (error != null) {
+                        Text(
+                            error,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+                    Button(onClick = onConfirm, enabled = !isLogging, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (isLogging) "Logging..." else "Log this ${if (recipe.recipeType == "meal") "meal" else "recipe"}")
+                    }
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 20.dp))
+            }
+        }
+
+        if (cropSourceBitmap != null) {
+            CropDialog(
+                sourceBitmap = cropSourceBitmap!!,
+                onCropped = { cropped ->
+                    val stream = java.io.ByteArrayOutputStream()
+                    cropped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                    clearCropState()
+                    uploadNewImage(stream.toByteArray())
+                },
+                onCancel = { clearCropState() }
+            )
+        }
+    }
+}
+
+/** Same image/name/quantity-or-serving/kcal layout as Journal's LogRow
+ * (see design discussion: "i'd like the ingredient list to be the same
+ * as the one in the journal"). showRemove/onRemoveClick add a small red
+ * "Remove" text below the row, edit-mode only -- same "smaller red
+ * text... with an are you sure dialog" pattern requested for deleting
+ * the whole recipe, applied per-ingredient here (the actual confirm
+ * dialog itself lives in RecipeInfoScreen, this just requests it). */
+@Composable
+private fun IngredientRow(ingredient: RecipeIngredient, showRemove: Boolean, onRemoveClick: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(CatalogVisuals.backgroundFor("product")),
+                contentAlignment = Alignment.Center
+            ) {
+                if (ingredient.imagePath != null) {
+                    coil3.compose.AsyncImage(
+                        model = com.mealtracker.android.BuildConfig.BASE_URL + ingredient.imagePath,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        CatalogVisuals.iconFor("product"),
+                        contentDescription = null,
+                        tint = CatalogVisuals.iconTint(),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-                Button(onClick = onConfirm, enabled = !isLogging, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (isLogging) "Logging..." else "Log this ${if (recipe.recipeType == "meal") "meal" else "recipe"}")
-                }
+            }
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(ingredient.itemName, style = MaterialTheme.typography.bodyLarge)
+                // Same servingSizeName-or-grams fallback as LogRow -- see
+                // that composable's own doc comment for the exact bug
+                // this avoids repeating (always showing grams even when
+                // a named serving was actually used).
+                Text(
+                    "${ingredient.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: ingredient.quantity}" +
+                        (ingredient.servingSizeName?.let { " $it" } ?: "g"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text("${ingredient.kcal} Cal", style = MaterialTheme.typography.bodyLarge)
+        }
+        if (showRemove) {
+            TextButton(onClick = onRemoveClick, contentPadding = PaddingValues(0.dp)) {
+                Text("Remove", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -1707,14 +2177,30 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
     // Swipe LEFT (EndToStart) to delete -- StartToEnd disabled so a
     // stray right-swipe doesn't accidentally trigger it, per design
     // discussion ("swiping the item to the left").
+    //
+    // confirmValueChange always returns false here, deliberately -- it
+    // used to return true on EndToStart, which let the box commit
+    // internally to its own "dismissed" visual state immediately,
+    // before onDelete()'s actual network call had even resolved. If
+    // that call was slow, or failed, or the log list re-rendered for
+    // any unrelated reason in between, the row could end up stuck: still
+    // present in the list, but with its swipe state already "confirmed
+    // dismissed", so it rendered in the fully-swiped-away position and
+    // stopped responding to further swipes (see design discussion:
+    // "swiping left to delete an item doesn't always work correctly and
+    // gets stuck"). Returning false instead means the box ALWAYS snaps
+    // back to resting after any swipe attempt -- onDelete() still fires
+    // as a side effect, but whether the row actually disappears is
+    // driven purely by it being removed from state.logs once the delete
+    // succeeds (ordinary recomposition), not by the swipe box's own
+    // internal state. If the delete fails, the row is simply back to
+    // normal and swipeable again, instead of stuck.
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart) {
                 onDelete()
-                true
-            } else {
-                false
             }
+            false
         }
     )
 
@@ -1777,17 +2263,21 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(log.itemName ?: log.recipeName ?: "Unknown", style = MaterialTheme.typography.bodyLarge)
-                // Uses the actual serving name when this log used one
-                // (e.g. "2 slices") -- falls back to grams only when
-                // servingSizeName is null, i.e. this was logged as raw
-                // grams with no serving selected. Previously this always
-                // showed grams regardless, since the backend didn't send
-                // the serving's name down at all, only its id, which the
-                // client had no way to resolve on its own (see design
-                // discussion).
+                // Recipe-based logs: quantity is "number of recipe
+                // servings consumed" (see LoggableEntryBase's quantity-
+                // semantics doc comment on the backend), never grams --
+                // showing "1g" here was wrong, it should read "1
+                // serving". Item-based logs keep the existing serving-
+                // name-or-grams display (see that branch's own doc
+                // comment for the bug it avoids repeating).
+                val quantityDisplay = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity
                 Text(
-                    "${log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity}" +
-                        (log.servingSizeName?.let { " $it" } ?: "g"),
+                    if (log.recipeId != null) {
+                        val servings = log.quantity.toDoubleOrNull() ?: 1.0
+                        "$quantityDisplay ${if (servings == 1.0) "serving" else "servings"}"
+                    } else {
+                        "$quantityDisplay" + (log.servingSizeName?.let { " $it" } ?: "g")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

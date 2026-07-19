@@ -178,7 +178,7 @@ def compute_recipe_totals(recipe: Recipe) -> RawTotals:
     """Sum across all recipe_ingredients - the whole recipe, all servings."""
     total = ZERO_TOTALS
     for ri in recipe.ingredients:
-        total = total + compute_item_totals(ri.item, ri.quantity_g)
+        total = total + compute_item_totals(ri.item, ri.quantity, ri.serving_size)
     return total
 
 

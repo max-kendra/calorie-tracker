@@ -298,7 +298,7 @@ class CreateRecipeViewModel : ViewModel() {
                         ingredients = state.ingredients.map {
                             RecipeIngredientCreateRequest(
                                 itemId = it.item.itemId,
-                                quantityG = it.quantityG
+                                quantity = it.quantityG
                             )
                         }
                     )

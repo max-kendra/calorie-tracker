@@ -167,8 +167,8 @@ fun AppNavHost(
             composable(Destination.Home.route) { HomeScreen() }
             composable(Destination.Journal.route) {
                 JournalScreen(
-                    onNavigateToMealDetail = { mealType ->
-                        navController.navigate("meal_detail/${java.time.LocalDate.now()}/$mealType")
+                    onNavigateToMealDetail = { date, mealType ->
+                        navController.navigate("meal_detail/$date/$mealType")
                     }
                 )
             }
