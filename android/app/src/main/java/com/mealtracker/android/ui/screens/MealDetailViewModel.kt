@@ -934,33 +934,51 @@ class MealDetailViewModel : ViewModel() {
      * recipe_type="meal" (see backend design doc: a saved Meal is just a
      * recipe with servings=1, editable afterward like any recipe).
      *
-     * LIMITATION: only logs that reference a real item AND were logged
-     * directly in grams (no serving_size_id) are included - converting
-     * a serving-size-based quantity to grams needs an extra lookup
-     * (the ServingSize's weight_g) that isn't fetched here. Recipe-based
-     * logs are also skipped, since recipe_ingredients can only reference
-     * items, not other recipes. Both are real gaps, not silent bugs -
-     * worth fixing if this turns out to matter in practice once logging
-     * itself is built (this screen currently has no way to create logs
-     * yet, so `logs` will typically be empty regardless).
+     * Converts EVERY item-based log to grams, whether it was logged
+     * directly in grams or via a named serving (e.g. "2 pancakes") -
+     * the latter needs an extra per-item lookup (the ServingSize's
+     * weight_g) to compute quantity x weight_g, which is why this whole
+     * function now needs to be async even before the actual POST
+     * /recipes call. This used to silently DROP any log that used a
+     * serving size instead of raw grams (documented here as a known
+     * limitation, but in practice this meant "Save as Meal" produced an
+     * empty ingredients list for the very common case of logging
+     * something in servings rather than typing grams - e.g. exactly
+     * "2 pancakes").
+     *
+     * Recipe-based logs are still skipped, since recipe_ingredients can
+     * only reference items, not other recipes.
      */
     fun saveAsMeal() {
         val state = _uiState.value
         val name = state.mealNameInput.trim()
         if (name.isEmpty()) return
 
-        val ingredients = state.logs
-            .filter { it.itemId != null && it.servingSizeId == null }
-            .mapNotNull { log ->
-                val itemId = log.itemId ?: return@mapNotNull null
-                val grams = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
-                RecipeIngredientCreateRequest(itemId = itemId, quantityG = grams)
-            }
+        val itemLogs = state.logs.filter { it.itemId != null }
 
         _uiState.value = state.copy(isSavingMeal = true, saveMealError = null)
 
         viewModelScope.launch {
             try {
+                // Cache one Item fetch per distinct itemId that actually
+                // needs it (has at least one serving-based log) - avoids
+                // re-fetching the same item once per log if it appears
+                // more than once with different servings.
+                val itemCache = mutableMapOf<Int, Item>()
+                val ingredients = itemLogs.mapNotNull { log ->
+                    val itemId = log.itemId ?: return@mapNotNull null
+                    val quantity = log.quantity.toDoubleOrNull() ?: return@mapNotNull null
+                    val grams = if (log.servingSizeId == null) {
+                        quantity
+                    } else {
+                        val item = itemCache.getOrPut(itemId) { ApiClient.service.getItem(itemId) }
+                        val serving = item.servingSizes.find { it.id == log.servingSizeId } ?: return@mapNotNull null
+                        val weightG = serving.weightG.toDoubleOrNull() ?: return@mapNotNull null
+                        quantity * weightG
+                    }
+                    RecipeIngredientCreateRequest(itemId = itemId, quantityG = grams)
+                }
+
                 ApiClient.service.createRecipe(
                     RecipeCreateRequest(name = name, recipeType = "meal", servings = 1.0, ingredients = ingredients)
                 )
