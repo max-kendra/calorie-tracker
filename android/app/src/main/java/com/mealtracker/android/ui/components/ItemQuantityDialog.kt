@@ -68,7 +68,13 @@ fun ItemQuantityDialog(
     onServingChange: (Int?) -> Unit,
     onCreateNewServing: () -> Unit,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    // Non-null only when editing an ingredient/log that already exists
+    // (as opposed to adding a new one) -- renders a small red "Remove"
+    // text below Save, same "smaller tappable text" convention used
+    // elsewhere in the app (e.g. deleting a recipe from its info
+    // screen), rather than a separate delete icon/button.
+    onRemove: (() -> Unit)? = null
 ) {
     var unitMenuExpanded by remember { mutableStateOf(false) }
     val selectedServing = item.servingSizes.find { it.id == servingSizeId }
@@ -178,6 +184,13 @@ fun ItemQuantityDialog(
 
                 Button(onClick = onConfirm, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
                     Text(if (isSaving) "Saving..." else confirmLabel)
+                }
+
+                if (onRemove != null) {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                    androidx.compose.material3.TextButton(onClick = onRemove, enabled = !isSaving) {
+                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }

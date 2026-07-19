@@ -151,12 +151,25 @@ class CreateRecipeViewModel : ViewModel() {
 
     // --- Ingredients phase: quantity picker (opened by tapping a search result) ---
 
-    fun openQuantityPicker(item: Item) {
+    /** Defaults to whatever quantity/serving this item already has IN
+     * THIS recipe if it's already an ingredient here, otherwise the
+     * last quantity/serving it was actually logged with anywhere (see
+     * lastLoggedAmounts' doc comment) -- falls back to a flat 100g only
+     * if neither is available (this item has never been logged at
+     * all). Previously always defaulted to 100g for any item not
+     * already in THIS specific recipe, meaning literally every new
+     * recipe/meal started from scratch regardless of how many times
+     * that item had been logged before (see design discussion: "each
+     * time i go to make a new meal, it's 100g again"). */
+    fun openQuantityPicker(item: Item, lastLoggedAmounts: Map<Int, LoggedAmount> = emptyMap()) {
         val existing = _uiState.value.ingredients.find { it.item.itemId == item.itemId }
+        val remembered = lastLoggedAmounts[item.itemId]
         _uiState.value = _uiState.value.copy(
             itemForQuantityPicker = item,
-            quantityPickerInput = existing?.quantityG?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "100",
-            quantityPickerServingSizeId = null
+            quantityPickerInput = existing?.quantityG?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() }
+                ?: remembered?.quantity?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() }
+                ?: "100",
+            quantityPickerServingSizeId = existing?.let { null } ?: remembered?.servingSizeId
         )
     }
 
@@ -168,10 +181,10 @@ class CreateRecipeViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(quantityPickerInput = value)
     }
 
-    /** Resets quantity to "0" whenever the unit changes -- see
+    /** Resets quantity to "1" whenever the unit changes -- see
      * createServing's doc comment on this same reasoning. */
     fun updateQuantityPickerServing(servingSizeId: Int?) {
-        _uiState.value = _uiState.value.copy(quantityPickerServingSizeId = servingSizeId, quantityPickerInput = "0")
+        _uiState.value = _uiState.value.copy(quantityPickerServingSizeId = servingSizeId, quantityPickerInput = "1")
     }
 
     /** Adds (or updates, if already in the list) the ingredient with
@@ -195,9 +208,7 @@ class CreateRecipeViewModel : ViewModel() {
         val withoutExisting = state.ingredients.filterNot { it.item.itemId == item.itemId }
         _uiState.value = state.copy(
             ingredients = withoutExisting + CreateRecipeIngredientRow(item, grams),
-            itemForQuantityPicker = null,
-            ingredientSearchQuery = "",
-            ingredientSearchResults = emptyList()
+            itemForQuantityPicker = null
         )
     }
 
@@ -263,13 +274,13 @@ class CreateRecipeViewModel : ViewModel() {
                     showCreateServingDialog = false,
                     itemForQuantityPicker = updatedItem,
                     quantityPickerServingSizeId = newServing?.id,
-                    // Reset to 0, same reasoning as
+                    // Reset to 1, same reasoning as
                     // updateQuantityPickerServing -- otherwise whatever
                     // gram quantity was typed before switching units gets
                     // reinterpreted as a multiplier of the NEW serving's
                     // weight (100 x a 62g protein bar = 6200g), which is
                     // never what was intended (see design discussion).
-                    quantityPickerInput = "0"
+                    quantityPickerInput = "1"
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

@@ -78,7 +78,16 @@ fun ItemResultsList(
             .verticalScroll(rememberScrollState())
     ) {
         when {
-            isLoading -> {
+            // Only blanks to a spinner on a genuine first load (no
+            // items yet) -- a refresh that already has items to show
+            // (e.g. after logging one, or a recipe-ingredient edit)
+            // used to flash the whole list away and back for every
+            // single such refresh, since isLoading was checked
+            // unconditionally here regardless of whether stale-but-
+            // still-valid items were already on screen (see design
+            // discussion: "the entire list reloads each time and
+            // disappears for a split second").
+            isLoading && items.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }

@@ -13,7 +13,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -38,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -371,6 +371,13 @@ fun MealDetailScreen(
                             label = { Text("Search for a food") },
                             shape = SEARCH_BAR_SHAPE,
                             singleLine = true,
+                            trailingIcon = if (state.searchQuery.isNotEmpty()) {
+                                {
+                                    IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                                    }
+                                }
+                            } else null,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                         )
                         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
@@ -629,22 +636,23 @@ fun MealDetailScreen(
             ingredientSearchQuery = state.ingredientSearchQuery,
             ingredientSearchResults = state.ingredientSearchResults,
             isSearchingIngredients = state.isSearchingIngredients,
+            recentIngredientItems = state.recentIngredientItems,
+            isLoadingRecentIngredientItems = state.isLoadingRecentIngredientItems,
             onIngredientSearchQueryChange = { viewModel.updateIngredientSearchQuery(it) },
             itemForIngredientPicker = state.itemForIngredientPicker,
             ingredientQuantityInput = state.ingredientQuantityInput,
             ingredientServingSizeId = state.ingredientServingSizeId,
+            editingIngredientItemId = state.editingIngredientItemId,
             isAddingIngredient = state.isAddingIngredient,
             addIngredientError = state.addIngredientError,
             onOpenIngredientPicker = { viewModel.openIngredientQuantityPicker(it) },
+            onOpenIngredientEdit = { viewModel.openIngredientEdit(it) },
             onDismissIngredientPicker = { viewModel.dismissIngredientQuantityPicker() },
             onIngredientQuantityChange = { viewModel.updateIngredientQuantityInput(it) },
             onIngredientServingChange = { viewModel.updateIngredientServingSize(it) },
             onConfirmAddIngredient = { viewModel.confirmAddIngredient() },
-            ingredientPendingRemoval = state.ingredientPendingRemoval,
-            isRemovingIngredient = state.isRemovingIngredient,
-            onRequestRemoveIngredient = { viewModel.requestRemoveIngredient(it) },
-            onDismissRemoveIngredientConfirm = { viewModel.dismissRemoveIngredientConfirm() },
-            onConfirmRemoveIngredient = { viewModel.confirmRemoveIngredient() },
+            onRemoveFromPicker = { viewModel.removeIngredientFromPicker() },
+            onRemoveBySwipe = { viewModel.removeIngredientBySwipe(it) },
             isUploadingImage = state.isUploadingRecipeImage,
             imageError = state.recipeImageError,
             onImageChanged = { viewModel.updateRecipeImage(it) }
@@ -940,7 +948,9 @@ private fun RecipeResultsList(
             .verticalScroll(rememberScrollState())
     ) {
         when {
-            isLoading -> {
+            // Same fix as ItemResultsList -- don't blank already-shown
+            // recipes to a spinner during a background refresh.
+            isLoading && recipes.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
@@ -1073,22 +1083,23 @@ private fun RecipeInfoScreen(
     ingredientSearchQuery: String,
     ingredientSearchResults: List<Item>,
     isSearchingIngredients: Boolean,
+    recentIngredientItems: List<Item>,
+    isLoadingRecentIngredientItems: Boolean,
     onIngredientSearchQueryChange: (String) -> Unit,
     itemForIngredientPicker: Item?,
     ingredientQuantityInput: String,
     ingredientServingSizeId: Int?,
+    editingIngredientItemId: Int?,
     isAddingIngredient: Boolean,
     addIngredientError: String?,
     onOpenIngredientPicker: (Item) -> Unit,
+    onOpenIngredientEdit: (RecipeIngredient) -> Unit,
     onDismissIngredientPicker: () -> Unit,
     onIngredientQuantityChange: (String) -> Unit,
     onIngredientServingChange: (Int?) -> Unit,
     onConfirmAddIngredient: () -> Unit,
-    ingredientPendingRemoval: RecipeIngredient?,
-    isRemovingIngredient: Boolean,
-    onRequestRemoveIngredient: (RecipeIngredient) -> Unit,
-    onDismissRemoveIngredientConfirm: () -> Unit,
-    onConfirmRemoveIngredient: () -> Unit,
+    onRemoveFromPicker: () -> Unit,
+    onRemoveBySwipe: (RecipeIngredient) -> Unit,
     isUploadingImage: Boolean,
     imageError: String?,
     onImageChanged: (String) -> Unit
@@ -1199,22 +1210,6 @@ private fun RecipeInfoScreen(
         )
     }
 
-    if (ingredientPendingRemoval != null) {
-        AlertDialog(
-            onDismissRequest = onDismissRemoveIngredientConfirm,
-            title = { Text("Remove ${ingredientPendingRemoval.itemName}?") },
-            text = { Text("This removes it from the ${if (recipe.recipeType == "meal") "meal" else "recipe"}.") },
-            confirmButton = {
-                TextButton(onClick = onConfirmRemoveIngredient, enabled = !isRemovingIngredient) {
-                    Text(if (isRemovingIngredient) "Removing..." else "Remove", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissRemoveIngredientConfirm) { Text("Cancel") }
-            }
-        )
-    }
-
     if (itemForIngredientPicker != null) {
         ItemQuantityDialog(
             item = itemForIngredientPicker,
@@ -1222,12 +1217,13 @@ private fun RecipeInfoScreen(
             servingSizeId = ingredientServingSizeId,
             isSaving = isAddingIngredient,
             error = addIngredientError,
-            confirmLabel = "Add ingredient",
+            confirmLabel = if (editingIngredientItemId != null) "Save" else "Add ingredient",
             onQuantityChange = onIngredientQuantityChange,
             onServingChange = onIngredientServingChange,
             onCreateNewServing = {},
             onConfirm = onConfirmAddIngredient,
-            onDismiss = onDismissIngredientPicker
+            onDismiss = onDismissIngredientPicker,
+            onRemove = if (editingIngredientItemId != null) onRemoveFromPicker else null
         )
     }
 
@@ -1383,36 +1379,56 @@ private fun RecipeInfoScreen(
                     recipe.ingredients.forEach { ingredient ->
                         IngredientRow(
                             ingredient = ingredient,
-                            showRemove = isEditing,
-                            onRemoveClick = { onRequestRemoveIngredient(ingredient) }
+                            isEditing = isEditing,
+                            onClick = { if (isEditing) onOpenIngredientEdit(ingredient) },
+                            onSwipeRemove = { onRemoveBySwipe(ingredient) }
                         )
                     }
                 }
 
                 if (isEditing) {
+                    // Genuinely the same search-list behavior as
+                    // everywhere else in the app (see design
+                    // discussion: "can we genuinely copy the way the
+                    // lists we already have behave") -- recent items
+                    // shown blank-query, debounced search once typing
+                    // starts, not a simplified "only show results once
+                    // you type" version.
                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+                    Text("Add ingredient", style = MaterialTheme.typography.titleSmall)
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
                     OutlinedTextField(
                         value = ingredientSearchQuery,
                         onValueChange = onIngredientSearchQueryChange,
-                        label = { Text("Add ingredient") },
+                        label = { Text("Search for an ingredient") },
                         singleLine = true,
+                        trailingIcon = if (ingredientSearchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { onIngredientSearchQueryChange("") }) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                                }
+                            }
+                        } else null,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (ingredientSearchQuery.isNotBlank()) {
-                        ItemResultsList(
-                            items = ingredientSearchResults,
-                            isLoading = isSearchingIngredients,
-                            emptyMessage = "No matches",
-                            quickLoggingItemId = null,
-                            lastLoggedAmounts = emptyMap(),
-                            onItemClick = onOpenIngredientPicker,
-                            onQuickAddClick = { itemId ->
-                                ingredientSearchResults.find { it.itemId == itemId }?.let(onOpenIngredientPicker)
-                            }
-                        )
-                    }
+                    ItemResultsList(
+                        items = if (ingredientSearchQuery.isBlank()) recentIngredientItems else ingredientSearchResults,
+                        isLoading = if (ingredientSearchQuery.isBlank()) isLoadingRecentIngredientItems else isSearchingIngredients,
+                        emptyMessage = if (ingredientSearchQuery.isBlank()) "No items yet" else "No matches",
+                        quickLoggingItemId = null,
+                        lastLoggedAmounts = emptyMap(),
+                        onItemClick = onOpenIngredientPicker,
+                        onQuickAddClick = { itemId ->
+                            val results = if (ingredientSearchQuery.isBlank()) recentIngredientItems else ingredientSearchResults
+                            results.find { it.itemId == itemId }?.let(onOpenIngredientPicker)
+                        }
+                    )
 
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
+                    // Small tappable text under the add-ingredient
+                    // section (see design discussion: "under the add
+                    // button, there should be smaller tappable text to
+                    // delete meal/recipe").
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
                     TextButton(onClick = onRequestDelete) {
                         Text(
                             "Delete this ${if (recipe.recipeType == "meal") "meal" else "recipe"}",
@@ -1475,15 +1491,30 @@ private fun RecipeInfoScreen(
 
 /** Same image/name/quantity-or-serving/kcal layout as Journal's LogRow
  * (see design discussion: "i'd like the ingredient list to be the same
- * as the one in the journal"). showRemove/onRemoveClick add a small red
- * "Remove" text below the row, edit-mode only -- same "smaller red
- * text... with an are you sure dialog" pattern requested for deleting
- * the whole recipe, applied per-ingredient here (the actual confirm
- * dialog itself lives in RecipeInfoScreen, this just requests it). */
+ * as the one in the journal"), and now the same INTERACTION pattern too
+ * -- tappable (opens the item's info to adjust quantity/serving or
+ * remove it entirely, edit mode only) and swipe-left-to-delete (same
+ * SwipeToDismissBox pattern as LogRow, see that composable's own doc
+ * comment for the "always snap back" reasoning this reuses). Not
+ * swipeable/tappable outside edit mode -- this is just an informational
+ * display when only logging, not editing. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IngredientRow(ingredient: RecipeIngredient, showRemove: Boolean, onRemoveClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+private fun IngredientRow(
+    ingredient: RecipeIngredient,
+    isEditing: Boolean,
+    onClick: () -> Unit,
+    onSwipeRemove: () -> Unit
+) {
+    val rowContent = @Composable {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .then(if (isEditing) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -1510,24 +1541,58 @@ private fun IngredientRow(ingredient: RecipeIngredient, showRemove: Boolean, onR
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(ingredient.itemName, style = MaterialTheme.typography.bodyLarge)
-                // Same servingSizeName-or-grams fallback as LogRow -- see
-                // that composable's own doc comment for the exact bug
-                // this avoids repeating (always showing grams even when
-                // a named serving was actually used).
+                // Same servingSizeName-or-grams fallback as LogRow, plus
+                // the same gram-equivalent suffix -- see that
+                // composable's own doc comment for the reasoning.
+                val ingredientQuantityValue = ingredient.quantity.toDoubleOrNull()
+                val ingredientServingWeightG = ingredient.servingSizeWeightG?.toDoubleOrNull()
+                val ingredientGramsSuffix = if (
+                    ingredient.servingSizeName != null && ingredientQuantityValue != null && ingredientServingWeightG != null
+                ) {
+                    " (${formatQuantity(ingredientQuantityValue * ingredientServingWeightG)}g)"
+                } else {
+                    ""
+                }
                 Text(
                     "${ingredient.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: ingredient.quantity}" +
-                        (ingredient.servingSizeName?.let { " $it" } ?: "g"),
+                        (ingredient.servingSizeName?.let { " $it$ingredientGramsSuffix" } ?: "g"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text("${ingredient.kcal} Cal", style = MaterialTheme.typography.bodyLarge)
         }
-        if (showRemove) {
-            TextButton(onClick = onRemoveClick, contentPadding = PaddingValues(0.dp)) {
-                Text("Remove", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
+
+    if (!isEditing) {
+        rowContent()
+        return
+    }
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onSwipeRemove()
+            }
+            false
+        }
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.error)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = Color.White)
             }
         }
+    ) {
+        rowContent()
     }
 }
 
@@ -2271,12 +2336,25 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
                 // name-or-grams display (see that branch's own doc
                 // comment for the bug it avoids repeating).
                 val quantityDisplay = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity
+                // When a custom serving was used, follows it up with the
+                // gram equivalent in parentheses (e.g. "2 slices (75g)")
+                // -- quantity alone doesn't tell you how much that
+                // actually was in grams, same reasoning as showing the
+                // serving name itself instead of just falling back to a
+                // meaningless raw quantity.
+                val quantityValue = log.quantity.toDoubleOrNull()
+                val servingWeightG = log.servingSizeWeightG?.toDoubleOrNull()
+                val gramsSuffix = if (log.servingSizeName != null && quantityValue != null && servingWeightG != null) {
+                    " (${formatQuantity(quantityValue * servingWeightG)}g)"
+                } else {
+                    ""
+                }
                 Text(
                     if (log.recipeId != null) {
                         val servings = log.quantity.toDoubleOrNull() ?: 1.0
                         "$quantityDisplay ${if (servings == 1.0) "serving" else "servings"}"
                     } else {
-                        "$quantityDisplay" + (log.servingSizeName?.let { " $it" } ?: "g")
+                        "$quantityDisplay" + (log.servingSizeName?.let { " $it$gramsSuffix" } ?: "g")
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

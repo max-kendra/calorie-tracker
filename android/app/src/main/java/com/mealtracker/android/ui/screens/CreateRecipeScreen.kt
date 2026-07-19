@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -233,6 +234,13 @@ private fun CreateRecipeIngredientsScreen(
                         onValueChange = viewModel::updateIngredientSearchQuery,
                         label = { Text("Search for an ingredient") },
                         singleLine = true,
+                        trailingIcon = if (state.ingredientSearchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { viewModel.updateIngredientSearchQuery("") }) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                                }
+                            }
+                        } else null,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -246,9 +254,9 @@ private fun CreateRecipeIngredientsScreen(
                     },
                     quickLoggingItemId = null,
                     lastLoggedAmounts = lastLoggedAmounts,
-                    onItemClick = { viewModel.openQuantityPicker(it) },
+                    onItemClick = { viewModel.openQuantityPicker(it, lastLoggedAmounts) },
                     onQuickAddClick = { itemId ->
-                        state.ingredientSearchResults.find { it.itemId == itemId }?.let { viewModel.openQuantityPicker(it) }
+                        state.ingredientSearchResults.find { it.itemId == itemId }?.let { viewModel.openQuantityPicker(it, lastLoggedAmounts) }
                     }
                 )
             }

@@ -2,6 +2,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import require_api_key
@@ -45,6 +46,7 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
                 "quantity": ri.quantity,
                 "item_name": ri.item.name,
                 "serving_size_name": ri.serving_size.name if ri.serving_size else None,
+                "serving_size_weight_g": ri.serving_size.weight_g if ri.serving_size else None,
                 "image_path": ri.item.image_path,
                 "kcal": ceil_int(compute_item_totals(ri.item, ri.quantity, ri.serving_size).kcal),
             }
@@ -89,6 +91,7 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
         instructions=payload.instructions,
         image_path=payload.image_path,
         servings=payload.servings,
+        last_logged_at=func.now(),
     )
     db.add(recipe)
     db.flush()  # get recipe_id before inserting ingredients
@@ -132,7 +135,7 @@ def list_recipes(
     if recipe_type:
         query = query.filter(Recipe.recipe_type == recipe_type)
 
-    recipes = query.order_by(Recipe.updated_at.desc()).offset(offset).limit(limit).all()
+    recipes = query.order_by(Recipe.last_logged_at.desc().nullslast()).offset(offset).limit(limit).all()
     return [_build_recipe_out(r) for r in recipes]
 
 

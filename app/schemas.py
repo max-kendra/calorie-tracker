@@ -232,6 +232,9 @@ class RecipeIngredientOut(BaseModel):
     # was actually used (e.g. "2 pancakes" vs raw grams), see that
     # field's doc comment for the exact bug this avoids repeating.
     serving_size_name: Optional[str] = None
+    # Same denormalization as LogOut.serving_size_weight_g -- lets the
+    # client show the gram equivalent alongside a custom serving.
+    serving_size_weight_g: Optional[Decimal] = None
     # Denormalized from the item, same reasoning as LogOut.image_path --
     # lets the ingredient list show a thumbnail without a separate
     # GET /items/{id} per row.
@@ -398,6 +401,11 @@ class LogOut(LoggableEntryBase):
     # raw grams), since it has no serving-size list of its own to
     # resolve the id against for a log it isn't currently editing.
     serving_size_name: Optional[str] = None
+    # The serving's own weight_g (not multiplied by quantity) -- lets
+    # the client show the gram equivalent alongside a custom serving
+    # (e.g. "2 slices (75g)": quantity=2, this=37.5), same reasoning as
+    # serving_size_name above.
+    serving_size_weight_g: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 

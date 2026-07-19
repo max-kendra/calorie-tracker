@@ -88,7 +88,11 @@ data class Log(
     // Denormalized the same way - serving_size_id alone gives us no way
     // to resolve what unit was actually logged (e.g. "2 slices" vs raw
     // grams) without a separate lookup this response doesn't carry.
-    @SerialName("serving_size_name") val servingSizeName: String? = null
+    @SerialName("serving_size_name") val servingSizeName: String? = null,
+    // The serving's own weight_g (not multiplied by quantity) - lets us
+    // show the gram equivalent alongside a custom serving, e.g.
+    // "2 slices (75g)" for quantity=2, this=37.5.
+    @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null
 )
 
 /**
@@ -252,6 +256,9 @@ data class RecipeIngredient(
     val quantity: String,
     @SerialName("item_name") val itemName: String,
     @SerialName("serving_size_name") val servingSizeName: String? = null,
+    // Same reasoning as Log.servingSizeWeightG -- gram equivalent
+    // alongside a custom serving.
+    @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null,
     @SerialName("image_path") val imagePath: String? = null,
     val kcal: Int
 )

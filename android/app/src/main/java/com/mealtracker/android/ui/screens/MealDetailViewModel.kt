@@ -180,23 +180,28 @@ data class MealDetailUiState(
     val showDeleteRecipeConfirm: Boolean = false,
     val isDeletingRecipe: Boolean = false,
 
-    // Add-ingredient search (edit mode only) -- reuses the same shared
-    // ItemResultsList/ItemQuantityDialog components CreateRecipeScreen's
-    // ingredient picker uses, rather than building a second search UI.
+    // Add/edit-ingredient search (edit mode only) -- genuinely the same
+    // behavior as every other search list in this app (recent items
+    // shown blank-query, debounced search once typing starts), not a
+    // simplified one-off -- reuses the same shared ItemResultsList/
+    // ItemQuantityDialog components CreateRecipeScreen's own ingredient
+    // picker uses.
     val ingredientSearchQuery: String = "",
     val ingredientSearchResults: List<Item> = emptyList(),
     val isSearchingIngredients: Boolean = false,
+    val recentIngredientItems: List<Item> = emptyList(),
+    val isLoadingRecentIngredientItems: Boolean = false,
     val itemForIngredientPicker: Item? = null,
     val ingredientQuantityInput: String = "100",
     val ingredientServingSizeId: Int? = null,
     val isAddingIngredient: Boolean = false,
     val addIngredientError: String? = null,
-
-    // Remove-ingredient confirm -- small red text under each ingredient
-    // row in edit mode, same "are you sure" pattern as deleting the
-    // whole recipe.
-    val ingredientPendingRemoval: RecipeIngredient? = null,
-    val isRemovingIngredient: Boolean = false,
+    // Non-null = the picker is editing THIS existing ingredient (tapped
+    // from the ingredient list) rather than adding a new one -- set by
+    // openIngredientEdit, cleared whenever the picker closes. Changes
+    // confirmAddIngredient's PATCH-vs-POST behavior and shows the
+    // Remove option in ItemQuantityDialog.
+    val editingIngredientItemId: Int? = null,
 
     // Tap-hero-to-change-image (recipe/meal info screen) -- same
     // camera/gallery/crop/upload pipeline as ItemLogPageDialog's own
@@ -277,21 +282,29 @@ class MealDetailViewModel : ViewModel() {
 
     /** Called after something gets ADDED to this meal (quick-add, the
      * quantity picker's confirm, a recipe/meal, or finishing the
-     * embedded AddItemScreen flow) - resets the search box and
-     * refetches "recent" so the just-added/just-updated item shows up
-     * there too (recent items are ordered by updated_at server-side).
-     * Previously the search query/results were deliberately preserved
-     * across a plain load() (see that function's own doc comment) -
-     * that's still correct for load() itself, but specifically after an
-     * ADD, per design discussion, the search field should reset and
-     * "recent" should reflect the new item, not just stay stale. */
+     * embedded AddItemScreen flow) - refreshes whatever's currently
+     * shown so it reflects the change (recent items reordering by
+     * last-logged, a quick-added item's fresh preview amount, etc),
+     * WITHOUT clearing the user's typed search query or knocking them
+     * back to the blank-query "recent" view.
+     *
+     * Previously this reset searchQuery to "" unconditionally after
+     * every single add, which threw away whatever the user had typed
+     * and navigated them away from the results they were just looking
+     * at (see design discussion: "adding an item to a meal should not
+     * reset the search and should instead keep us where we are"). If a
+     * search is in progress, re-runs that same query instead of
+     * clearing it; only the blank-query "recent" case reloads recent
+     * items directly. Clearing the search box is now an explicit, opt-
+     * in action (the search field's own "x" button) rather than
+     * something that happens as a side effect of adding something. */
     fun refreshSearchAfterAdd() {
-        _uiState.value = _uiState.value.copy(
-            searchQuery = "",
-            searchResults = emptyList(),
-            recipeSearchResults = emptyList()
-        )
-        loadRecentItems()
+        val query = _uiState.value.searchQuery
+        if (query.isBlank()) {
+            loadRecentItems()
+        } else {
+            updateSearchQuery(query)
+        }
     }
 
     fun load(date: LocalDate, mealType: String) {
@@ -675,6 +688,7 @@ class MealDetailViewModel : ViewModel() {
             editRecipeServings = recipe.servings,
             recipeEditError = null
         )
+        loadRecentIngredientItems()
     }
 
     fun dismissRecipeEdit() {
@@ -761,11 +775,26 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    // --- Add ingredient (edit mode) -- reuses ItemResultsList/
+    // --- Add/edit ingredient (edit mode) -- reuses ItemResultsList/
     // ItemQuantityDialog, same shared components CreateRecipeScreen's
-    // ingredient picker already uses, rather than a second search UI. ---
+    // ingredient picker already uses, rather than a second search UI.
+    // Genuinely matches how every other search list in this app
+    // behaves: recent items shown blank-query, debounced search once
+    // typing starts -- not a simplified one-off that only searches. ---
 
     private var ingredientSearchJob: Job? = null
+
+    fun loadRecentIngredientItems() {
+        _uiState.value = _uiState.value.copy(isLoadingRecentIngredientItems = true)
+        viewModelScope.launch {
+            try {
+                val items = ApiClient.service.searchItems(query = null, type = null)
+                _uiState.value = _uiState.value.copy(isLoadingRecentIngredientItems = false, recentIngredientItems = items)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingRecentIngredientItems = false)
+            }
+        }
+    }
 
     fun updateIngredientSearchQuery(query: String) {
         _uiState.value = _uiState.value.copy(ingredientSearchQuery = query)
@@ -790,30 +819,73 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
+    /** Opened by tapping a search/recent result -- adding a NEW
+     * ingredient. See openIngredientEdit for tapping an EXISTING one
+     * already in the recipe instead. Defaults to whatever this item was
+     * last logged/added with (see lastLoggedAmounts' doc comment),
+     * falling back to a flat 100g only if it's never been logged at
+     * all -- previously always defaulted to 100g regardless (see
+     * design discussion: "each time i go to make a new meal, it's 100g
+     * again"). */
     fun openIngredientQuantityPicker(item: Item) {
+        val remembered = _uiState.value.lastLoggedAmounts[item.itemId]
         _uiState.value = _uiState.value.copy(
             itemForIngredientPicker = item,
-            ingredientQuantityInput = "100",
-            ingredientServingSizeId = null,
+            ingredientQuantityInput = remembered?.quantity?.let { formatQuantity(it) } ?: "100",
+            ingredientServingSizeId = remembered?.servingSizeId,
+            editingIngredientItemId = null,
             addIngredientError = null
         )
     }
 
+    /** Opened by tapping an ALREADY-added ingredient row (see design
+     * discussion: "the ingredients list should be tappable... its item
+     * info opens... we are able to adjust the quantity... or remove it
+     * entirely") -- fetches the full Item (RecipeIngredient only
+     * carries denormalized name/image/kcal, not the full per-100g
+     * macros or serving_sizes list this picker needs, same reasoning as
+     * openLogDetail's own item fetch), and pre-fills the EXISTING
+     * quantity/serving rather than defaulting to 100g. */
+    fun openIngredientEdit(ingredient: RecipeIngredient) {
+        _uiState.value = _uiState.value.copy(addIngredientError = null)
+        viewModelScope.launch {
+            try {
+                val item = ApiClient.service.getItem(ingredient.itemId)
+                _uiState.value = _uiState.value.copy(
+                    itemForIngredientPicker = item,
+                    ingredientQuantityInput = ingredient.quantity,
+                    ingredientServingSizeId = ingredient.servingSizeId,
+                    editingIngredientItemId = ingredient.itemId
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(addIngredientError = e.message ?: "Couldn't load that item")
+            }
+        }
+    }
+
     fun dismissIngredientQuantityPicker() {
-        _uiState.value = _uiState.value.copy(itemForIngredientPicker = null, addIngredientError = null)
+        _uiState.value = _uiState.value.copy(
+            itemForIngredientPicker = null,
+            editingIngredientItemId = null,
+            addIngredientError = null
+        )
     }
 
     fun updateIngredientQuantityInput(value: String) {
         _uiState.value = _uiState.value.copy(ingredientQuantityInput = value)
     }
 
-    /** Resets quantity to "0" on unit change -- same reasoning as
+    /** Resets quantity to "1" on unit change -- same reasoning as
      * MealDetailViewModel's other quantity/serving pickers (see
      * updateLogServingSize's doc comment). */
     fun updateIngredientServingSize(servingSizeId: Int?) {
-        _uiState.value = _uiState.value.copy(ingredientServingSizeId = servingSizeId, ingredientQuantityInput = "0")
+        _uiState.value = _uiState.value.copy(ingredientServingSizeId = servingSizeId, ingredientQuantityInput = "1")
     }
 
+    /** POSTs a new ingredient, or PATCHes an existing one if
+     * editingIngredientItemId is set (see that field's doc comment) --
+     * same "one confirm function branches on whether we're editing"
+     * pattern as confirmLogItemQuantity. */
     fun confirmAddIngredient() {
         val state = _uiState.value
         val recipe = state.recipeToView ?: return
@@ -827,56 +899,86 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = state.copy(isAddingIngredient = true, addIngredientError = null)
         viewModelScope.launch {
             try {
-                val updated = ApiClient.service.addRecipeIngredient(
-                    recipe.recipeId,
-                    RecipeIngredientCreateRequest(
-                        itemId = item.itemId,
-                        servingSizeId = state.ingredientServingSizeId,
-                        quantity = quantity
+                val editingItemId = state.editingIngredientItemId
+                val updated = if (editingItemId != null) {
+                    ApiClient.service.updateRecipeIngredient(
+                        recipe.recipeId,
+                        editingItemId,
+                        quantity = quantity,
+                        servingSizeId = state.ingredientServingSizeId
                     )
-                )
+                } else {
+                    ApiClient.service.addRecipeIngredient(
+                        recipe.recipeId,
+                        RecipeIngredientCreateRequest(
+                            itemId = item.itemId,
+                            servingSizeId = state.ingredientServingSizeId,
+                            quantity = quantity
+                        )
+                    )
+                }
                 _uiState.value = _uiState.value.copy(
                     isAddingIngredient = false,
                     itemForIngredientPicker = null,
-                    recipeToView = updated,
-                    ingredientSearchQuery = "",
-                    ingredientSearchResults = emptyList()
+                    editingIngredientItemId = null,
+                    recipeToView = updated
                 )
+                // Refreshes whatever's currently shown without clearing
+                // the user's typed query - same "keep us where we are"
+                // fix as MealDetailViewModel.refreshSearchAfterAdd.
+                if (editingItemId == null) {
+                    val query = _uiState.value.ingredientSearchQuery
+                    if (query.isBlank()) loadRecentIngredientItems() else updateIngredientSearchQuery(query)
+                }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isAddingIngredient = false,
-                    addIngredientError = e.message ?: "Couldn't add that ingredient"
+                    addIngredientError = e.message ?: "Couldn't save that ingredient"
                 )
             }
         }
     }
 
-    // --- Remove ingredient (edit mode) ---
-
-    fun requestRemoveIngredient(ingredient: RecipeIngredient) {
-        _uiState.value = _uiState.value.copy(ingredientPendingRemoval = ingredient)
-    }
-
-    fun dismissRemoveIngredientConfirm() {
-        _uiState.value = _uiState.value.copy(ingredientPendingRemoval = null)
-    }
-
-    fun confirmRemoveIngredient() {
+    /** "Remove" text inside the picker, shown only when editing an
+     * existing ingredient (see ItemQuantityDialog's onRemove param) --
+     * removes it entirely rather than saving a quantity change. */
+    fun removeIngredientFromPicker() {
         val recipe = _uiState.value.recipeToView ?: return
-        val ingredient = _uiState.value.ingredientPendingRemoval ?: return
-        _uiState.value = _uiState.value.copy(isRemovingIngredient = true)
+        val itemId = _uiState.value.editingIngredientItemId ?: return
+        _uiState.value = _uiState.value.copy(isAddingIngredient = true, addIngredientError = null)
         viewModelScope.launch {
             try {
-                val updated = ApiClient.service.removeRecipeIngredient(recipe.recipeId, ingredient.itemId)
+                val updated = ApiClient.service.removeRecipeIngredient(recipe.recipeId, itemId)
                 _uiState.value = _uiState.value.copy(
-                    isRemovingIngredient = false,
-                    ingredientPendingRemoval = null,
+                    isAddingIngredient = false,
+                    itemForIngredientPicker = null,
+                    editingIngredientItemId = null,
                     recipeToView = updated
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    isRemovingIngredient = false,
-                    ingredientPendingRemoval = null,
+                    isAddingIngredient = false,
+                    addIngredientError = e.message ?: "Couldn't remove that ingredient"
+                )
+            }
+        }
+    }
+
+    /** Swipe-left-to-delete on an ingredient row -- same "always snap
+     * back, let actual removal from recipeToView drive whether the row
+     * disappears" pattern as LogRow's swipe-to-delete (see that
+     * composable's doc comment for the bug this avoids: a swipe box
+     * that commits to its own internal "dismissed" state independently
+     * of whether the underlying delete actually succeeded can get
+     * visually stuck). No confirm dialog, same as LogRow. */
+    fun removeIngredientBySwipe(ingredient: RecipeIngredient) {
+        val recipe = _uiState.value.recipeToView ?: return
+        viewModelScope.launch {
+            try {
+                val updated = ApiClient.service.removeRecipeIngredient(recipe.recipeId, ingredient.itemId)
+                _uiState.value = _uiState.value.copy(recipeToView = updated)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
                     recipeDetailError = e.message ?: "Couldn't remove that ingredient"
                 )
             }
@@ -986,15 +1088,13 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(logQuantityInput = value)
     }
 
-    /** null = switch to raw grams. Resets quantity to "0" whenever the
+    /** null = switch to raw grams. Resets quantity to "1" whenever the
      * unit changes -- otherwise whatever number was typed for the
      * PREVIOUS unit gets reinterpreted against the new one (e.g. "100"
      * grams becomes "100 slices" = 6200g for a 62g protein bar), which
-     * is never what was intended. Forcing back to 0 (rather than
-     * silently guessing 1) makes it obvious a fresh quantity needs to
-     * be entered for whatever was just selected. */
+     * is never what was intended. */
     fun updateLogServingSize(servingSizeId: Int?) {
-        _uiState.value = _uiState.value.copy(logServingSizeId = servingSizeId, logQuantityInput = "0")
+        _uiState.value = _uiState.value.copy(logServingSizeId = servingSizeId, logQuantityInput = "1")
     }
 
     /** Confirms ItemLogPageDialog - POSTs a new log, or PATCHes an
@@ -1108,13 +1208,13 @@ class MealDetailViewModel : ViewModel() {
                     showCreateServingDialog = false,
                     itemToLog = updatedItem,
                     logServingSizeId = newServing?.id,
-                    // Reset to 0, same reasoning as updateLogServingSize
+                    // Reset to 1, same reasoning as updateLogServingSize
                     // -- otherwise whatever gram quantity was typed
                     // before switching units (e.g. "100") gets
                     // reinterpreted as a multiplier of the NEW serving's
                     // weight (100 x a 62g protein bar = 6200g), which is
                     // never what was intended (see design discussion).
-                    logQuantityInput = "0"
+                    logQuantityInput = "1"
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

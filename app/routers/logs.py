@@ -29,16 +29,19 @@ router = APIRouter(
 )
 
 
-def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str], Optional[str], Optional[str], Optional[str]]:
+def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal]]:
     """
     Shared validation + macro computation for both logs and meal_plans.
-    Returns (totals, item_name, recipe_name, image_path, serving_name)
-    for convenience/display - image_path and serving_name denormalized
-    onto LogOut so the client can show a thumbnail and the actual unit
-    logged (e.g. "2 slices") without a separate lookup per row. Without
-    serving_name, the client only has serving_size_id and has no way to
-    resolve what unit that actually was, which is why the log list was
-    always showing quantity in grams even when a named serving was used.
+    Returns (totals, item_name, recipe_name, image_path, serving_name,
+    serving_weight_g) for convenience/display - image_path/serving_name/
+    serving_weight_g denormalized onto LogOut so the client can show a
+    thumbnail and the actual unit logged (e.g. "2 slices (75g)") without
+    a separate lookup per row. Without serving_name, the client only has
+    serving_size_id and has no way to resolve what unit that actually
+    was, which is why the log list was always showing quantity in grams
+    even when a named serving was used; serving_weight_g on top of that
+    is what lets it also show the gram equivalent alongside the serving
+    name, rather than just the serving name on its own.
     """
     if (payload.item_id is None) == (payload.recipe_id is None):
         raise HTTPException(
@@ -65,7 +68,7 @@ def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str
                 )
 
         totals = compute_item_totals(item, payload.quantity, serving)
-        return totals, item.name, None, item.image_path, serving.name if serving else None
+        return totals, item.name, None, item.image_path, serving.name if serving else None, serving.weight_g if serving else None
 
     else:
         recipe = (
@@ -78,7 +81,7 @@ def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown recipe_id")
 
         totals = compute_recipe_totals_for_quantity(recipe, payload.quantity)
-        return totals, None, recipe.name, recipe.image_path, None
+        return totals, None, recipe.name, recipe.image_path, None, None
 
 
 def _log_to_out(
@@ -87,6 +90,7 @@ def _log_to_out(
     recipe_name: Optional[str],
     image_path: Optional[str] = None,
     serving_name: Optional[str] = None,
+    serving_weight_g: Optional[Decimal] = None,
 ) -> LogOut:
     """The DB stores kcal_logged etc as precise Decimal (frozen at write
     time). Rounded UP to int here, at the display boundary only."""
@@ -98,6 +102,7 @@ def _log_to_out(
         recipe_id=log.recipe_id,
         serving_size_id=log.serving_size_id,
         serving_size_name=serving_name,
+        serving_size_weight_g=serving_weight_g,
         quantity=log.quantity,
         logged_at=log.logged_at,
         kcal_logged=ceil_int(log.kcal_logged),
@@ -122,7 +127,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     - historical days/weekly summaries reflect what was actually counted
     at the time (see design doc).
     """
-    totals, item_name, recipe_name, image_path, serving_name = _validate_and_compute(payload, db)
+    totals, item_name, recipe_name, image_path, serving_name, serving_weight_g = _validate_and_compute(payload, db)
 
     log = Log(
         date=payload.date,
@@ -146,9 +151,13 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         # list (see items.py's list_items) - this is the actual moment
         # an item gets logged, as opposed to just edited.
         db.query(Item).filter(Item.item_id == payload.item_id).update({"last_logged_at": func.now()})
+    elif payload.recipe_id is not None:
+        # Same reasoning, for the unfiltered recipe/meal list (see
+        # recipes.py's list_recipes).
+        db.query(Recipe).filter(Recipe.recipe_id == payload.recipe_id).update({"last_logged_at": func.now()})
     db.commit()
     db.refresh(log)
-    return _log_to_out(log, item_name, recipe_name, image_path, serving_name)
+    return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)
 
 
 @router.post("/from-meal", response_model=list[LogOut], status_code=status.HTTP_201_CREATED)
@@ -225,6 +234,11 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             detail="None of this meal's ingredient items exist anymore",
         )
 
+    # Same "recently logged" bump as the recipe branch in create_log -
+    # this expands into per-ingredient item logs instead, but the meal
+    # itself was still just logged and should sort accordingly too.
+    recipe.last_logged_at = func.now()
+
     db.commit()
     result = []
     for log, item_name, image_path in created:
@@ -276,6 +290,9 @@ def list_logs(
     serving_names = {
         s.id: s.name for s in db.query(ServingSize).filter(ServingSize.id.in_(serving_ids)).all()
     } if serving_ids else {}
+    serving_weights = {
+        s.id: s.weight_g for s in db.query(ServingSize).filter(ServingSize.id.in_(serving_ids)).all()
+    } if serving_ids else {}
 
     return [
         _log_to_out(
@@ -283,7 +300,8 @@ def list_logs(
             item_names.get(l.item_id),
             recipe_names.get(l.recipe_id),
             item_images.get(l.item_id) or recipe_images.get(l.recipe_id),
-            serving_names.get(l.serving_size_id)
+            serving_names.get(l.serving_size_id),
+            serving_weights.get(l.serving_size_id)
         ) for l in logs
     ]
 
@@ -413,7 +431,7 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
         serving_size_id=payload.serving_size_id if payload.serving_size_id is not None else log.serving_size_id,
         quantity=payload.quantity if payload.quantity is not None else log.quantity,
     )
-    totals, item_name, recipe_name, image_path, serving_name = _validate_and_compute(merged, db)
+    totals, item_name, recipe_name, image_path, serving_name, serving_weight_g = _validate_and_compute(merged, db)
 
     log.serving_size_id = merged.serving_size_id
     log.quantity = merged.quantity
@@ -427,7 +445,7 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
     log.sodium_mg_logged = totals.sodium_mg
     db.commit()
     db.refresh(log)
-    return _log_to_out(log, item_name, recipe_name, image_path, serving_name)
+    return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)
 
 
 @router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -462,4 +480,8 @@ def get_log(log_id: int, db: Session = Depends(get_db)):
         log.serving_size_id
         and db.query(ServingSize.name).filter(ServingSize.id == log.serving_size_id).scalar()
     )
-    return _log_to_out(log, item_name, recipe_name, image_path, serving_name)
+    serving_weight_g = (
+        log.serving_size_id
+        and db.query(ServingSize.weight_g).filter(ServingSize.id == log.serving_size_id).scalar()
+    )
+    return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)

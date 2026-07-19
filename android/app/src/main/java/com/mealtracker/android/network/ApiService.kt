@@ -21,6 +21,7 @@ import com.mealtracker.android.network.models.ProductPhotoScanResult
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeDetail
+import com.mealtracker.android.network.models.RecipeIngredientCreateRequest
 import com.mealtracker.android.network.models.RecipeUpdateRequest
 import com.mealtracker.android.network.models.UsdaFoodDetail
 import com.mealtracker.android.network.models.UsdaFoodSummary
@@ -259,6 +260,17 @@ interface ApiService {
     suspend fun addRecipeIngredient(
         @Path("recipeId") recipeId: Int,
         @Body request: RecipeIngredientCreateRequest
+    ): RecipeDetail
+
+    // Query params, not a request body -- matches the backend's
+    // update_ingredient_quantity signature (quantity/serving_size_id are
+    // plain function params there, not a Pydantic model).
+    @PATCH("recipes/{recipeId}/ingredients/{itemId}")
+    suspend fun updateRecipeIngredient(
+        @Path("recipeId") recipeId: Int,
+        @Path("itemId") itemId: Int,
+        @Query("quantity") quantity: Double,
+        @Query("serving_size_id") servingSizeId: Int? = null
     ): RecipeDetail
 
     @DELETE("recipes/{recipeId}/ingredients/{itemId}")
