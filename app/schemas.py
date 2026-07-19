@@ -557,3 +557,22 @@ class KcalGoalCalculationResult(BaseModel):
     kcal_low: int
     kcal_high: int
     floor_applied: bool  # true if the 1500 kcal/day safety floor kicked in
+
+
+class PhysiologicalGuidelineOut(BaseModel):
+    """
+    Read-only mirror of PhysiologicalGuideline -- these rows are seeded
+    once via migration (824c17bcbba4_seed_physiological_guidelines) and
+    never written to by the app itself, so this is response-only, no
+    matching Create/Update schema. min_value/max_value are nullable
+    since some guidelines are one-sided (e.g. a ceiling with no floor).
+    """
+    id: int
+    name: str
+    min_value: Optional[Decimal] = None
+    recommended_value: Optional[Decimal] = None
+    max_value: Optional[Decimal] = None
+    unit: str
+    basis: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
