@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -115,10 +119,15 @@ fun EditProfileScreen(
 
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
 
+            val focusManager = LocalFocusManager.current
             OutlinedTextField(
                 value = state.name,
                 onValueChange = viewModel::updateName,
                 label = { Text("Name") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(
+                    onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
@@ -126,7 +135,10 @@ fun EditProfileScreen(
                 value = state.heightCm,
                 onValueChange = viewModel::updateHeightCm,
                 label = { Text("Height (cm)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(
+                    onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
@@ -134,7 +146,10 @@ fun EditProfileScreen(
                 value = state.age,
                 onValueChange = viewModel::updateAge,
                 label = { Text("Age") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { focusManager.clearFocus() }
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
 

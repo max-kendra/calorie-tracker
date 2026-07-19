@@ -72,7 +72,7 @@ fun SettingsScreen(
         SettingsSectionHeader("Goals")
         SettingsRow("Calorie goal", "TDEE calculation and daily target", onNavigateToCalorieGoal)
         SettingsRow("Calorie goals by meal", "Change calories for each meal", onNavigateToMealCalorieGoal)
-        SettingsRow("Carbs, protein, fat and fiber goals", "Edit your macronutrient goals", onNavigateToMacronutrients)
+        SettingsRow("Fat, carbs, fiber and protein goals", "Edit your macronutrient goals", onNavigateToMacronutrients)
         SettingsRow("Weight goal", "Set your starting and goal weight", onNavigateToWeightGoal)
     }
 }

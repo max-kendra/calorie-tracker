@@ -3,6 +3,7 @@ package com.mealtracker.android.ui.components
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -11,6 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
@@ -35,12 +39,17 @@ fun CreateServingDialog(
         onDismissRequest = onDismiss,
         title = { Text("New serving") },
         text = {
+            val focusManager = LocalFocusManager.current
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
                     label = { Text("Name (e.g. \"slice\")") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
@@ -48,7 +57,10 @@ fun CreateServingDialog(
                     value = weightG,
                     onValueChange = onWeightChange,
                     label = { Text("Weight (g)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    ),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )

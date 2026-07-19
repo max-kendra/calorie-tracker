@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,6 +25,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -78,11 +82,15 @@ fun WeightGoalScreen(
         )
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
 
+        val focusManager = LocalFocusManager.current
         OutlinedTextField(
             value = state.startingWeightKg,
             onValueChange = viewModel::updateStartingWeightKg,
             label = { Text("Starting weight (kg)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(FocusDirection.Down) }
+            ),
             modifier = Modifier.fillMaxWidth()
         )
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
@@ -90,7 +98,10 @@ fun WeightGoalScreen(
             value = state.goalWeightKg,
             onValueChange = viewModel::updateGoalWeightKg,
             label = { Text("Goal weight (kg)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = { focusManager.clearFocus() }
+            ),
             modifier = Modifier.fillMaxWidth()
         )
 

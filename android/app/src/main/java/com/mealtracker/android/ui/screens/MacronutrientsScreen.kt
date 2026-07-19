@@ -147,9 +147,9 @@ fun MacronutrientsScreen(
                 DonutChart(
                     segments = listOf(
                         state.fatPct / 100f to FatColor,
-                        state.proteinPct / 100f to ProteinColor,
                         state.carbsPct / 100f to CarbsColor,
-                        state.fiberPct / 100f to FiberColor
+                        state.fiberPct / 100f to FiberColor,
+                        state.proteinPct / 100f to ProteinColor
                     ),
                     centerContent = {
                         Text(
@@ -184,10 +184,10 @@ fun MacronutrientsScreen(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
             }
 
-            PercentSliderRow("Protein", "${state.protein.grams}g \u00b7 ${state.protein.kcal} Cal", state.protein.percent, ProteinColor, viewModel::updateProteinPct)
             PercentSliderRow("Fat", "${state.fat.grams}g \u00b7 ${state.fat.kcal} Cal", state.fat.percent, FatColor, viewModel::updateFatPct)
             PercentSliderRow("Carbs", "${state.carbs.grams}g \u00b7 ${state.carbs.kcal} Cal", state.carbs.percent, CarbsColor, viewModel::updateCarbsPct)
             PercentSliderRow("Fiber", "${state.fiber.grams}g \u00b7 ${state.fiber.kcal} Cal", state.fiber.percent, FiberColor, viewModel::updateFiberPct)
+            PercentSliderRow("Protein", "${state.protein.grams}g \u00b7 ${state.protein.kcal} Cal", state.protein.percent, ProteinColor, viewModel::updateProteinPct)
 
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 

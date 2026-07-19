@@ -246,10 +246,10 @@ private fun WeeklyProgressCard(
             )
 
             WeeklyMacroBar("Calories", weekly.eaten.kcal, weekly.goal.kcal, KcalColor, unit = "kcal")
-            WeeklyMacroBar("Protein", weekly.eaten.protein, weekly.goal.protein, MacroColors.Protein)
             WeeklyMacroBar("Fat", weekly.eaten.fat, weekly.goal.fat, MacroColors.Fat)
             WeeklyMacroBar("Carbs", weekly.eaten.carbs, weekly.goal.carbs, MacroColors.Carbs)
             WeeklyMacroBar("Fiber", weekly.eaten.fiber, weekly.goal.fiber, MacroColors.Fiber)
+            WeeklyMacroBar("Protein", weekly.eaten.protein, weekly.goal.protein, MacroColors.Protein)
         }
     }
 }
@@ -364,19 +364,19 @@ private fun WeeklyTableCard(weekly: WeeklySummary) {
                 Row {
                     DayLabelHeaderCell("")
                     MacroHeaderCell("kcal", KcalColor)
-                    MacroHeaderCell("P", MacroColors.Protein)
                     MacroHeaderCell("F", MacroColors.Fat)
                     MacroHeaderCell("C", MacroColors.Carbs)
                     MacroHeaderCell("Fi", MacroColors.Fiber)
+                    MacroHeaderCell("P", MacroColors.Protein)
                 }
                 weekly.days.forEach { day ->
                     Row {
                         DayLabelCell(dayLabel(day), emphasized = day.isToday)
                         MacroValueCell(day.totals.kcal, day.isFuture)
-                        MacroValueCell(day.totals.protein, day.isFuture)
                         MacroValueCell(day.totals.fat, day.isFuture)
                         MacroValueCell(day.totals.carbs, day.isFuture)
                         MacroValueCell(day.totals.fiber, day.isFuture)
+                        MacroValueCell(day.totals.protein, day.isFuture)
                     }
                 }
             }

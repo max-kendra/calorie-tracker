@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -25,6 +26,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -87,11 +91,16 @@ private fun CreateRecipeDetailsScreen(viewModel: CreateRecipeViewModel, onDone: 
         }
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
 
+        val focusManager = LocalFocusManager.current
         OutlinedTextField(
             value = state.name,
             onValueChange = viewModel::updateName,
             label = { Text("Recipe name") },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(FocusDirection.Down) }
+            ),
             modifier = Modifier.fillMaxWidth()
         )
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
@@ -100,7 +109,10 @@ private fun CreateRecipeDetailsScreen(viewModel: CreateRecipeViewModel, onDone: 
             value = state.servings,
             onValueChange = viewModel::updateServings,
             label = { Text("Servings") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = { focusManager.clearFocus() }
+            ),
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )

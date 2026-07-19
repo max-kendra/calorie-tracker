@@ -1229,10 +1229,10 @@ private fun ItemLogPageDialog(
                 Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
-                LogMacroBar("Protein", per100(item.protein100g), goalProtein, MacroColors.Protein)
                 LogMacroBar("Fat", per100(item.fat100g), goalFat, MacroColors.Fat)
                 LogMacroBar("Carbs", per100(item.carbs100g), goalCarbs, MacroColors.Carbs)
                 LogMacroBar("Fiber", per100(item.fiber100g), goalFiber, MacroColors.Fiber)
+                LogMacroBar("Protein", per100(item.protein100g), goalProtein, MacroColors.Protein)
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
 
@@ -1305,11 +1305,16 @@ private fun EditItemDialog(
         title = { Text("Edit item") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                val focusManager = LocalFocusManager.current
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
                     label = { Text("Name") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(
+                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
@@ -1319,12 +1324,12 @@ private fun EditItemDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 EditNumberField("Calories", kcal, onKcalChange)
-                EditNumberField("Protein (g)", protein, onProteinChange)
                 EditNumberField("Fat (g)", fat, onFatChange)
                 EditNumberField("Saturated Fat (g)", saturatedFat, onSaturatedFatChange)
                 EditNumberField("Carbs (g)", carbs, onCarbsChange)
                 EditNumberField("Sugar (g)", sugar, onSugarChange)
                 EditNumberField("Fiber (g)", fiber, onFiberChange)
+                EditNumberField("Protein (g)", protein, onProteinChange)
                 EditNumberField("Salt (g)", saltG, onSaltChange, isLast = true)
                 if (error != null) {
                     Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -1481,10 +1486,10 @@ private fun LogDetailDialog(
                 Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
-                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
                 LogMacroBar("Fat", log.fatGLogged, goalFat, MacroColors.Fat)
                 LogMacroBar("Carbs", log.carbsGLogged, goalCarbs, MacroColors.Carbs)
                 LogMacroBar("Fiber", log.fiberGLogged, goalFiber, MacroColors.Fiber)
+                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
 

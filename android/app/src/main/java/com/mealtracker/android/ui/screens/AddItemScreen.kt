@@ -556,11 +556,16 @@ private fun EnterNameBrandContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+        val focusManager = LocalFocusManager.current
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
             label = { Text("Name") },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(FocusDirection.Down) }
+            ),
             modifier = Modifier.fillMaxWidth()
         )
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
@@ -569,6 +574,10 @@ private fun EnterNameBrandContent(
             onValueChange = onBrandChange,
             label = { Text("Brand (optional)") },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = { focusManager.clearFocus() }
+            ),
             modifier = Modifier.fillMaxWidth()
         )
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
@@ -1051,12 +1060,12 @@ private fun ItemFormContent(
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
         NumberField("Calories (kcal)", state.kcal100g, viewModel::updateKcal)
-        NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
         NumberField("Fat (g)", state.fat100g, viewModel::updateFat)
         NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
         NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
         NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
         NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
+        NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
         NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt, isLast = true)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
