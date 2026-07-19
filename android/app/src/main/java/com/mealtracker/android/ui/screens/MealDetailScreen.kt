@@ -30,6 +30,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -79,6 +80,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -91,6 +95,8 @@ import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.health.HealthConnectManager
 import com.mealtracker.android.health.HealthConnectPreferences
 import com.mealtracker.android.ui.components.CatalogVisuals
+import com.mealtracker.android.ui.components.CreateServingDialog
+import com.mealtracker.android.ui.components.ItemResultsList
 import com.mealtracker.android.ui.components.CropDialog
 import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
 import com.mealtracker.android.ui.components.MacroColors
@@ -460,6 +466,7 @@ fun MealDetailScreen(
                             viewModel(key = "create_recipe_${date}_$mealType")
                         CreateRecipeContent(
                             viewModel = createRecipeViewModel,
+                            lastLoggedAmounts = state.lastLoggedAmounts,
                             onLogToMeal = { recipe ->
                                 viewModel.logRecipeQuickly(recipe)
                                 createRecipeViewModel.reset()
@@ -798,21 +805,6 @@ private fun AddMethodIcon(
     }
 }
 
-/** "142 Cal, 100g" preview of what tapping "+" would actually log for
- * this item right now -- see MealDetailViewModel.LoggedAmount. Returns
- * null if there's not enough info to compute a preview (no kcal_100g on
- * the item, or a remembered serving that's since been deleted). */
-private fun quickAddPreview(item: Item, remembered: LoggedAmount?): String? {
-    val quantity = remembered?.quantity ?: 100.0
-    val grams = if (remembered?.servingSizeId != null) {
-        val serving = item.servingSizes.find { it.id == remembered.servingSizeId } ?: return null
-        quantity * (serving.weightG.toDoubleOrNull() ?: return null)
-    } else {
-        quantity
-    }
-    val kcal = item.kcal100g?.toDoubleOrNull()?.times(grams / 100.0) ?: return null
-    return "${kcal.roundToInt()} Cal, ${"%.0f".format(grams)}g"
-}
 
 /** Recipe/Meal filter's results list -- separate from ItemResultsList
  * since Recipes have a totally different shape (servings + totals_per_
@@ -897,117 +889,6 @@ private fun RecipeResultsList(
                         } else {
                             IconButton(onClick = { onQuickAddClick(recipe) }) {
                                 Icon(Icons.Filled.Add, contentDescription = "Quick add")
-                            }
-                        }
-                    }
-                    HorizontalDivider()
-                }
-            }
-        }
-    }
-}
-
-/** Results list backing Search (recent items when blank, search results
- * once typing) -- bounded height + its own scroll so a long list
- * doesn't fight the sheet's own drag gesture. */
-@Composable
-private fun ItemResultsList(
-    items: List<Item>,
-    isLoading: Boolean,
-    emptyMessage: String,
-    quickLoggingItemId: Int?,
-    lastLoggedAmounts: Map<Int, LoggedAmount>,
-    onItemClick: (Item) -> Unit,
-    onQuickAddClick: (Int) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 500.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        when {
-            isLoading -> {
-                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
-            items.isEmpty() -> {
-                Text(
-                    emptyMessage,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-            else -> {
-                items.forEach { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            // Tapping the ROW opens the quantity/serving
-                            // picker (see MealDetailViewModel.
-                            // openItemQuantityPicker) -- the separate "+"
-                            // button below is still the flat-quantity
-                            // quick-add shortcut, kept for when you just
-                            // want the default fast without picking
-                            // anything.
-                            .clickable(enabled = quickLoggingItemId == null) { onItemClick(item) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(CatalogVisuals.backgroundFor(item.type)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (item.imagePath != null) {
-                                coil3.compose.AsyncImage(
-                                    model = com.mealtracker.android.BuildConfig.BASE_URL + item.imagePath,
-                                    contentDescription = null,
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Icon(
-                                    CatalogVisuals.iconFor(item.type),
-                                    contentDescription = null,
-                                    tint = CatalogVisuals.iconTint(),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(item.name, style = MaterialTheme.typography.bodyLarge)
-                            if (item.brand != null) {
-                                Text(
-                                    item.brand,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            // What tapping "+" would actually log -- the
-                            // last quantity/serving used for this item,
-                            // or 100g the first time (see
-                            // MealDetailViewModel.LoggedAmount).
-                            val preview = quickAddPreview(item, lastLoggedAmounts[item.itemId])
-                            if (preview != null) {
-                                Text(
-                                    preview,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        if (quickLoggingItemId == item.itemId) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            IconButton(onClick = { onQuickAddClick(item.itemId) }) {
-                                Icon(Icons.Filled.Add, contentDescription = "Quick add 100g")
                             }
                         }
                     }
@@ -1444,7 +1325,7 @@ private fun EditItemDialog(
                 EditNumberField("Carbs (g)", carbs, onCarbsChange)
                 EditNumberField("Sugar (g)", sugar, onSugarChange)
                 EditNumberField("Fiber (g)", fiber, onFiberChange)
-                EditNumberField("Salt (g)", saltG, onSaltChange)
+                EditNumberField("Salt (g)", saltG, onSaltChange, isLast = true)
                 if (error != null) {
                     Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
@@ -1462,65 +1343,22 @@ private fun EditItemDialog(
 }
 
 @Composable
-private fun EditNumberField(label: String, value: String, onValueChange: (String) -> Unit) {
+private fun EditNumberField(label: String, value: String, onValueChange: (String) -> Unit, isLast: Boolean = false) {
+    val focusManager = LocalFocusManager.current
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Decimal,
+            imeAction = if (isLast) ImeAction.Done else ImeAction.Next
+        ),
+        keyboardActions = KeyboardActions(
+            onNext = { focusManager.moveFocus(FocusDirection.Down) },
+            onDone = { focusManager.clearFocus() }
+        ),
         singleLine = true,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-    )
-}
-
-/** Reached from ItemLogPageDialog's unit dropdown -- backend already had
- * full CRUD for this (POST/PATCH/DELETE /items/{id}/serving-sizes),
- * just no client UI to reach it. */
-@Composable
-private fun CreateServingDialog(
-    name: String,
-    weightG: String,
-    isCreating: Boolean,
-    error: String?,
-    onNameChange: (String) -> Unit,
-    onWeightChange: (String) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New serving") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = onNameChange,
-                    label = { Text("Name (e.g. \"slice\")") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-                OutlinedTextField(
-                    value = weightG,
-                    onValueChange = onWeightChange,
-                    label = { Text("Weight (g)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (error != null) {
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm, enabled = !isCreating) {
-                Text(if (isCreating) "Creating..." else "Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
     )
 }
 
@@ -1772,14 +1610,17 @@ private fun LogRow(log: Log, onClick: () -> Unit, onDelete: () -> Unit) {
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(log.itemName ?: log.recipeName ?: "Unknown", style = MaterialTheme.typography.bodyLarge)
-                // Assumes grams -- true whenever serving_size_id is null,
-                // which is every logging path this app currently has (all
-                // go through quick-log or the item form, never a serving-
-                // size picker). If a serving-size UI gets added later,
-                // this needs to become serving-aware (see
-                // LoggableEntryBase's quantity-semantics doc comment).
+                // Uses the actual serving name when this log used one
+                // (e.g. "2 slices") -- falls back to grams only when
+                // servingSizeName is null, i.e. this was logged as raw
+                // grams with no serving selected. Previously this always
+                // showed grams regardless, since the backend didn't send
+                // the serving's name down at all, only its id, which the
+                // client had no way to resolve on its own (see design
+                // discussion).
                 Text(
-                    "${log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity}g",
+                    "${log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity}" +
+                        (log.servingSizeName?.let { " $it" } ?: "g"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

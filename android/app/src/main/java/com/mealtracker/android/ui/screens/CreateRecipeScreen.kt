@@ -1,19 +1,19 @@
 package com.mealtracker.android.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,20 +28,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Recipe
+import com.mealtracker.android.ui.components.CreateServingDialog
+import com.mealtracker.android.ui.components.ItemQuantityDialog
+import com.mealtracker.android.ui.components.ItemResultsList
 
 /**
- * Content for the meal-detail add sheet's "Create" method -- builds a
- * brand-new recipe (name, servings, a searched-and-added ingredient
- * list with per-ingredient gram quantities), then offers to either log
- * it straight to the meal that was open, or just finish and leave it
- * saved for later. See CreateRecipeViewModel for the actual save logic
- * and MealDetailScreen's CREATE branch for how this gets embedded.
+ * Entry point for the meal-detail add sheet's "Create" method -- just
+ * dispatches between the two phases (see CreateRecipeViewModel.
+ * CreateRecipePhase). Kept as its own file/composable so
+ * MealDetailScreen's CREATE branch only has to know about one entry
+ * point, same shape as AddItemScreen's single entry point for the
+ * Barcode branch.
  */
 @Composable
 fun CreateRecipeContent(
     viewModel: CreateRecipeViewModel = viewModel(),
+    lastLoggedAmounts: Map<Int, LoggedAmount>,
     onLogToMeal: (Recipe) -> Unit,
     onDone: () -> Unit
 ) {
@@ -56,14 +59,33 @@ fun CreateRecipeContent(
         return
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-    ) {
-        Text("Create a recipe", style = MaterialTheme.typography.titleMedium)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+    when (state.phase) {
+        CreateRecipePhase.DETAILS -> CreateRecipeDetailsScreen(viewModel = viewModel, onDone = onDone)
+        CreateRecipePhase.INGREDIENTS -> CreateRecipeIngredientsScreen(
+            viewModel = viewModel,
+            lastLoggedAmounts = lastLoggedAmounts,
+            onDone = onDone
+        )
+    }
+}
+
+/**
+ * First step: just the recipe's own metadata (name, servings) -- split
+ * out from ingredient-picking per design discussion ("name the recipe
+ * and give the amount of servings on a separate screen"), so the
+ * ingredients screen underneath can solely focus on searching/scanning
+ * without also juggling a name field at the top.
+ */
+@Composable
+private fun CreateRecipeDetailsScreen(viewModel: CreateRecipeViewModel, onDone: () -> Unit) {
+    val state by viewModel.uiState.collectAsState()
+
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Create a recipe", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDone) { Text("Cancel") }
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
 
         OutlinedTextField(
             value = state.name,
@@ -82,95 +104,217 @@ fun CreateRecipeContent(
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
 
-        Text("Ingredients", style = MaterialTheme.typography.titleSmall)
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        Button(
+            onClick = { viewModel.proceedToIngredients() },
+            enabled = state.isDetailsValid,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Next: add ingredients")
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 16.dp))
+    }
+}
 
-        if (state.ingredients.isEmpty()) {
-            Text(
-                "No ingredients added yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            state.ingredients.forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(row.item.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    OutlinedTextField(
-                        value = row.quantityG,
-                        onValueChange = { viewModel.updateIngredientQuantity(row.item.itemId, it) },
-                        label = { Text("g") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.padding(start = 8.dp).width(90.dp)
-                    )
-                    IconButton(onClick = { viewModel.removeIngredient(row.item.itemId) }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Remove ${row.item.name}")
-                    }
-                }
+/**
+ * Second step: search or scan barcodes to add ingredients -- reuses as
+ * much of the main meal-add flow as the different context allows (see
+ * design discussion: "the more you can reuse from the main search, the
+ * better"). Concretely reused, not just visually similar:
+ *  - ItemResultsList (images, brand, last-used-quantity preview) --
+ *    the exact same component the main meal search uses.
+ *  - ItemQuantityDialog for tap-to-adjust-quantity -- same quantity/
+ *    serving semantics as the meal-logging picker, including
+ *    "+ Create new serving" via the shared CreateServingDialog.
+ *  - AddItemScreen/AddItemViewModel for barcode scanning -- the entire
+ *    scan -> match/create -> confirm flow, just pointed at
+ *    "add as an ingredient" (via onUseCreatedItem) instead of
+ *    "log to a meal".
+ * No third "Create" toggle here -- Create is what got you to this
+ * screen in the first place, so only Search/Barcode make sense as
+ * methods underneath it.
+ */
+@Composable
+private fun CreateRecipeIngredientsScreen(
+    viewModel: CreateRecipeViewModel,
+    lastLoggedAmounts: Map<Int, LoggedAmount>,
+    onDone: () -> Unit
+) {
+    val state by viewModel.uiState.collectAsState()
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { viewModel.backToDetails() }) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to recipe details")
             }
+            Text(state.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDone) { Text("Cancel") }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            IngredientMethodChip(
+                icon = Icons.Filled.Search,
+                label = "Search",
+                selected = state.ingredientMode == CreateRecipeIngredientMode.SEARCH,
+                onClick = { viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH) }
+            )
+            IngredientMethodChip(
+                icon = Icons.Filled.QrCodeScanner,
+                label = "Barcode",
+                selected = state.ingredientMode == CreateRecipeIngredientMode.BARCODE,
+                onClick = { viewModel.selectIngredientMode(CreateRecipeIngredientMode.BARCODE) }
+            )
         }
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
-        OutlinedTextField(
-            value = state.ingredientSearchQuery,
-            onValueChange = viewModel::updateIngredientSearchQuery,
-            label = { Text("Add an ingredient") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        if (state.isSearchingIngredients) {
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
-                CircularProgressIndicator(modifier = Modifier.padding(8.dp))
-            }
-        } else {
-            state.ingredientSearchResults.forEach { item: Item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(item.name, style = MaterialTheme.typography.bodyMedium)
-                        if (item.brand != null) {
-                            Text(item.brand, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (state.ingredients.isNotEmpty()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text("Added so far", style = MaterialTheme.typography.titleSmall)
+                state.ingredients.forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "${row.item.name} \u00b7 ${"%.0f".format(row.quantityG)}g",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { viewModel.removeIngredient(row.item.itemId) }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Remove ${row.item.name}")
                         }
                     }
-                    TextButton(onClick = { viewModel.addIngredient(item) }) {
-                        Text("Add")
-                    }
                 }
-                HorizontalDivider()
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                Button(
+                    onClick = { viewModel.save() },
+                    enabled = state.isSaveValid && !state.isSaving,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (state.isSaving) "Saving..." else "Save recipe")
+                }
+                if (state.saveError != null) {
+                    Text(
+                        "Couldn't save: ${state.saveError}",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
             }
         }
 
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+        when (state.ingredientMode) {
+            CreateRecipeIngredientMode.SEARCH -> {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    OutlinedTextField(
+                        value = state.ingredientSearchQuery,
+                        onValueChange = viewModel::updateIngredientSearchQuery,
+                        label = { Text("Search for an ingredient") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                ItemResultsList(
+                    items = state.ingredientSearchResults,
+                    isLoading = state.isSearchingIngredients,
+                    emptyMessage = if (state.ingredientSearchQuery.isBlank()) {
+                        "Search for an item to add as an ingredient."
+                    } else {
+                        "No matches."
+                    },
+                    quickLoggingItemId = null,
+                    lastLoggedAmounts = lastLoggedAmounts,
+                    onItemClick = { viewModel.openQuantityPicker(it) },
+                    onQuickAddClick = { itemId ->
+                        state.ingredientSearchResults.find { it.itemId == itemId }?.let { viewModel.openQuantityPicker(it) }
+                    }
+                )
+            }
+            CreateRecipeIngredientMode.BARCODE -> {
+                val addItemViewModel: AddItemViewModel =
+                    viewModel(key = "create_recipe_barcode_${System.identityHashCode(viewModel)}")
+                AddItemScreen(
+                    viewModel = addItemViewModel,
+                    savedScreenPromptText = "Want to review it before adding to your recipe?",
+                    savedScreenActionLabel = "View Ingredient",
+                    onUseCreatedItem = { item ->
+                        addItemViewModel.resetToScanChoice()
+                        viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+                        viewModel.addIngredientFromBarcodeFlow(item)
+                    },
+                    onBack = {
+                        addItemViewModel.resetToScanChoice()
+                        viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+                    },
+                    onDone = {
+                        addItemViewModel.resetToScanChoice()
+                        viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+                    }
+                )
+            }
+        }
+    }
 
-        Button(
-            onClick = { viewModel.save() },
-            enabled = state.isValid && !state.isSaving,
-            modifier = Modifier.fillMaxWidth()
+    if (state.itemForQuantityPicker != null) {
+        ItemQuantityDialog(
+            item = state.itemForQuantityPicker!!,
+            quantityInput = state.quantityPickerInput,
+            servingSizeId = state.quantityPickerServingSizeId,
+            isSaving = false,
+            error = null,
+            confirmLabel = "Add ingredient",
+            onQuantityChange = viewModel::updateQuantityPickerInput,
+            onServingChange = viewModel::updateQuantityPickerServing,
+            onCreateNewServing = { viewModel.openCreateServingDialog() },
+            onConfirm = { viewModel.confirmQuantityPicker() },
+            onDismiss = { viewModel.dismissQuantityPicker() }
+        )
+    }
+
+    if (state.showCreateServingDialog) {
+        CreateServingDialog(
+            name = state.newServingName,
+            weightG = state.newServingWeightG,
+            isCreating = state.isCreatingServing,
+            error = state.createServingError,
+            onNameChange = viewModel::updateNewServingName,
+            onWeightChange = viewModel::updateNewServingWeightG,
+            onConfirm = { viewModel.createServing() },
+            onDismiss = { viewModel.dismissCreateServingDialog() }
+        )
+    }
+}
+
+@Composable
+private fun IngredientMethodChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val background = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val iconTint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier
+                .size(56.dp)
+                .padding(4.dp)
+                .background(background, androidx.compose.foundation.shape.CircleShape)
         ) {
-            Text(if (state.isSaving) "Saving..." else "Save recipe")
+            Icon(icon, contentDescription = label, tint = iconTint)
         }
-
-        if (state.saveError != null) {
-            Text(
-                "Couldn't save: ${state.saveError}",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
-
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 16.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
     }
 }
 

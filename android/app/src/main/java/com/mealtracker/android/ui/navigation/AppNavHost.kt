@@ -30,12 +30,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
+import com.mealtracker.android.ui.theme.ThemePreference
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mealtracker.android.ui.screens.CalorieGoalScreen
 import com.mealtracker.android.ui.screens.EditProfileScreen
-import com.mealtracker.android.ui.screens.HealthConnectSettingsScreen
 import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
@@ -50,7 +50,7 @@ import com.mealtracker.android.ui.screens.WeightGoalScreen
 
 /**
  * The four bottom-nav destinations from the design doc: Home / Journal /
- * Meal Plan / Profile - deliberately no Coach/Sprout equivalents (those
+ * Meal Plan / Profile -- deliberately no Coach/Sprout equivalents (those
  * were Foodvisor-specific features, not part of our scope, see design doc).
  */
 sealed class Destination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -67,7 +67,7 @@ private val bottomNavDestinations = listOf(
     Destination.Profile
 )
 
-// Routes that should NOT show the bottom nav bar - the required
+// Routes that should NOT show the bottom nav bar -- the required
 // onboarding flow (and the brief gate check before it) is deliberately
 // full-screen, no tab-bar escape hatch, since the rest of the app
 // assumes a complete profile + active goal exist.
@@ -75,7 +75,7 @@ private val routesWithoutBottomBar = setOf("gate", "onboarding", "meal_detail/{d
 
 // Routes whose own hero background is meant to bleed up behind the
 // status bar (Journal's pastel kcal-ring section, Meal Detail's compact
-// header when its sheet is expanded) - these get NO automatic
+// header when its sheet is expanded) -- these get NO automatic
 // statusBarsPadding from AppNavHost, and are responsible for padding
 // their own readable content below the status bar themselves (see
 // JournalScreen's top spacer, MealDetailScreen's CompactMealHeader).
@@ -84,14 +84,17 @@ private val routesWithoutBottomBar = setOf("gate", "onboarding", "meal_detail/{d
 private val edgeToEdgeStatusBarRoutes = setOf("journal", "meal_detail/{date}/{mealType}")
 
 @Composable
-fun AppNavHost() {
+fun AppNavHost(
+    themePreference: ThemePreference,
+    onThemePreferenceChange: (ThemePreference) -> Unit
+) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
         // Everywhere EXCEPT edgeToEdgeStatusBarRoutes still gets a
-        // status-bar-safe top inset - just applied explicitly below via
+        // status-bar-safe top inset -- just applied explicitly below via
         // statusBarsPadding() instead of Scaffold's default, so the
         // routes that want their own hero to bleed up behind the status
         // bar (see that set's doc comment) can opt out of it.
@@ -178,7 +181,7 @@ fun AppNavHost() {
                     onBack = { navController.popBackStack() }
                 )
             }
-            // "add_item" as its own standalone route is gone - that
+            // "add_item" as its own standalone route is gone -- that
             // flow (AddItemScreen) is now embedded directly inside
             // MealDetailScreen's Add Item sheet instead of being
             // navigated to (see design discussion: "we want it inside
@@ -198,11 +201,9 @@ fun AppNavHost() {
                     onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
                     onNavigateToMacronutrients = { navController.navigate("macronutrients") },
                     onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") },
-                    onNavigateToHealthConnect = { navController.navigate("profile_settings/health_connect") }
+                    themePreference = themePreference,
+                    onThemePreferenceChange = onThemePreferenceChange
                 )
-            }
-            composable("profile_settings/health_connect") {
-                HealthConnectSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable("profile_settings/edit") {
                 EditProfileScreen(onBack = { navController.popBackStack() })

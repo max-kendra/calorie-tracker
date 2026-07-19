@@ -717,7 +717,13 @@ class MealDetailViewModel : ViewModel() {
                     isCreatingServing = false,
                     showCreateServingDialog = false,
                     itemToLog = updatedItem,
-                    logServingSizeId = newServing?.id
+                    logServingSizeId = newServing?.id,
+                    // Reset to 1 -- otherwise whatever gram quantity was
+                    // typed before switching units (e.g. "100") gets
+                    // reinterpreted as a multiplier of the NEW serving's
+                    // weight (100 x a 62g protein bar = 6200g), which is
+                    // never what was intended (see design discussion).
+                    logQuantityInput = "1"
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -59,6 +60,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -92,7 +96,29 @@ fun AddItemScreen(
     // AddItemViewModel has no access to that (separate ViewModel/
     // screen), so this can't be handled locally the way onDone/onBack
     // are.
-    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {}
+    onOpenItemDetail: (com.mealtracker.android.network.models.Item) -> Unit = {},
+    // Wording for the SAVED screen's secondary action -- defaults match
+    // the original meal-logging framing. Recipe ingredient picking (see
+    // CreateRecipeIngredientsScreen) passes its own wording since
+    // "add this item to your meal" doesn't apply there. Default action
+    // is "View Item" rather than "Add Item" -- even someone who does
+    // want to add it will likely want to adjust the quantity first (see
+    // design discussion), so the secondary action always opens the
+    // quantity picker rather than logging a flat default quantity
+    // directly.
+    savedScreenPromptText: String = "Want to review it before adding to your meal?",
+    savedScreenActionLabel: String = "View Item",
+    // When non-null, the SAVED screen's secondary action calls THIS with
+    // the created/matched item instead of onOpenItemDetail -- lets the
+    // entire scan/search/create flow be reused for contexts that aren't
+    // meal-logging at all (currently: adding a scanned item as a recipe
+    // ingredient, which opens ITS OWN quantity picker via
+    // addIngredientFromBarcodeFlow). Leave null (the default) to route
+    // through onOpenItemDetail instead, which opens MealDetailScreen's
+    // own quantity picker (see MealDetailScreen's onOpenItemDetail
+    // wiring) -- same "view and adjust" behavior, just a different
+    // picker depending on context.
+    onUseCreatedItem: ((com.mealtracker.android.network.models.Item) -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -432,7 +458,19 @@ fun AddItemScreen(
             AddItemPhase.SAVED -> SavedContent(
                 itemName = state.createdItem?.name ?: "",
                 isLoggingToMeal = state.isLoggingToMeal,
-                onAddItem = { viewModel.logCreatedItemToMeal(onComplete = onDone) },
+                promptText = savedScreenPromptText,
+                secondaryActionLabel = savedScreenActionLabel,
+                onAddItem = {
+                    val item = state.createdItem
+                    if (item != null) {
+                        if (onUseCreatedItem != null) {
+                            onUseCreatedItem(item)
+                        } else {
+                            onOpenItemDetail(item)
+                        }
+                    }
+                    onDone()
+                },
                 onDone = onDone
             )
         }
@@ -1019,7 +1057,7 @@ private fun ItemFormContent(
         NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
         NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
         NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
-        NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt)
+        NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt, isLast = true)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(12.dp))
 
@@ -1041,18 +1079,33 @@ private fun ItemFormContent(
 }
 
 @Composable
-private fun NumberField(label: String, value: String, onValueChange: (String) -> Unit) {
+private fun NumberField(label: String, value: String, onValueChange: (String) -> Unit, isLast: Boolean = false) {
+    val focusManager = LocalFocusManager.current
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Decimal,
+            imeAction = if (isLast) ImeAction.Done else ImeAction.Next
+        ),
+        keyboardActions = KeyboardActions(
+            onNext = { focusManager.moveFocus(FocusDirection.Down) },
+            onDone = { focusManager.clearFocus() }
+        ),
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
     )
 }
 
 @Composable
-private fun SavedContent(itemName: String, isLoggingToMeal: Boolean, onAddItem: () -> Unit, onDone: () -> Unit) {
+private fun SavedContent(
+    itemName: String,
+    isLoggingToMeal: Boolean,
+    promptText: String,
+    secondaryActionLabel: String,
+    onAddItem: () -> Unit,
+    onDone: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1062,7 +1115,7 @@ private fun SavedContent(itemName: String, isLoggingToMeal: Boolean, onAddItem: 
         Text(itemName, style = MaterialTheme.typography.titleMedium)
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
         Text(
-            "Would you like to add this item to your meal?",
+            promptText,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1072,14 +1125,17 @@ private fun SavedContent(itemName: String, isLoggingToMeal: Boolean, onAddItem: 
         // discussion), so the only decision left here is whether THIS
         // item should also get logged, framed as a low-key, easy-to-
         // ignore option rather than an equally-weighted second button.
-        // Done is the one obvious, big action; Add Item is a small,
-        // clearly-secondary text underneath it.
+        // Done is the one obvious, big action; the secondary action is a
+        // small, clearly-secondary text underneath it. Same reasoning
+        // applies verbatim to the recipe-ingredient reuse of this screen
+        // (see AddItemScreen's onUseCreatedItem doc comment) -- just
+        // with different wording for what "add" means there.
         Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
             Text("Done")
         }
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
         TextButton(onClick = onAddItem, enabled = !isLoggingToMeal) {
-            Text(if (isLoggingToMeal) "Adding..." else "Add Item")
+            Text(if (isLoggingToMeal) "Adding..." else secondaryActionLabel)
         }
     }
 }

@@ -168,7 +168,9 @@ data class AddItemUiState(
 
     val saveError: String? = null,
     val createdItem: Item? = null,
-    // SAVED screen's "Add Item" text - see logCreatedItemToMeal.
+    // SAVED screen's secondary-action state -- currently always false
+    // since that action (view item/ingredient) is synchronous, kept for
+    // any future async secondary action.
     val isLoggingToMeal: Boolean = false
 )
 
@@ -201,32 +203,6 @@ class AddItemViewModel : ViewModel() {
         )
     }
 
-    /** SAVED screen's small "Add Item" text - the explicit, opt-in way
-     * to log the just-saved/matched item to this meal, now that saving/
-     * matching itself no longer does this automatically (see design
-     * discussion: "would you like to add this item to your meal?",
-     * asked rather than assumed). onComplete fires either way (success
-     * or failure) since a logging hiccup here shouldn't trap the user
-     * on this screen - matches the "unobtrusive" framing this was
-     * asked for. */
-    fun logCreatedItemToMeal(onComplete: () -> Unit) {
-        val item = _uiState.value.createdItem
-        if (item == null) {
-            onComplete()
-            return
-        }
-        _uiState.value = _uiState.value.copy(isLoggingToMeal = true)
-        viewModelScope.launch {
-            try {
-                logToMealIfAttached(item.itemId)
-            } catch (e: Exception) {
-                // Best-effort - still proceed, see doc comment above.
-            }
-            _uiState.value = _uiState.value.copy(isLoggingToMeal = false)
-            onComplete()
-        }
-    }
-
     fun resetToScanChoice() {
         _uiState.value = AddItemUiState()
     }
@@ -235,9 +211,9 @@ class AddItemViewModel : ViewModel() {
      * just shows the SAVED confirmation screen now, same as a newly-
      * saved item. Used to auto-log it to the attached meal here, but
      * logging is decoupled from matching/saving now - see SAVED
-     * screen's explicit "Add Item" action (logCreatedItemToMeal) for
-     * why ("would you like to add this item to your meal?", asked
-     * rather than assumed, per design discussion). */
+     * screen's secondary action (View Item, opens the quantity picker)
+     * for why ("even if the user wants to add it, they'll likely want
+     * to adjust the quantity", per design discussion). */
     fun useMatchedItem() {
         val item = _uiState.value.matchedItem ?: return
         _uiState.value = _uiState.value.copy(phase = AddItemPhase.SAVED, createdItem = item)

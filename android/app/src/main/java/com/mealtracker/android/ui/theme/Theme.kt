@@ -9,16 +9,18 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
     // Deliberately the SAME TealPrimary as light mode, not a muted
-    // variant - per design discussion, colored/branded elements are
+    // variant -- per design discussion, colored/branded elements are
     // meant to stay exactly as they are; only neutral surfaces/text
     // invert. Same reasoning applies to every other hardcoded color in
     // the app (JournalHeroPastel, MacroColors, MealVisuals meal-icon
-    // tints, etc.) - none of those read from the theme at all, by
+    // tints, etc.) -- none of those read from the theme at all, by
     // design, so they don't need a dark-mode counterpart here.
     primary = TealPrimary,
     // Material3's darkColorScheme() picks its own default onPrimary
@@ -26,7 +28,7 @@ private val DarkColorScheme = darkColorScheme(
     // (with a dark, low-contrast "onPrimary" for text on top of it).
     // Since our primary is deliberately the same dark, saturated teal in
     // both themes (see above), that default onPrimary was some dark
-    // navy-ish tone - navy text/icons on a dark green button, exactly
+    // navy-ish tone -- navy text/icons on a dark green button, exactly
     // the "content inside them is navy" bug from design discussion.
     // White is correct here regardless of theme, so it's set explicitly
     // rather than relying on M3's per-theme default.
@@ -44,7 +46,7 @@ private val LightColorScheme = lightColorScheme(
     primary = TealPrimary,
     onPrimary = Color.White,
     primaryContainer = TealPrimaryContainer,
-    // Plain white/near-white app-wide - any per-screen color (like
+    // Plain white/near-white app-wide -- any per-screen color (like
     // Journal's pastel hero) is applied locally by that screen instead
     // of being baked into the theme (see design discussion).
     background = AppBackground,
@@ -52,18 +54,34 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant = TealSurfaceVariant
 )
 
+/**
+ * The theme actually being rendered right now -- NOT the device's
+ * system setting. Every place in the app with a hardcoded light/dark
+ * color pair (MealVisuals, CatalogVisuals, JournalScreen's hero) needs
+ * this, not `isSystemInDarkTheme()` directly: once ThemePreference lets
+ * someone pin the app to Light or Dark independent of their system
+ * setting (see SettingsScreen), a raw `isSystemInDarkTheme()` call
+ * anywhere else in the app quietly goes back to following the device
+ * instead of the app's actual current theme -- which was exactly the
+ * bug being fixed here (dark-mode colors showing up while the app was
+ * visibly in light mode, and vice versa). MealTrackerTheme below is the
+ * ONLY place that should ever call `isSystemInDarkTheme()` for the
+ * SYSTEM case; everything else should read this instead.
+ */
+val LocalIsAppDarkTheme = staticCompositionLocalOf { false }
+
 @Composable
 fun MealTrackerTheme(
-    // Now genuinely follows the system setting - see this function's
+    // Now genuinely follows the system setting -- see this function's
     // git history/design discussion for why it was hardcoded to false
     // for a while (every screen was painting hardcoded Color.White for
     // cards, which read as barely-legible light-text-on-light-
     // background in dark mode). That's fixed now: cards read
     // MaterialTheme.colorScheme.surface instead of a literal
-    // Color.White, and the bottom nav bar does too - so dark mode is a
+    // Color.White, and the bottom nav bar does too -- so dark mode is a
     // real, coherent theme now, not a half-applied one.
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color (Material You) is available Android 12+ - uses
+    // Dynamic color (Material You) is available Android 12+ -- uses
     // colors derived from the user's wallpaper. Off by default here so
     // the look is consistent and predictable; flip to true if you want
     // that effect instead.
@@ -79,9 +97,11 @@ fun MealTrackerTheme(
         else -> LightColorScheme
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalIsAppDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }

@@ -29,12 +29,16 @@ router = APIRouter(
 )
 
 
-def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str], Optional[str], Optional[str]]:
+def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str], Optional[str], Optional[str], Optional[str]]:
     """
     Shared validation + macro computation for both logs and meal_plans.
-    Returns (totals, item_name, recipe_name, image_path) for convenience/
-    display - image_path denormalized onto LogOut so the client can show
-    a thumbnail without a separate lookup per row.
+    Returns (totals, item_name, recipe_name, image_path, serving_name)
+    for convenience/display - image_path and serving_name denormalized
+    onto LogOut so the client can show a thumbnail and the actual unit
+    logged (e.g. "2 slices") without a separate lookup per row. Without
+    serving_name, the client only has serving_size_id and has no way to
+    resolve what unit that actually was, which is why the log list was
+    always showing quantity in grams even when a named serving was used.
     """
     if (payload.item_id is None) == (payload.recipe_id is None):
         raise HTTPException(
@@ -61,7 +65,7 @@ def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str
                 )
 
         totals = compute_item_totals(item, payload.quantity, serving)
-        return totals, item.name, None, item.image_path
+        return totals, item.name, None, item.image_path, serving.name if serving else None
 
     else:
         recipe = (
@@ -74,11 +78,15 @@ def _validate_and_compute(payload, db: Session) -> tuple[RawTotals, Optional[str
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown recipe_id")
 
         totals = compute_recipe_totals_for_quantity(recipe, payload.quantity)
-        return totals, None, recipe.name, recipe.image_path
+        return totals, None, recipe.name, recipe.image_path, None
 
 
 def _log_to_out(
-    log: Log, item_name: Optional[str], recipe_name: Optional[str], image_path: Optional[str] = None
+    log: Log,
+    item_name: Optional[str],
+    recipe_name: Optional[str],
+    image_path: Optional[str] = None,
+    serving_name: Optional[str] = None,
 ) -> LogOut:
     """The DB stores kcal_logged etc as precise Decimal (frozen at write
     time). Rounded UP to int here, at the display boundary only."""
@@ -89,6 +97,7 @@ def _log_to_out(
         item_id=log.item_id,
         recipe_id=log.recipe_id,
         serving_size_id=log.serving_size_id,
+        serving_size_name=serving_name,
         quantity=log.quantity,
         logged_at=log.logged_at,
         kcal_logged=ceil_int(log.kcal_logged),
@@ -113,7 +122,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     - historical days/weekly summaries reflect what was actually counted
     at the time (see design doc).
     """
-    totals, item_name, recipe_name, image_path = _validate_and_compute(payload, db)
+    totals, item_name, recipe_name, image_path, serving_name = _validate_and_compute(payload, db)
 
     log = Log(
         date=payload.date,
@@ -134,7 +143,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     db.add(log)
     db.commit()
     db.refresh(log)
-    return _log_to_out(log, item_name, recipe_name, image_path)
+    return _log_to_out(log, item_name, recipe_name, image_path, serving_name)
 
 
 @router.post("/from-meal", response_model=list[LogOut], status_code=status.HTTP_201_CREATED)
@@ -242,6 +251,7 @@ def list_logs(
 
     item_ids = {l.item_id for l in logs if l.item_id}
     recipe_ids = {l.recipe_id for l in logs if l.recipe_id}
+    serving_ids = {l.serving_size_id for l in logs if l.serving_size_id}
     item_names = {
         i.item_id: i.name for i in db.query(Item).filter(Item.item_id.in_(item_ids)).all()
     } if item_ids else {}
@@ -254,13 +264,17 @@ def list_logs(
     recipe_images = {
         r.recipe_id: r.image_path for r in db.query(Recipe).filter(Recipe.recipe_id.in_(recipe_ids)).all()
     } if recipe_ids else {}
+    serving_names = {
+        s.id: s.name for s in db.query(ServingSize).filter(ServingSize.id.in_(serving_ids)).all()
+    } if serving_ids else {}
 
     return [
         _log_to_out(
             l,
             item_names.get(l.item_id),
             recipe_names.get(l.recipe_id),
-            item_images.get(l.item_id) or recipe_images.get(l.recipe_id)
+            item_images.get(l.item_id) or recipe_images.get(l.recipe_id),
+            serving_names.get(l.serving_size_id)
         ) for l in logs
     ]
 
@@ -390,7 +404,7 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
         serving_size_id=payload.serving_size_id if payload.serving_size_id is not None else log.serving_size_id,
         quantity=payload.quantity if payload.quantity is not None else log.quantity,
     )
-    totals, item_name, recipe_name, image_path = _validate_and_compute(merged, db)
+    totals, item_name, recipe_name, image_path, serving_name = _validate_and_compute(merged, db)
 
     log.serving_size_id = merged.serving_size_id
     log.quantity = merged.quantity
@@ -404,7 +418,7 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
     log.sodium_mg_logged = totals.sodium_mg
     db.commit()
     db.refresh(log)
-    return _log_to_out(log, item_name, recipe_name, image_path)
+    return _log_to_out(log, item_name, recipe_name, image_path, serving_name)
 
 
 @router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -435,4 +449,8 @@ def get_log(log_id: int, db: Session = Depends(get_db)):
         log.item_id and db.query(Item.image_path).filter(Item.item_id == log.item_id).scalar()
         or log.recipe_id and db.query(Recipe.image_path).filter(Recipe.recipe_id == log.recipe_id).scalar()
     )
-    return _log_to_out(log, item_name, recipe_name, image_path)
+    serving_name = (
+        log.serving_size_id
+        and db.query(ServingSize.name).filter(ServingSize.id == log.serving_size_id).scalar()
+    )
+    return _log_to_out(log, item_name, recipe_name, image_path, serving_name)

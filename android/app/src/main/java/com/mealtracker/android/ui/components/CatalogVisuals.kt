@@ -1,6 +1,5 @@
 package com.mealtracker.android.ui.components
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Egg
 import androidx.compose.material.icons.filled.MenuBook
@@ -9,22 +8,29 @@ import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.mealtracker.android.ui.theme.LocalIsAppDarkTheme
 
 /**
  * Default icon+background for an Item (type: "product"/"ingredient") or
- * Recipe (recipeType: "recipe"/"meal") that has no image_path - used
+ * Recipe (recipeType: "recipe"/"meal") that has no image_path -- used
  * everywhere a thumbnail shows (search results, logged-items rows, the
  * item/recipe detail hero, the matched-barcode toast) so a missing
  * photo isn't just a blank gray box. Same pattern/reasoning as
  * MealVisuals (breakfast/lunch/dinner/snack icons), but keyed off the
- * catalog type instead of meal type - these are conceptually different
+ * catalog type instead of meal type -- these are conceptually different
  * groupings (a "snack" meal-slot can contain a "product" item), so
  * they're deliberately two separate objects rather than one shared
  * `when`.
+ *
+ * Reads LocalIsAppDarkTheme (the app's ACTUAL applied theme), not
+ * isSystemInDarkTheme() -- see that CompositionLocal's doc comment in
+ * Theme.kt. Same fix as MealVisuals: isSystemInDarkTheme() here was
+ * ignoring the in-app Light/Dark override and following the device's
+ * system setting instead.
  */
 object CatalogVisuals {
     @Composable
-    fun iconTint(): Color = if (isSystemInDarkTheme()) Color(0xFFD7CCC8) else Color(0xFF5D4037)
+    fun iconTint(): Color = if (LocalIsAppDarkTheme.current) Color(0xFFD7CCC8) else Color(0xFF5D4037)
 
     fun iconFor(type: String): ImageVector = when (type) {
         "ingredient" -> Icons.Filled.Egg
@@ -35,7 +41,7 @@ object CatalogVisuals {
 
     @Composable
     fun backgroundFor(type: String): Color {
-        val dark = isSystemInDarkTheme()
+        val dark = LocalIsAppDarkTheme.current
         return when (type) {
             "ingredient" -> if (dark) Color(0xFF28402A) else Color(0xFFC8E6C9)
             "recipe" -> if (dark) Color(0xFF352D4A) else Color(0xFFD1C4E9)
