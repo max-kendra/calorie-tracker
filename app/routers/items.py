@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
 from app.barcode import decode_barcode_from_image_bytes
 from app.config import settings
+from app.search import multi_column_search_filter
 from app.database import get_db
 from app.models import Item, ServingSize
 from app.ocr import extract_label_from_image
@@ -222,8 +222,9 @@ def list_items(
     query = db.query(Item)
 
     if q:
-        like = f"%{q}%"
-        query = query.filter(or_(Item.name.ilike(like), Item.brand.ilike(like)))
+        search_filter = multi_column_search_filter(q, Item.name, Item.brand)
+        if search_filter is not None:
+            query = query.filter(search_filter)
 
     if type:
         query = query.filter(Item.type == type)

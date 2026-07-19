@@ -8,6 +8,7 @@ from app.auth import require_api_key
 from app.database import get_db
 from app.models import Item, Recipe, RecipeIngredient
 from app.nutrition import compute_recipe_totals, to_display
+from app.search import multi_column_search_filter
 from app.schemas import (
     RecipeCreate,
     RecipeIngredientCreate,
@@ -112,7 +113,9 @@ def list_recipes(
     )
 
     if q:
-        query = query.filter(Recipe.name.ilike(f"%{q}%"))
+        search_filter = multi_column_search_filter(q, Recipe.name)
+        if search_filter is not None:
+            query = query.filter(search_filter)
     if recipe_type:
         query = query.filter(Recipe.recipe_type == recipe_type)
 
