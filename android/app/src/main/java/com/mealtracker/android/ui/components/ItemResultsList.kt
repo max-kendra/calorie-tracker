@@ -33,16 +33,31 @@ import kotlin.math.roundToInt
 
 /** "142 Cal, 100g" preview of what tapping "+" would actually log for
  * this item right now, based on the last quantity/serving used for it
- * (see MealDetailViewModel.LoggedAmount) -- defaults to 100g the first
- * time. Returns null if there's not enough info to compute a preview
- * (no kcal_100g on the item, or a remembered serving that's since been
- * deleted). Shared across every place that lists items to add
- * (meal search, recipe ingredient search) so the preview logic and its
- * edge cases only exist once. */
+ * -- prefers this session's own remembered amount (freshest), then the
+ * item's own persisted last-logged fields (survives across meals/days/
+ * sessions - see design discussion: "we're saving the last logged
+ * quantity/serving, but in the item list, the quantity is always 100g"
+ * -- this fell back straight to a flat 100g whenever remembered was
+ * null, ignoring the persisted fields entirely, even though the item's
+ * own info page read them correctly), and only then a flat 100g
+ * default if this item has never been logged at all. Returns null if
+ * there's not enough info to compute a preview (no kcal_100g on the
+ * item, or a remembered serving that's since been deleted). Shared
+ * across every place that lists items to add (meal search, recipe
+ * ingredient search) so the preview logic and its edge cases only
+ * exist once. */
 fun quickAddPreview(item: Item, remembered: LoggedAmount?): String? {
-    val quantity = remembered?.quantity ?: 100.0
-    val grams = if (remembered?.servingSizeId != null) {
-        val serving = item.servingSizes.find { it.id == remembered.servingSizeId } ?: return null
+    val quantity: Double
+    val servingSizeId: Int?
+    if (remembered != null) {
+        quantity = remembered.quantity
+        servingSizeId = remembered.servingSizeId
+    } else {
+        quantity = item.lastLoggedQuantity?.toDoubleOrNull() ?: 100.0
+        servingSizeId = item.lastLoggedServingSizeId
+    }
+    val grams = if (servingSizeId != null) {
+        val serving = item.servingSizes.find { it.id == servingSizeId } ?: return null
         quantity * (serving.weightG.toDoubleOrNull() ?: return null)
     } else {
         quantity

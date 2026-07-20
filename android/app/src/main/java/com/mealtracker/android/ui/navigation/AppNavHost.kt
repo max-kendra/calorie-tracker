@@ -36,6 +36,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mealtracker.android.ui.screens.CalorieGoalScreen
 import com.mealtracker.android.ui.screens.EditProfileScreen
+import com.mealtracker.android.ui.screens.HealthConnectSettingsScreen
 import com.mealtracker.android.ui.screens.HomeScreen
 import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
@@ -201,6 +202,7 @@ fun AppNavHost(
                     onNavigateToMealCalorieGoal = { navController.navigate("meal_calorie_goal") },
                     onNavigateToMacronutrients = { navController.navigate("macronutrients") },
                     onNavigateToWeightGoal = { navController.navigate("profile_settings/weight_goal") },
+                    onNavigateToHealthConnect = { navController.navigate("profile_settings/health_connect") },
                     themePreference = themePreference,
                     onThemePreferenceChange = onThemePreferenceChange
                 )
@@ -213,6 +215,9 @@ fun AppNavHost(
             }
             composable("profile_settings/weight_goal") {
                 WeightGoalScreen(onBack = { navController.popBackStack() })
+            }
+            composable("profile_settings/health_connect") {
+                HealthConnectSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable("macronutrients") {
                 MacronutrientsScreen(

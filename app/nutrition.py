@@ -176,6 +176,24 @@ def compute_item_totals(
     factor = grams / Decimal("100")
     sugar_g = (item.sugar_100g or ZERO) * factor
 
+    if item.counts_as_added_sugar is not None:
+        # Manual override wins outright, regardless of origin -- see
+        # design discussion: "my third highest ranking added sugar
+        # source is frozen berry mix... this is silly". A whole food
+        # sold as a scanned/barcoded product (frozen fruit, dried fruit)
+        # has no reliable automatic signal to catch, so this is a
+        # deliberate per-item escape hatch rather than a smarter
+        # heuristic.
+        countable_sugar_g = sugar_g if item.counts_as_added_sugar else ZERO
+    else:
+        # Raw USDA-import ingredients (e.g. a banana) don't count toward
+        # "countable" sugar - see RawTotals.countable_sugar_g's doc
+        # comment. Everything else (scanned products, manually-entered
+        # items, OCR-assisted) does, since a packaged food's sugar figure
+        # could plausibly include added sugar and we have no finer-
+        # grained label data to separate it out.
+        countable_sugar_g = ZERO if item.origin == "usda_import" else sugar_g
+
     return RawTotals(
         kcal=(item.kcal_100g or ZERO) * factor,
         protein_g=(item.protein_100g or ZERO) * factor,
@@ -183,13 +201,7 @@ def compute_item_totals(
         fat_g=(item.fat_100g or ZERO) * factor,
         fiber_g=(item.fiber_100g or ZERO) * factor,
         sugar_g=sugar_g,
-        # Raw USDA-import ingredients (e.g. a banana) don't count toward
-        # "countable" sugar - see RawTotals.countable_sugar_g's doc
-        # comment. Everything else (scanned products, manually-entered
-        # items, OCR-assisted) does, since a packaged food's sugar figure
-        # could plausibly include added sugar and we have no finer-
-        # grained label data to separate it out.
-        countable_sugar_g=ZERO if item.origin == "usda_import" else sugar_g,
+        countable_sugar_g=countable_sugar_g,
         saturated_fat_g=(item.saturated_fat_100g or ZERO) * factor,
         sodium_mg=(item.sodium_mg_100g or ZERO) * factor,
     )

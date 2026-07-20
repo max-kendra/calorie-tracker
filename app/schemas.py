@@ -40,6 +40,13 @@ class ItemBase(BaseModel):
     sugar_100g: Optional[Decimal] = None
     saturated_fat_100g: Optional[Decimal] = None
     sodium_mg_100g: Optional[Decimal] = None
+    # Manual override for the origin-based "countable sugar" heuristic
+    # used in weekly summaries (see design discussion: "my third
+    # highest ranking added sugar source is frozen berry mix... this is
+    # silly"). NULL = use the origin heuristic (raw USDA ingredient =
+    # not added sugar); True/False = force count/exclude regardless of
+    # origin. See compute_item_totals for where this is applied.
+    counts_as_added_sugar: Optional[bool] = None
 
     type: ItemType = "product"
     origin: ItemOrigin = "manual"
@@ -70,6 +77,7 @@ class ItemUpdate(BaseModel):
     sugar_100g: Optional[Decimal] = None
     saturated_fat_100g: Optional[Decimal] = None
     sodium_mg_100g: Optional[Decimal] = None
+    counts_as_added_sugar: Optional[bool] = None
 
     type: Optional[ItemType] = None
 
@@ -327,8 +335,14 @@ class RecipeOut(RecipeBase):
     created_at: datetime
     updated_at: datetime
     ingredients: list[RecipeIngredientOut] = Field(default_factory=list)
-    totals: NutritionTotals  # for the whole recipe (all servings combined)
-    totals_per_serving: NutritionTotals
+    # Extended (not the compact NutritionTotals) so the recipe/meal info
+    # screen can show sugar/saturated fat/sodium under the relevant
+    # macro, same as the item info screen already does with its own
+    # per-100g fields (see design discussion: "could we start showing
+    # sugar, saturated fats and sodium on the item and recipe/meal info
+    # screens").
+    totals: ExtendedNutritionTotals  # for the whole recipe (all servings combined)
+    totals_per_serving: ExtendedNutritionTotals
 
     model_config = ConfigDict(from_attributes=True)
 

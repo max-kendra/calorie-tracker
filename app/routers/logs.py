@@ -468,6 +468,12 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
             "last_logged_quantity": log.quantity,
             "last_logged_serving_size_id": log.serving_size_id,
         })
+    elif log.recipe_id is not None:
+        # Same reasoning, for the recipe/meal search list's own
+        # last_logged_at ordering (see recipes.py's list_recipes) - this
+        # was previously missing entirely, so editing a logged recipe's
+        # quantity never bumped the recipe's own recency.
+        db.query(Recipe).filter(Recipe.recipe_id == log.recipe_id).update({"last_logged_at": func.now()})
     db.commit()
     db.refresh(log)
     return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)

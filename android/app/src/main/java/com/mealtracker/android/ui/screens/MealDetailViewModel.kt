@@ -268,6 +268,12 @@ data class MealDetailUiState(
     // (food labels show salt, not sodium; converted at the boundary,
     // see saveItemEdit()).
     val editItemSaltG: String = "",
+    // Manual override for the origin-based "countable sugar" heuristic
+    // (see design discussion: "my third highest ranking added sugar
+    // source is frozen berry mix... this is silly"). Three-state:
+    // null = use the origin heuristic (default), true/false = force
+    // count/exclude regardless of origin.
+    val editItemCountsAsAddedSugar: Boolean? = null,
     val isSavingItemEdit: Boolean = false,
     val editItemError: String? = null
 )
@@ -683,10 +689,13 @@ class MealDetailViewModel : ViewModel() {
                     recipeLogInstanceId = null
                 )
                 load(date, state.mealType)
-                // Only for the new-log case - editing an existing log's
-                // quantity isn't "adding" (see refreshSearchAfterAdd's
-                // doc comment).
-                if (instanceId == null) refreshSearchAfterAdd()
+                // Same fix as confirmLogItemQuantity - refresh
+                // regardless of new-vs-edit, since editing an existing
+                // recipe log's quantity now also bumps the recipe's own
+                // last_logged_at server-side (see update_log on the
+                // backend), and the recipe search/recent list needs to
+                // reflect that too, not just brand-new logs.
+                refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoggingRecipeDetail = false,
@@ -1217,10 +1226,21 @@ class MealDetailViewModel : ViewModel() {
                         (item.itemId to LoggedAmount(quantity, state.logServingSizeId))
                 )
                 load(date, state.mealType)
-                // Only for the new-log case - editing an existing log's
-                // quantity isn't "adding" (see refreshSearchAfterAdd's
-                // doc comment).
-                if (editingLogId == null) refreshSearchAfterAdd()
+                // Refreshes the recent/search list's underlying Item
+                // data too, not just "was something added" -- editing an
+                // EXISTING log's quantity also updates that item's
+                // persisted last-logged fields server-side (see
+                // update_log on the backend), so the list needs
+                // refreshing here too, not just for brand-new logs.
+                // Previously skipped entirely when editingLogId was set,
+                // which left the list showing a stale/default quantity
+                // preview even after you'd just corrected it (see design
+                // discussion: "the latest logged list still shows all
+                // servings as 100g, even if that's not the saved value,
+                // we're overriding the display to 100g somewhere" -- it
+                // wasn't an override, it was this list never refreshing
+                // after an edit).
+                refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoggingItem = false,
@@ -1316,6 +1336,7 @@ class MealDetailViewModel : ViewModel() {
             // conversion/reasoning as AddItemViewModel's form.
             editItemSaltG = item.sodiumMg100g?.toDoubleOrNull()
                 ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: "",
+            editItemCountsAsAddedSugar = item.countsAsAddedSugar,
             editItemError = null
         )
     }
@@ -1335,6 +1356,18 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(editItemSaturatedFat = value)
     }
     fun updateEditItemSalt(value: String) { _uiState.value = _uiState.value.copy(editItemSaltG = value) }
+    /** Cycles null -> true -> false -> null (see
+     * editItemCountsAsAddedSugar's doc comment for what each state
+     * means) -- a plain Boolean toggle can't represent "use the
+     * default heuristic" as a state, only on/off. */
+    fun cycleEditItemCountsAsAddedSugar() {
+        val next = when (_uiState.value.editItemCountsAsAddedSugar) {
+            null -> true
+            true -> false
+            false -> null
+        }
+        _uiState.value = _uiState.value.copy(editItemCountsAsAddedSugar = next)
+    }
 
     fun saveItemEdit() {
         val state = _uiState.value
@@ -1361,7 +1394,8 @@ class MealDetailViewModel : ViewModel() {
                         saturatedFat100g = state.editItemSaturatedFat.toDoubleOrNull(),
                         // Salt (g) -> sodium (mg): same math as
                         // AddItemViewModel's saveItem().
-                        sodiumMg100g = state.editItemSaltG.toDoubleOrNull()?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO)
+                        sodiumMg100g = state.editItemSaltG.toDoubleOrNull()?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO),
+                        countsAsAddedSugar = state.editItemCountsAsAddedSugar
                     )
                 )
                 val date = _uiState.value.date

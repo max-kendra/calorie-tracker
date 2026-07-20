@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import require_api_key
 from app.database import get_db
 from app.models import Item, Recipe, RecipeIngredient
-from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals, to_display
+from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals, to_display_extended
 from app.search import multi_column_search_filter
 from app.schemas import (
     RecipeCreate,
@@ -52,8 +52,8 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
             }
             for ri in recipe.ingredients
         ],
-        totals=to_display(totals),
-        totals_per_serving=to_display(per_serving),
+        totals=to_display_extended(totals),
+        totals_per_serving=to_display_extended(per_serving),
     )
 
 

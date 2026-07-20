@@ -1,5 +1,7 @@
 package com.mealtracker.android.network.models
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -56,7 +58,14 @@ data class Item(
     // it's 100g again" - that was purely an in-memory map scoped to a
     // single MealDetailViewModel instance, which is fresh per meal).
     @SerialName("last_logged_quantity") val lastLoggedQuantity: String? = null,
-    @SerialName("last_logged_serving_size_id") val lastLoggedServingSizeId: Int? = null
+    @SerialName("last_logged_serving_size_id") val lastLoggedServingSizeId: Int? = null,
+    // Manual override for the origin-based "countable sugar" heuristic
+    // used in weekly summaries -- null = use the origin heuristic
+    // (raw USDA ingredient = not added sugar); true/false = force
+    // count/exclude regardless of origin (see design discussion: "my
+    // third highest ranking added sugar source is frozen berry mix...
+    // this is silly").
+    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null
 )
 
 /**
@@ -288,6 +297,25 @@ data class RecipeIngredient(
  * to see what was actually in it first, unlike items which have
  * ItemLogPageDialog for this).
  */
+/** Mirrors ExtendedNutritionTotals from app/schemas.py -- same as
+ * NutritionTotals plus sugar/saturated fat/sodium. Used by the recipe/
+ * meal info screen so it can show these under the relevant macro (see
+ * design discussion: "could we start showing sugar, saturated fats and
+ * sodium on the item and recipe/meal info screens"), same treatment
+ * items already get from their own per-100g fields. */
+@Serializable
+data class ExtendedNutritionTotals(
+    val kcal: Int,
+    @SerialName("protein_g") val proteinG: Int,
+    @SerialName("carbs_g") val carbsG: Int,
+    @SerialName("fat_g") val fatG: Int,
+    @SerialName("fiber_g") val fiberG: Int,
+    @SerialName("sugar_g") val sugarG: Int,
+    @SerialName("countable_sugar_g") val countableSugarG: Int,
+    @SerialName("saturated_fat_g") val saturatedFatG: Int,
+    @SerialName("sodium_mg") val sodiumMg: Int
+)
+
 @Serializable
 data class RecipeDetail(
     @SerialName("recipe_id") val recipeId: Int,
@@ -297,8 +325,8 @@ data class RecipeDetail(
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
     val ingredients: List<RecipeIngredient> = emptyList(),
-    val totals: NutritionTotals,
-    @SerialName("totals_per_serving") val totalsPerServing: NutritionTotals
+    val totals: ExtendedNutritionTotals,
+    @SerialName("totals_per_serving") val totalsPerServing: ExtendedNutritionTotals
 )
 
 /**
@@ -524,6 +552,7 @@ data class ItemImagePathUpdateRequest(@SerialName("image_path") val imagePath: S
  * backend never sees it as "set" and leaves it untouched. A null VALUE
  * here (for a macro the user cleared) is intentional and does get
  * applied, unlike an absent field. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class ItemMacrosUpdateRequest(
     val name: String,
@@ -534,7 +563,19 @@ data class ItemMacrosUpdateRequest(
     @SerialName("fiber_100g") val fiber100g: Double? = null,
     @SerialName("sugar_100g") val sugar100g: Double? = null,
     @SerialName("saturated_fat_100g") val saturatedFat100g: Double? = null,
-    @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null
+    @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null,
+    // @EncodeDefault(ALWAYS) is deliberate here, unlike every other
+    // field in this class -- this is a genuine 3-state value (use
+    // heuristic / force true / force false), and "reset back to null"
+    // is a real, reachable state a user can choose (see
+    // cycleEditItemCountsAsAddedSugar). With the default encodeDefaults
+    // behavior, sending null would be indistinguishable from "don't
+    // touch this field" (null is this field's own declared default, so
+    // it'd be silently omitted) -- meaning resetting the override back
+    // to "use the heuristic" would never actually reach the backend.
+    // Forcing this one field to always serialize sidesteps that.
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null
 )
 
 /**

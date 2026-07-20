@@ -707,6 +707,7 @@ fun MealDetailScreen(
                 sugar = state.editItemSugar,
                 saturatedFat = state.editItemSaturatedFat,
                 saltG = state.editItemSaltG,
+                countsAsAddedSugar = state.editItemCountsAsAddedSugar,
                 isSaving = state.isSavingItemEdit,
                 error = state.editItemError,
                 onNameChange = { viewModel.updateEditItemName(it) },
@@ -718,6 +719,7 @@ fun MealDetailScreen(
                 onSugarChange = { viewModel.updateEditItemSugar(it) },
                 onSaturatedFatChange = { viewModel.updateEditItemSaturatedFat(it) },
                 onSaltChange = { viewModel.updateEditItemSalt(it) },
+                onCyclesCountsAsAddedSugar = { viewModel.cycleEditItemCountsAsAddedSugar() },
                 onConfirm = { viewModel.saveItemEdit() },
                 onDismiss = { viewModel.dismissEditItemDialog() }
             )
@@ -1263,9 +1265,9 @@ private fun RecipeInfoScreen(
                     modifier = Modifier
                         .statusBarsPadding()
                         .padding(8.dp)
-                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f), CircleShape)
                 ) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close", tint = Color.White)
                 }
             }
             if (imageError != null) {
@@ -1357,12 +1359,49 @@ private fun RecipeInfoScreen(
                 }
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    RecipeMacroChip("Fat", recipe.totalsPerServing.fatG)
-                    RecipeMacroChip("Carbs", recipe.totalsPerServing.carbsG)
-                    RecipeMacroChip("Fiber", recipe.totalsPerServing.fiberG)
-                    RecipeMacroChip("Protein", recipe.totalsPerServing.proteinG)
+                // When viewing a LOGGED INSTANCE (not browsing/editing
+                // the global recipe), macros and ingredient quantities
+                // should reflect the amount actually eaten (the logged
+                // number of servings), not the recipe's flat per-
+                // serving reference values or its full stored
+                // ingredient list (see design discussion: "we should be
+                // showing the macros and ingredient quantities for the
+                // amount of servings, not the ingredient quantities for
+                // the entire recipe"). totalsPerServing is already
+                // per-ONE-serving, so multiplying by the logged
+                // quantity directly gives the actual amount consumed;
+                // each ingredient's stored quantity represents the
+                // WHOLE recipe (recipe.servings servings' worth), so
+                // that one needs dividing by recipe.servings first.
+                // Browsing/editing the global recipe (logInstanceId ==
+                // null) shows the unscaled per-serving/whole-recipe
+                // reference values, same as before.
+                val loggedServings = if (logInstanceId != null) quantityInput.toDoubleOrNull() ?: 1.0 else 1.0
+                val recipeServingsCount = recipe.servings.toDoubleOrNull() ?: 1.0
+                val ingredientScaleFactor = if (logInstanceId != null && recipeServingsCount > 0) {
+                    loggedServings / recipeServingsCount
+                } else {
+                    1.0
                 }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    RecipeMacroChip(
+                        "Fat", (recipe.totalsPerServing.fatG * loggedServings).roundToInt(),
+                        subLabel = "Sat: ${(recipe.totalsPerServing.saturatedFatG * loggedServings).roundToInt()}g"
+                    )
+                    RecipeMacroChip(
+                        "Carbs", (recipe.totalsPerServing.carbsG * loggedServings).roundToInt(),
+                        subLabel = "Sugar: ${(recipe.totalsPerServing.sugarG * loggedServings).roundToInt()}g"
+                    )
+                    RecipeMacroChip("Fiber", (recipe.totalsPerServing.fiberG * loggedServings).roundToInt())
+                    RecipeMacroChip("Protein", (recipe.totalsPerServing.proteinG * loggedServings).roundToInt())
+                }
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Sodium: ${(recipe.totalsPerServing.sodiumMg * loggedServings).roundToInt()}mg",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
                 Text("Ingredients", style = MaterialTheme.typography.titleSmall)
@@ -1378,6 +1417,7 @@ private fun RecipeInfoScreen(
                         IngredientRow(
                             ingredient = ingredient,
                             isEditing = isEditing,
+                            scaleFactor = ingredientScaleFactor,
                             onClick = { if (isEditing) onOpenIngredientEdit(ingredient) },
                             onSwipeRemove = { onRemoveBySwipe(ingredient) }
                         )
@@ -1516,10 +1556,17 @@ private fun RecipeInfoScreen(
  * this app (not the Protein-first exception specific to the collapsed
  * ring/bar summaries). */
 @Composable
-private fun RecipeMacroChip(label: String, grams: Int) {
+private fun RecipeMacroChip(label: String, grams: Int, subLabel: String? = null) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("${grams}g", style = MaterialTheme.typography.titleSmall)
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Smaller text under the relevant macro (saturated fat under
+        // fat, sugar under carbs) -- see design discussion: "could we
+        // start showing sugar, saturated fats and sodium on the item
+        // and recipe/meal info screens".
+        if (subLabel != null) {
+            Text(subLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -1537,6 +1584,13 @@ private fun RecipeMacroChip(label: String, grams: Int) {
 private fun IngredientRow(
     ingredient: RecipeIngredient,
     isEditing: Boolean,
+    // Scales the displayed quantity/kcal -- 1.0 when browsing/editing
+    // the global recipe (shows the ingredient as actually stored), a
+    // fraction/multiple of that when viewing a logged instance (shows
+    // the amount that was actually eaten, see RecipeInfoScreen's own
+    // comment on ingredientScaleFactor for the exact math). Never
+    // changes what's stored, purely a display-time scaling.
+    scaleFactor: Double = 1.0,
     onClick: () -> Unit,
     onSwipeRemove: () -> Unit
 ) {
@@ -1577,8 +1631,10 @@ private fun IngredientRow(
                 Text(ingredient.itemName, style = MaterialTheme.typography.bodyLarge)
                 // Same servingSizeName-or-grams fallback as LogRow, plus
                 // the same gram-equivalent suffix -- see that
-                // composable's own doc comment for the reasoning.
-                val ingredientQuantityValue = ingredient.quantity.toDoubleOrNull()
+                // composable's own doc comment for the reasoning. All
+                // scaled by scaleFactor first (see this composable's own
+                // doc comment on that param).
+                val ingredientQuantityValue = ingredient.quantity.toDoubleOrNull()?.let { it * scaleFactor }
                 val ingredientServingWeightG = ingredient.servingSizeWeightG?.toDoubleOrNull()
                 val ingredientGramsSuffix = if (
                     ingredient.servingSizeName != null && ingredientQuantityValue != null && ingredientServingWeightG != null
@@ -1588,13 +1644,13 @@ private fun IngredientRow(
                     ""
                 }
                 Text(
-                    "${ingredient.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: ingredient.quantity}" +
+                    "${ingredientQuantityValue?.let { formatQuantity(it) } ?: ingredient.quantity}" +
                         (ingredient.servingSizeName?.let { " $it$ingredientGramsSuffix" } ?: "g"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text("${ingredient.kcal} Cal", style = MaterialTheme.typography.bodyLarge)
+            Text("${(ingredient.kcal * scaleFactor).roundToInt()} Cal", style = MaterialTheme.typography.bodyLarge)
         }
     }
 
@@ -1871,9 +1927,9 @@ private fun ItemLogPageDialog(
                     modifier = Modifier
                         .statusBarsPadding()
                         .padding(8.dp)
-                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f), CircleShape)
                 ) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close", tint = Color.White)
                 }
             }
             if (imageUpdateError != null) {
@@ -1962,9 +2018,22 @@ private fun ItemLogPageDialog(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
 
                 LogMacroBar("Protein", per100(item.protein100g), goalProtein, MacroColors.Protein)
-                LogMacroBar("Fat", per100(item.fat100g), goalFat, MacroColors.Fat)
-                LogMacroBar("Carbs", per100(item.carbs100g), goalCarbs, MacroColors.Carbs)
+                LogMacroBar(
+                    "Fat", per100(item.fat100g), goalFat, MacroColors.Fat,
+                    subLabel = "Saturated fat: ${per100(item.saturatedFat100g)}g"
+                )
+                LogMacroBar(
+                    "Carbs", per100(item.carbs100g), goalCarbs, MacroColors.Carbs,
+                    subLabel = "Sugar: ${per100(item.sugar100g)}g"
+                )
                 LogMacroBar("Fiber", per100(item.fiber100g), goalFiber, MacroColors.Fiber)
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                Text(
+                    "Sodium: ${per100(item.sodiumMg100g)}mg",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
 
@@ -2018,6 +2087,7 @@ private fun EditItemDialog(
     sugar: String,
     saturatedFat: String,
     saltG: String,
+    countsAsAddedSugar: Boolean?,
     isSaving: Boolean,
     error: String?,
     onNameChange: (String) -> Unit,
@@ -2029,6 +2099,7 @@ private fun EditItemDialog(
     onSugarChange: (String) -> Unit,
     onSaturatedFatChange: (String) -> Unit,
     onSaltChange: (String) -> Unit,
+    onCyclesCountsAsAddedSugar: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2060,6 +2131,39 @@ private fun EditItemDialog(
                 EditNumberField("Saturated Fat (g)", saturatedFat, onSaturatedFatChange)
                 EditNumberField("Carbs (g)", carbs, onCarbsChange)
                 EditNumberField("Sugar (g)", sugar, onSugarChange)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                // 3-state toggle, not a plain checkbox -- "use the
+                // default heuristic" is a real, distinct state (see
+                // design discussion: "my third highest ranking added
+                // sugar source is frozen berry mix... this is silly").
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onCyclesCountsAsAddedSugar)
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Counts as added sugar",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        when (countsAsAddedSugar) {
+                            null -> "Auto"
+                            true -> "Yes"
+                            false -> "No"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Text(
+                    "\"Auto\" counts scanned/manual items but not raw USDA ingredients (e.g. a banana). Override if this item is a whole food sold as a product, like frozen fruit.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 EditNumberField("Fiber (g)", fiber, onFiberChange)
                 EditNumberField("Protein (g)", protein, onProteinChange)
                 EditNumberField("Salt (g)", saltG, onSaltChange, isLast = true)
@@ -2100,13 +2204,25 @@ private fun EditNumberField(label: String, value: String, onValueChange: (String
 }
 
 @Composable
-private fun LogMacroBar(label: String, amountG: Int, goalG: Int, color: Color) {
+private fun LogMacroBar(label: String, amountG: Int, goalG: Int, color: Color, subLabel: String? = null) {
     val fraction = if (goalG > 0) (amountG.toFloat() / goalG.toFloat()).coerceIn(0f, 1f) else 0f
     Column(modifier = Modifier.padding(bottom = 12.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = MaterialTheme.typography.bodyMedium)
             Text(
                 "${amountG}g / ${goalG}g",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        // Smaller text under the relevant macro (saturated fat under
+        // fat, sugar under carbs) -- see design discussion: "could we
+        // start showing sugar, saturated fats and sodium on the item
+        // and recipe/meal info screens". No goal/progress bar of its
+        // own, just informational.
+        if (subLabel != null) {
+            Text(
+                subLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
