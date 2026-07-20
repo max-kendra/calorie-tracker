@@ -248,6 +248,8 @@ data class RecipeCreateRequest(
 @Serializable
 data class RecipeUpdateRequest(
     val name: String? = null,
+    val instructions: String? = null,
+    @SerialName("source_url") val sourceUrl: String? = null,
     val servings: Double? = null,
     @SerialName("image_path") val imagePath: String? = null
 )
@@ -322,6 +324,7 @@ data class RecipeDetail(
     val name: String,
     @SerialName("recipe_type") val recipeType: String = "recipe",
     val instructions: String? = null,
+    @SerialName("source_url") val sourceUrl: String? = null,
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
     val ingredients: List<RecipeIngredient> = emptyList(),

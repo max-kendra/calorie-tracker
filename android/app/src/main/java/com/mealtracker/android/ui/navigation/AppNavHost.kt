@@ -12,7 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,7 +42,7 @@ import com.mealtracker.android.ui.screens.JournalScreen
 import com.mealtracker.android.ui.screens.MacronutrientsScreen
 import com.mealtracker.android.ui.screens.MealCalorieGoalScreen
 import com.mealtracker.android.ui.screens.MealDetailScreen
-import com.mealtracker.android.ui.screens.MealPlanScreen
+import com.mealtracker.android.ui.screens.RecipesScreen
 import com.mealtracker.android.ui.screens.OnboardingGateViewModel
 import com.mealtracker.android.ui.screens.OnboardingScreen
 import com.mealtracker.android.ui.screens.ProfileScreen
@@ -57,14 +57,14 @@ import com.mealtracker.android.ui.screens.WeightGoalScreen
 sealed class Destination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Home : Destination("home", "Home", Icons.Filled.Home)
     object Journal : Destination("journal", "Journal", Icons.Filled.CalendarMonth)
-    object MealPlan : Destination("meal_plan", "Meal Plan", Icons.Filled.Restaurant)
+    object Recipes : Destination("recipes", "Recipes", Icons.Filled.MenuBook)
     object Profile : Destination("profile", "Profile", Icons.Filled.Person)
 }
 
 private val bottomNavDestinations = listOf(
     Destination.Home,
     Destination.Journal,
-    Destination.MealPlan,
+    Destination.Recipes,
     Destination.Profile
 )
 
@@ -188,7 +188,7 @@ fun AppNavHost(
             // navigated to (see design discussion: "we want it inside
             // the card"). It was only ever reachable from there, so
             // there's nothing else that needs this route.
-            composable(Destination.MealPlan.route) { MealPlanScreen() }
+            composable(Destination.Recipes.route) { RecipesScreen() }
             composable(Destination.Profile.route) {
                 ProfileScreen(
                     onNavigateToSettings = { navController.navigate("profile_settings") }

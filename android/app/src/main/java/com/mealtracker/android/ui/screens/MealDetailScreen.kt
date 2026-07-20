@@ -414,7 +414,8 @@ fun MealDetailScreen(
                                     emptyMessage = "",
                                     quickLoggingRecipeId = state.quickLoggingRecipeId,
                                     onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
-                                    onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
+                                    onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) },
+                                    scrollable = false
                                 )
                                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
                             }
@@ -425,7 +426,13 @@ fun MealDetailScreen(
                                 quickLoggingItemId = state.quickLoggingItemId,
                                 lastLoggedAmounts = state.lastLoggedAmounts,
                                 onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
-                                onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) }
+                                onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) },
+                                // Only disabled under ALL (where a recipe
+                                // section may be stacked above this) --
+                                // PRODUCT/INGREDIENT have nothing stacked
+                                // above them, so keep the normal bounded/
+                                // scrollable box there.
+                                scrollable = state.searchFilter != SearchFilter.ALL
                             )
                         }
                         // USDA lookup lives ONLY here now, not in the
@@ -951,13 +958,27 @@ private fun RecipeResultsList(
     emptyMessage: String,
     quickLoggingRecipeId: Int?,
     onRecipeClick: (Recipe) -> Unit,
-    onQuickAddClick: (Recipe) -> Unit
+    onQuickAddClick: (Recipe) -> Unit,
+    // false when stacked above ItemResultsList in the ALL-filter case
+    // (see that call site) -- two independently height-bounded,
+    // independently-scrollable regions stacked in the same outer
+    // scrollable sheet creates nested scrolling, where this box's OWN
+    // scroll has to be exhausted before the items below it can move at
+    // all, which reads as "recipes/meals just stay on top" while
+    // scrolling (see design discussion). Standalone usage (the actual
+    // Recipe/Meal tabs, where this is the ONLY content in the sheet)
+    // keeps the bounded/scrollable box as before.
+    scrollable: Boolean = true
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 500.dp)
-            .verticalScroll(rememberScrollState())
+        modifier = if (scrollable) {
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 500.dp)
+                .verticalScroll(rememberScrollState())
+        } else {
+            Modifier.fillMaxWidth()
+        }
     ) {
         when {
             // Same fix as ItemResultsList -- don't blank already-shown

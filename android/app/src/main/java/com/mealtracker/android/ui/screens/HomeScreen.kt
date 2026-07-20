@@ -57,7 +57,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val CARD_CORNER_RADIUS = 24.dp
-private val KcalColor = Color(0xFF2C6E63) // TealPrimary -- kcal isn't a "macro" per se, gets the app's accent color instead of a MacroColors entry
+private val KcalColor = Color(0xFF1B3A5C) // NavyPrimary -- kcal isn't a "macro" per se, gets the app's accent color instead of a MacroColors entry
 
 /**
  * Home screen. Layout, top to bottom:

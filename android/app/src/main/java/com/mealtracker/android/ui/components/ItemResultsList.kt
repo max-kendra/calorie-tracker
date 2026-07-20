@@ -84,13 +84,22 @@ fun ItemResultsList(
     quickLoggingItemId: Int?,
     lastLoggedAmounts: Map<Int, LoggedAmount>,
     onItemClick: (Item) -> Unit,
-    onQuickAddClick: (Int) -> Unit
+    onQuickAddClick: (Int) -> Unit,
+    // See RecipeResultsList's own doc comment on this same param -- false
+    // when stacked below a recipe section in the ALL-filter case, so the
+    // two don't create nested independently-scrolling regions within
+    // the outer sheet's own scroll container.
+    scrollable: Boolean = true
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 500.dp)
-            .verticalScroll(rememberScrollState())
+        modifier = if (scrollable) {
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 500.dp)
+                .verticalScroll(rememberScrollState())
+        } else {
+            Modifier.fillMaxWidth()
+        }
     ) {
         when {
             // Only blanks to a spinner on a genuine first load (no

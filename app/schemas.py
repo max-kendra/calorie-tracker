@@ -311,6 +311,7 @@ class RecipeBase(BaseModel):
     name: str
     recipe_type: RecipeType = "recipe"
     instructions: Optional[str] = None
+    source_url: Optional[str] = None
     image_path: Optional[str] = None
     servings: Decimal = Decimal("1")
 
@@ -326,6 +327,7 @@ class RecipeUpdate(BaseModel):
     name: Optional[str] = None
     recipe_type: Optional[RecipeType] = None
     instructions: Optional[str] = None
+    source_url: Optional[str] = None
     image_path: Optional[str] = None
     servings: Optional[Decimal] = None
 
@@ -453,41 +455,6 @@ class LogOut(LoggableEntryBase):
 class DailySummary(BaseModel):
     date: date
     totals: ExtendedNutritionTotals
-
-
-class MealPlanCreate(LoggableEntryBase):
-    pass
-
-
-class MealPlanUpdate(BaseModel):
-    date: Optional[date] = None
-    meal_type: Optional[MealType] = None
-    quantity: Optional[Decimal] = None
-    serving_size_id: Optional[int] = None
-
-
-class MealPlanOut(LoggableEntryBase):
-    id: int
-    # NOT snapshotted — always reflects current item/recipe data until
-    # committed. Computed fresh on every read.
-    computed_totals: NutritionTotals
-    item_name: Optional[str] = None
-    recipe_name: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class CommitRange(BaseModel):
-    """Commit all meal_plans in [start_date, end_date] (inclusive) into
-    logs. Use the same date for both to commit a single day."""
-
-    start_date: date
-    end_date: date
-
-
-class CommitResult(BaseModel):
-    committed_count: int
-    log_ids: list[int]
 
 
 class MealGoalSplitIn(BaseModel):

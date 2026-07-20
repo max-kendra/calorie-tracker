@@ -15,25 +15,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    // Deliberately the SAME TealPrimary as light mode, not a muted
-    // variant -- per design discussion, colored/branded elements are
-    // meant to stay exactly as they are; only neutral surfaces/text
-    // invert. Same reasoning applies to every other hardcoded color in
-    // the app (JournalHeroPastel, MacroColors, MealVisuals meal-icon
-    // tints, etc.) -- none of those read from the theme at all, by
-    // design, so they don't need a dark-mode counterpart here.
-    primary = TealPrimary,
+    // Same NavyPrimary as light mode, deliberately -- see Color.kt's
+    // top comment for why one shared value across both themes is
+    // correct here (unlike the old TealPrimary situation, which
+    // ALSO reused one dark value in both themes but had no
+    // dark-mode-appropriate companion color, which is what actually
+    // caused it to nearly vanish against dark backgrounds).
+    primary = NavyPrimary,
     // Material3's darkColorScheme() picks its own default onPrimary
     // assuming a typical M3 dark theme's primary is a LIGHT/pastel tone
     // (with a dark, low-contrast "onPrimary" for text on top of it).
-    // Since our primary is deliberately the same dark, saturated teal in
-    // both themes (see above), that default onPrimary was some dark
-    // navy-ish tone -- navy text/icons on a dark green button, exactly
-    // the "content inside them is navy" bug from design discussion.
-    // White is correct here regardless of theme, so it's set explicitly
-    // rather than relying on M3's per-theme default.
+    // Since our primary is a dark, saturated navy in both themes, that
+    // default onPrimary would be some dark tone with poor contrast on
+    // top of it. White is correct here regardless of theme, so it's
+    // set explicitly rather than relying on M3's per-theme default.
     onPrimary = Color.White,
-    primaryContainer = TealPrimaryContainer,
+    primaryContainer = JournalHeroPastelDark,
     background = AppBackgroundDark,
     surface = SurfaceDark,
     surfaceVariant = SurfaceVariantDark,
@@ -43,15 +40,15 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = TealPrimary,
+    primary = NavyPrimary,
     onPrimary = Color.White,
-    primaryContainer = TealPrimaryContainer,
+    primaryContainer = JournalHeroPastel,
     // Plain white/near-white app-wide -- any per-screen color (like
     // Journal's pastel hero) is applied locally by that screen instead
     // of being baked into the theme (see design discussion).
     background = AppBackground,
     surface = Color.White,
-    surfaceVariant = TealSurfaceVariant
+    surfaceVariant = NeutralSurfaceVariant
 )
 
 /**

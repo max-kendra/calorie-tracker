@@ -89,6 +89,7 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
         name=payload.name,
         recipe_type=payload.recipe_type,
         instructions=payload.instructions,
+        source_url=payload.source_url,
         image_path=payload.image_path,
         servings=payload.servings,
         last_logged_at=func.now(),
@@ -154,8 +155,8 @@ def update_recipe(recipe_id: int, payload: RecipeUpdate, db: Session = Depends(g
 @router.delete("/{recipe_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
     recipe = _get_recipe_or_404(recipe_id, db)
-    # FK constraint blocks this if any `logs`/`meal_plans` row still
-    # references this recipe — deliberate, same protection as item deletes.
+    # FK constraint blocks this if any `logs` row still references this
+    # recipe — deliberate, same protection as item deletes.
     db.delete(recipe)
     db.commit()
     return None

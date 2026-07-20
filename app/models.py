@@ -152,7 +152,8 @@ class Recipe(Base):
     recipe_id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     recipe_type = Column(String, nullable=False, default="recipe")  # 'recipe' | 'meal'
-    instructions = Column(Text, nullable=True)  # typically unused for 'meal' type
+    instructions = Column(Text, nullable=True)  # available to both recipe_type values (see design discussion)
+    source_url = Column(String, nullable=True)  # optional link to where this recipe/meal originally came from
     image_path = Column(String, nullable=True)
     servings = Column(Numeric, nullable=False, default=1)
 
@@ -257,38 +258,6 @@ class Log(Base):
         CheckConstraint(
             "meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')",
             name="ck_logs_meal_type",
-        ),
-    )
-
-
-class MealPlan(Base):
-    """
-    Planned, not-yet-committed meals. NO macro snapshot — always reflects
-    current item/recipe data until committed. The "commit to tracker"
-    action copies matching rows into `logs`, computing + freezing the
-    macro snapshot at that exact moment.
-    """
-
-    __tablename__ = "meal_plans"
-
-    id = Column(Integer, primary_key=True)
-    date = Column(Date, nullable=False)
-    meal_type = Column(String, nullable=False)
-
-    item_id = Column(Integer, ForeignKey("items.item_id"), nullable=True)
-    recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), nullable=True)
-    serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
-    quantity = Column(Numeric, nullable=False)
-
-    __table_args__ = (
-        CheckConstraint(
-            "(item_id IS NOT NULL AND recipe_id IS NULL) OR "
-            "(item_id IS NULL AND recipe_id IS NOT NULL)",
-            name="ck_meal_plans_item_or_recipe",
-        ),
-        CheckConstraint(
-            "meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')",
-            name="ck_meal_plans_meal_type",
         ),
     )
 

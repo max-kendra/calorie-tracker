@@ -1,3 +1,8 @@
 <resources>
-    <color name="ic_launcher_background">#6650A4</color>
+    <!-- Pastel blue, matching JournalHeroPastel / the app's new navy +
+         pastel-blue identity (see design discussion: "we could change
+         the icon to that color scheme as well"). Was the stock Android
+         Studio template purple (#6650A4) before, never actually chosen
+         deliberately. -->
+    <color name="ic_launcher_background">#BFEAFB</color>
 </resources>
