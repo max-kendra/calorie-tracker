@@ -5,22 +5,13 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -32,21 +23,36 @@ import java.io.ByteArrayOutputStream
  * pick and crop an image" (currently: profile picture, from both the
  * Profile screen's avatar and Edit Profile screen).
  *
- * Usage: call this at the top of a Composable, then invoke the returned
- * lambda from an onClick to launch the picker.
+ * Usage: call rememberImagePickerWithCrop() to get a handle, invoke
+ * handle.launch() from an onClick to start the picker, and render
+ * ImagePickerCropOverlay(handle) as a LATER SIBLING in your own
+ * full-screen Box (same pattern as AddItemScreen/MealDetailScreen's own
+ * CropDialog usage - see that composable's doc comment).
  *
- * CropDialog itself is a plain composable now, not self-overlaying (see
- * its own doc comment - Dialog's window kept not sizing to the full
- * screen reliably). AddItemScreen/MealDetailScreen can lay it out as a
- * Box sibling themselves since they control their own structure, but
- * THIS helper is invoked from arbitrary/unknown call sites (Profile,
- * Edit Profile, wherever else) that it has no control over and can't
- * assume are Box-wrapped - so it still wraps its own CropDialog usage
- * in a local Dialog here, isolating that risk to just this one helper
- * rather than reintroducing it into the shared component.
+ * This USED to self-render via an internal Dialog() wrapper, accepting
+ * the same "Dialog's separate Android Window doesn't reliably size to
+ * the full screen" risk CropDialog's own doc comment describes - a
+ * SideEffect forcing the Dialog's window to MATCH_PARENT was tried
+ * here too, same as everywhere else that bug showed up, and it was
+ * JUST as unreliable (see design discussion: "the CropDialog for the
+ * profile picture is out of frame as well, the really old bug" - every
+ * OTHER caller of CropDialog had already moved off Dialog() entirely,
+ * this was the one remaining holdout, specifically because it's called
+ * from screens that don't control their own root layout). Requiring
+ * callers to provide their own full-screen Box (which every screen
+ * calling this already effectively has, or can easily get) removes the
+ * Dialog-window risk entirely, consistent with every other place this
+ * bug was actually fixed.
  */
+class ImagePickerWithCropHandle internal constructor(
+    val launch: () -> Unit,
+    internal val cropBitmap: Bitmap?,
+    internal val onCropConfirmed: (Bitmap) -> Unit,
+    internal val onCropCancelled: () -> Unit
+)
+
 @Composable
-fun rememberImagePickerWithCrop(onCropped: (ByteArray) -> Unit): () -> Unit {
+fun rememberImagePickerWithCrop(onCropped: (ByteArray) -> Unit): ImagePickerWithCropHandle {
     val context = LocalContext.current
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var cropBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -74,36 +80,31 @@ fun rememberImagePickerWithCrop(onCropped: (ByteArray) -> Unit): () -> Unit {
         pendingUri = null
     }
 
-    val bitmapToCrop = cropBitmap
-    if (bitmapToCrop != null) {
-        Dialog(
-            onDismissRequest = { cropBitmap = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-        ) {
-            val view = LocalView.current
-            SideEffect {
-                val window = (view.parent as? DialogWindowProvider)?.window
-                window?.setLayout(
-                    android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                    android.view.WindowManager.LayoutParams.MATCH_PARENT
-                )
-            }
-            androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                CropDialog(
-                    sourceBitmap = bitmapToCrop,
-                    onCropped = { cropped ->
-                        val stream = ByteArrayOutputStream()
-                        cropped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                        cropBitmap = null
-                        onCropped(stream.toByteArray())
-                    },
-                    onCancel = { cropBitmap = null }
-                )
-            }
-        }
-    }
+    return ImagePickerWithCropHandle(
+        launch = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        cropBitmap = cropBitmap,
+        onCropConfirmed = { cropped ->
+            val stream = ByteArrayOutputStream()
+            cropped.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+            cropBitmap = null
+            onCropped(stream.toByteArray())
+        },
+        onCropCancelled = { cropBitmap = null }
+    )
+}
 
-    return {
-        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-    }
+/**
+ * Renders the actual crop UI when a photo is pending - place this as a
+ * LATER SIBLING in your own full-screen Box (see this file's top doc
+ * comment). No-ops entirely when nothing is pending, so it's always
+ * safe to include unconditionally.
+ */
+@Composable
+fun ImagePickerCropOverlay(handle: ImagePickerWithCropHandle) {
+    val bitmap = handle.cropBitmap ?: return
+    CropDialog(
+        sourceBitmap = bitmap,
+        onCropped = handle.onCropConfirmed,
+        onCancel = handle.onCropCancelled
+    )
 }

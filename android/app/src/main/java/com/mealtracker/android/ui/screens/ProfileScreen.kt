@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.health.HealthConnectManager
+import com.mealtracker.android.ui.components.ImagePickerCropOverlay
 import com.mealtracker.android.ui.components.ProfileAvatar
 import com.mealtracker.android.ui.components.WeightLineChart
 import com.mealtracker.android.ui.components.rememberImagePickerWithCrop
@@ -77,22 +78,23 @@ fun ProfileScreen(
         return
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-    ) {
-        // --- Header: avatar + name + settings ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
         ) {
-            ProfileAvatar(
-                imagePath = state.profilePicPath,
-                size = 56.dp,
-                onClick = pickProfilePicture
-            )
+            // --- Header: avatar + name + settings ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ProfileAvatar(
+                    imagePath = state.profilePicPath,
+                    size = 56.dp,
+                    onClick = pickProfilePicture.launch
+                )
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
             Text(
                 state.name?.takeIf { it.isNotBlank() } ?: "Your profile",
@@ -218,8 +220,12 @@ fun ProfileScreen(
                 }
             }
         }
+        }
+
+        ImagePickerCropOverlay(pickProfilePicture)
     }
 }
+
 
 @Composable
 private fun WeightGoalSummary(

@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +72,30 @@ private val KcalColor = Color(0xFF2C6E63) // TealPrimary -- kcal isn't a "macro"
 fun HomeScreen(viewModel: HomeViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val streakCalendarState by viewModel.streakCalendarState.collectAsState()
+
+    // Refreshes whenever this screen becomes visible again (app
+    // foregrounded, or navigated back to from elsewhere) -- the
+    // ViewModel otherwise only loads once in its own init block and
+    // then never again, since it's scoped to Home's own back stack
+    // entry and survives navigating away and back. Without this, an
+    // edit made elsewhere (e.g. flagging an item's sugar override, or
+    // logging something from a different screen) would never show up
+    // here until the app fully restarted (see design discussion: "i
+    // don't think the homescreen sugar bar refreshes when i assign the
+    // no added sugar flag to items"). Uses the base lifecycle observer
+    // API (not the newer lifecycle-runtime-compose LifecycleResumeEffect)
+    // for broader compatibility with whatever lifecycle artifact
+    // version this project already depends on.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.load()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     var showWeekPicker by remember { mutableStateOf(false) }
     var weekPickerMonth by remember { mutableStateOf(YearMonth.now()) }

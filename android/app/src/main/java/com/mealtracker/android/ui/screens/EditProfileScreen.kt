@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mealtracker.android.ui.components.ImagePickerCropOverlay
 import com.mealtracker.android.ui.components.ProfileAvatar
 import com.mealtracker.android.ui.components.rememberImagePickerWithCrop
 
@@ -106,7 +107,7 @@ fun EditProfileScreen(
                 ProfileAvatar(
                     imagePath = state.profilePicPath,
                     size = 96.dp,
-                    onClick = pickProfilePicture
+                    onClick = pickProfilePicture.launch
                 )
             }
             if (state.pictureError != null) {
@@ -188,5 +189,7 @@ fun EditProfileScreen(
                 Text("\u2705 Saved", color = MaterialTheme.colorScheme.primary)
             }
         }
+
+        ImagePickerCropOverlay(pickProfilePicture)
     }
 }

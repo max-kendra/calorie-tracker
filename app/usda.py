@@ -144,6 +144,28 @@ def extract_macros(food_nutrients: list[dict]) -> dict:
             if found:
                 break  # don't try looser patterns once a match is found
 
+    # USDA's "Carbohydrate, by difference" is TOTAL carbohydrate, which
+    # by definition already INCLUDES fiber as a subset (same as any US
+    # nutrition label: "Total Carbohydrate" followed by an indented "of
+    # which Dietary Fiber" sub-line, not two independent nutrients that
+    # sum together). This app's own carbs_100g convention is NET carbs
+    # (excluding fiber) instead, matching how EU nutrition labels are
+    # entered everywhere else in this app (EU labels list fiber as its
+    # own separate line item, not a subset of carbs) - manually-entered
+    # items and OCR/barcode-scanned products already follow that
+    # convention. Left uncorrected, a USDA-imported raw ingredient's
+    # fiber grams were being counted TWICE: once inside carbs_100g
+    # (gross), and again via the separate fiber_100g field, whenever
+    # anything in the app treats carbs/fiber as independent, additive
+    # totals (e.g. separate weekly goals/progress bars) - see design
+    # discussion: "my macros and calories in my weekly summaries don't
+    # add up... i'm literally duplicating the carbs and fiber". Only
+    # subtracted when both were actually found - if fiber wasn't
+    # confidently matched, carbs is left as USDA reported it rather than
+    # guessing at what a missing subtraction should be.
+    if "carbs_100g" in macros and "fiber_100g" in macros:
+        macros["carbs_100g"] = max(macros["carbs_100g"] - macros["fiber_100g"], Decimal("0"))
+
     return macros
 
 

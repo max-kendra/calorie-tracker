@@ -57,6 +57,9 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
     var hasNutritionPermission by remember { mutableStateOf(false) }
     var weightImportEnabled by remember { mutableStateOf(HealthConnectPreferences.isWeightImportEnabled(context)) }
     var nutritionExportEnabled by remember { mutableStateOf(HealthConnectPreferences.isNutritionExportEnabled(context)) }
+    var isBackfilling by remember { mutableStateOf(false) }
+    var backfillProgress by remember { mutableStateOf<String?>(null) }
+    var backfillError by remember { mutableStateOf<String?>(null) }
 
     suspend fun refreshPermissionState() {
         healthConnectAvailable = HealthConnectManager.isAvailable(context)
@@ -136,6 +139,83 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
                     }
                 }
             )
+            HorizontalDivider()
+
+            // The normal sync path only fires when a meal's OWN screen
+            // is opened (see MealDetailScreen's LaunchedEffect) - so
+            // anything logged before nutrition export was ever turned
+            // on, or any day/meal never revisited since, never syncs on
+            // its own (see design discussion: "my data still isn't
+            // showing in google health, how can we make sure that even
+            // data that was logged before the permissions were given
+            // get pushed"). This does the same per-meal write that
+            // screen does, just for every past meal at once instead of
+            // waiting for each to be revisited.
+            if (nutritionExportEnabled && hasNutritionPermission) {
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                Text(
+                    "Only meals visited after turning this on sync automatically. " +
+                        "Use this to push everything you've ever logged, in one go.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+                if (isBackfilling) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                        Text(backfillProgress ?: "Syncing past meals...", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else {
+                    androidx.compose.material3.TextButton(onClick = {
+                        coroutineScope.launch {
+                            isBackfilling = true
+                            backfillProgress = null
+                            backfillError = null
+                            try {
+                                val logs = com.mealtracker.android.network.ApiClient.service.getLogsInRange(
+                                    startDate = "2000-01-01",
+                                    endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                                )
+                                val byMeal = logs.groupBy { it.date to it.mealType }
+                                byMeal.entries.forEachIndexed { index, (key, mealLogs) ->
+                                    val (date, mealType) = key
+                                    backfillProgress = "Syncing ${index + 1} of ${byMeal.size}..."
+                                    val totals = HealthConnectManager.MealNutritionTotals(
+                                        kcal = mealLogs.sumOf { it.kcalLogged }.toDouble(),
+                                        proteinG = mealLogs.sumOf { it.proteinGLogged }.toDouble(),
+                                        carbsG = mealLogs.sumOf { it.carbsGLogged }.toDouble(),
+                                        fatG = mealLogs.sumOf { it.fatGLogged }.toDouble(),
+                                        saturatedFatG = mealLogs.sumOf { it.saturatedFatGLogged }.toDouble(),
+                                        sugarG = mealLogs.sumOf { it.sugarGLogged }.toDouble(),
+                                        fiberG = mealLogs.sumOf { it.fiberGLogged }.toDouble(),
+                                        sodiumMg = mealLogs.sumOf { it.sodiumMgLogged }.toDouble()
+                                    )
+                                    HealthConnectManager.writeMealNutrition(
+                                        context,
+                                        java.time.LocalDate.parse(date),
+                                        mealType,
+                                        totals
+                                    )
+                                }
+                                backfillProgress = "Synced ${byMeal.size} meal${if (byMeal.size == 1) "" else "s"}."
+                            } catch (e: Exception) {
+                                backfillError = e.message ?: "Couldn't sync past meals"
+                            } finally {
+                                isBackfilling = false
+                            }
+                        }
+                    }) {
+                        Text("Sync all past meals")
+                    }
+                }
+                if (backfillError != null) {
+                    Text(
+                        backfillError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
             HorizontalDivider()
         }
     }

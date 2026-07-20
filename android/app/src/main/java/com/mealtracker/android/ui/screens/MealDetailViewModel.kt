@@ -443,6 +443,25 @@ class MealDetailViewModel : ViewModel() {
             return
         }
 
+        // ALL also fetches recipes+meals (recipeType = null, so both)
+        // alongside items below, rather than exclusively going through
+        // the items endpoint the way PRODUCT/INGREDIENT do - otherwise
+        // "All" wasn't actually all, recipes/meals only ever showed up
+        // by specifically switching to the Recipe or Meal tab (see
+        // design discussion: "they only show up if we filter for
+        // recipes... not with the rest of the items when it's set to
+        // show all").
+        if (filter == SearchFilter.ALL) {
+            viewModelScope.launch {
+                try {
+                    val recipes = ApiClient.service.searchRecipes(query = null, recipeType = null)
+                    _uiState.value = _uiState.value.copy(recentRecipes = recipes)
+                } catch (e: Exception) {
+                    // Not core functionality - fails quietly.
+                }
+            }
+        }
+
         val itemType = when (filter) {
             SearchFilter.PRODUCT -> "product"
             SearchFilter.INGREDIENT -> "ingredient"
@@ -482,6 +501,11 @@ class MealDetailViewModel : ViewModel() {
     // Cancelled and relaunched on every keystroke - see updateSearchQuery's
     // debounce below.
     private var searchJob: Job? = null
+    // Separate from searchJob - when filter is ALL, item search and
+    // recipe search run in parallel (see updateSearchQuery), each
+    // needing its own debounce/cancel-on-next-keystroke rather than
+    // fighting over one shared job.
+    private var allFilterRecipeSearchJob: Job? = null
 
     /** Debounced now - previously fired a request on EVERY keystroke
      * (see design discussion: "we send a request every single stroke",
@@ -498,6 +522,7 @@ class MealDetailViewModel : ViewModel() {
         val filter = _uiState.value.searchFilter
 
         searchJob?.cancel()
+        allFilterRecipeSearchJob?.cancel()
 
         if (query.isBlank()) {
             _uiState.value = _uiState.value.copy(
@@ -526,6 +551,28 @@ class MealDetailViewModel : ViewModel() {
                 }
             }
             return
+        }
+
+        // ALL also searches recipes+meals (recipeType = null) IN
+        // PARALLEL with the items search below, same reasoning as
+        // loadRecentItems's own ALL handling - otherwise typing a
+        // search under "All" would never surface a matching recipe/meal
+        // at all, only items.
+        if (filter == SearchFilter.ALL) {
+            _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
+            allFilterRecipeSearchJob = viewModelScope.launch {
+                delay(SEARCH_DEBOUNCE_MS)
+                try {
+                    val results = ApiClient.service.searchRecipes(query = query, recipeType = null)
+                    if (_uiState.value.searchQuery == query) {
+                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
+                    }
+                } catch (e: Exception) {
+                    if (_uiState.value.searchQuery == query) {
+                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false)
+                    }
+                }
+            }
         }
 
         val itemType = when (filter) {

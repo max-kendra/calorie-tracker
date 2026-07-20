@@ -395,6 +395,29 @@ fun MealDetailScreen(
                                 onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
                             )
                         } else {
+                            // ALL also shows recipes/meals, stacked above
+                            // items -- previously ALL only ever queried
+                            // items, so a recipe/meal never showed up
+                            // unless you specifically switched to that
+                            // tab (see design discussion: "they only
+                            // show up if we filter for recipes... not
+                            // with the rest of the items when it's set
+                            // to show all"). Only rendered when there
+                            // are actual matches, so the combined view
+                            // doesn't clutter itself with a "no recipes"
+                            // placeholder on every ordinary item search.
+                            val recipesForAll = if (showingRecent) state.recentRecipes else state.recipeSearchResults
+                            if (state.searchFilter == SearchFilter.ALL && recipesForAll.isNotEmpty()) {
+                                RecipeResultsList(
+                                    recipes = recipesForAll,
+                                    isLoading = false,
+                                    emptyMessage = "",
+                                    quickLoggingRecipeId = state.quickLoggingRecipeId,
+                                    onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
+                                    onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
+                                )
+                                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                            }
                             ItemResultsList(
                                 items = if (showingRecent) state.recentItems else state.searchResults,
                                 isLoading = if (showingRecent) state.isLoadingRecentItems else state.isSearching,
@@ -599,6 +622,10 @@ fun MealDetailScreen(
             onQuantityChange = { viewModel.updateRecipeLogQuantityInput(it) },
             onConfirm = { viewModel.confirmRecipeLog() },
             onDismiss = { viewModel.dismissRecipeDetail() },
+            goalFat = state.goalFat,
+            goalProtein = state.goalProtein,
+            goalCarbs = state.goalCarbs,
+            goalFiber = state.goalFiber,
             logInstanceId = state.recipeLogInstanceId,
             onDeleteInstance = { viewModel.deleteRecipeLogInstance() },
             isEditing = state.isEditingRecipe,
@@ -1050,6 +1077,13 @@ private fun RecipeInfoScreen(
     onQuantityChange: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    // Same per-meal goals ItemLogPageDialog uses, for the same colored
+    // progress-bar treatment (see design discussion: "i wanted recipes
+    // and meals to show macro info the same way items do").
+    goalFat: Int,
+    goalProtein: Int,
+    goalCarbs: Int,
+    goalFiber: Int,
     // Non-null = viewing this from an ALREADY-LOGGED instance (tapped a
     // logged recipe row) -- see MealDetailUiState.recipeLogInstanceId's
     // doc comment. Changes the bottom action area to "Save"/"Delete
@@ -1383,20 +1417,33 @@ private fun RecipeInfoScreen(
                 } else {
                     1.0
                 }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    RecipeMacroChip(
-                        "Fat", (recipe.totalsPerServing.fatG * loggedServings).roundToInt(),
-                        subLabel = "Sat: ${(recipe.totalsPerServing.saturatedFatG * loggedServings).roundToInt()}g"
-                    )
-                    RecipeMacroChip(
-                        "Carbs", (recipe.totalsPerServing.carbsG * loggedServings).roundToInt(),
-                        subLabel = "Sugar: ${(recipe.totalsPerServing.sugarG * loggedServings).roundToInt()}g"
-                    )
-                    RecipeMacroChip("Fiber", (recipe.totalsPerServing.fiberG * loggedServings).roundToInt())
-                    RecipeMacroChip("Protein", (recipe.totalsPerServing.proteinG * loggedServings).roundToInt())
-                }
+                // Same colored progress-bar treatment as the item info
+                // screen's LogMacroBar (see design discussion: "i wanted
+                // recipes and meals to show macro info the same way
+                // items do with the colored progress bars and all"),
+                // reusing that exact shared composable rather than a
+                // separate flat-chip display, so the two screens stay
+                // visually consistent.
+                LogMacroBar(
+                    "Protein", (recipe.totalsPerServing.proteinG * loggedServings).roundToInt(),
+                    goalProtein, MacroColors.Protein
+                )
+                LogMacroBar(
+                    "Fat", (recipe.totalsPerServing.fatG * loggedServings).roundToInt(),
+                    goalFat, MacroColors.Fat,
+                    subLabel = "Saturated fat: ${(recipe.totalsPerServing.saturatedFatG * loggedServings).roundToInt()}g"
+                )
+                LogMacroBar(
+                    "Carbs", (recipe.totalsPerServing.carbsG * loggedServings).roundToInt(),
+                    goalCarbs, MacroColors.Carbs,
+                    subLabel = "Sugar: ${(recipe.totalsPerServing.sugarG * loggedServings).roundToInt()}g"
+                )
+                LogMacroBar(
+                    "Fiber", (recipe.totalsPerServing.fiberG * loggedServings).roundToInt(),
+                    goalFiber, MacroColors.Fiber
+                )
 
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
                 Text(
                     "Sodium: ${(recipe.totalsPerServing.sodiumMg * loggedServings).roundToInt()}mg",
                     style = MaterialTheme.typography.bodySmall,
@@ -1544,28 +1591,6 @@ private fun RecipeInfoScreen(
                 },
                 onCancel = { clearCropState() }
             )
-        }
-    }
-}
-
-/** Small per-macro value used in the recipe info screen's macro
- * breakdown, shown before the ingredients list (see design discussion:
- * "when you open a recipe info page you should see the macros first,
- * then the ingredients list"). Fat/Carbs/Fiber/Protein order, matching
- * the general list/form macro ordering convention used elsewhere in
- * this app (not the Protein-first exception specific to the collapsed
- * ring/bar summaries). */
-@Composable
-private fun RecipeMacroChip(label: String, grams: Int, subLabel: String? = null) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("${grams}g", style = MaterialTheme.typography.titleSmall)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        // Smaller text under the relevant macro (saturated fat under
-        // fat, sugar under carbs) -- see design discussion: "could we
-        // start showing sugar, saturated fats and sodium on the item
-        // and recipe/meal info screens".
-        if (subLabel != null) {
-            Text(subLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
