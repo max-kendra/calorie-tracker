@@ -226,6 +226,12 @@ class Log(Base):
     # per-log API response (LogOut) to avoid crowding the tracker UI, but
     # summed for daily/weekly summaries (ExtendedNutritionTotals).
     sugar_g_logged = Column(Numeric, nullable=False, default=0)
+    # Sugar EXCLUDING raw USDA-import-origin ingredients (see design
+    # discussion) -- what the weekly summary's sugar tracking actually
+    # sums, instead of sugar_g_logged, since naturally-occurring fruit
+    # sugar isn't what added-sugar dietary guidance targets. Frozen at
+    # write time same as every other _logged column.
+    countable_sugar_g_logged = Column(Numeric, nullable=False, default=0)
     saturated_fat_g_logged = Column(Numeric, nullable=False, default=0)
     sodium_mg_logged = Column(Numeric, nullable=False, default=0)
 

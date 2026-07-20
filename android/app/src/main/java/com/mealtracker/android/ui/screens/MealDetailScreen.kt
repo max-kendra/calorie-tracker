@@ -164,7 +164,7 @@ fun MealDetailScreen(
     // Runs on ANY change to this meal's logs -- add, edit, or delete all
     // naturally show up as a change to state.logs, so this is simpler
     // and more robust than hooking into every individual mutation
-    // function (logItemQuickly, confirmLogItemQuantity, saveLogQuantity,
+    // function (logItemQuickly, confirmLogItemQuantity, confirmRecipeLog,
     // deleteLog, ...) separately. Per design discussion: sync unit is
     // the MEAL (matching this app's own logging unit and Health
     // Connect's own per-meal mealType field), not individual items --
@@ -288,25 +288,6 @@ fun MealDetailScreen(
                     Text("Cancel")
                 }
             }
-        )
-    }
-
-    val selectedLog = state.selectedLog
-    if (selectedLog != null) {
-        LogDetailDialog(
-            log = selectedLog,
-            goalKcal = state.goalKcal,
-            goalFat = state.goalFat,
-            goalProtein = state.goalProtein,
-            goalCarbs = state.goalCarbs,
-            goalFiber = state.goalFiber,
-            editQuantityInput = state.editQuantityInput,
-            isSaving = state.isSavingLogEdit,
-            error = state.logEditError,
-            onQuantityChange = { viewModel.updateEditQuantityInput(it) },
-            onSave = { viewModel.saveLogQuantity() },
-            onDelete = { viewModel.deleteLog(selectedLog.id) },
-            onDismiss = { viewModel.dismissLogDetail() }
         )
     }
 
@@ -618,6 +599,8 @@ fun MealDetailScreen(
             onQuantityChange = { viewModel.updateRecipeLogQuantityInput(it) },
             onConfirm = { viewModel.confirmRecipeLog() },
             onDismiss = { viewModel.dismissRecipeDetail() },
+            logInstanceId = state.recipeLogInstanceId,
+            onDeleteInstance = { viewModel.deleteRecipeLogInstance() },
             isEditing = state.isEditingRecipe,
             editName = state.editRecipeName,
             editServings = state.editRecipeServings,
@@ -1065,6 +1048,13 @@ private fun RecipeInfoScreen(
     onQuantityChange: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    // Non-null = viewing this from an ALREADY-LOGGED instance (tapped a
+    // logged recipe row) -- see MealDetailUiState.recipeLogInstanceId's
+    // doc comment. Changes the bottom action area to "Save"/"Delete
+    // this log" (editing/removing THAT INSTANCE) instead of "Log this
+    // recipe" (creating a new one).
+    logInstanceId: Int?,
+    onDeleteInstance: () -> Unit,
     isEditing: Boolean,
     editName: String,
     editServings: String,
@@ -1366,6 +1356,14 @@ private fun RecipeInfoScreen(
                     )
                 }
 
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    RecipeMacroChip("Fat", recipe.totalsPerServing.fatG)
+                    RecipeMacroChip("Carbs", recipe.totalsPerServing.carbsG)
+                    RecipeMacroChip("Fiber", recipe.totalsPerServing.fiberG)
+                    RecipeMacroChip("Protein", recipe.totalsPerServing.proteinG)
+                }
+
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
                 Text("Ingredients", style = MaterialTheme.typography.titleSmall)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
@@ -1467,7 +1465,28 @@ private fun RecipeInfoScreen(
 
                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
                     Button(onClick = onConfirm, enabled = !isLogging, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (isLogging) "Logging..." else "Log this ${if (recipe.recipeType == "meal") "meal" else "recipe"}")
+                        Text(
+                            if (isLogging) {
+                                "Saving..."
+                            } else if (logInstanceId != null) {
+                                "Save"
+                            } else {
+                                "Log this ${if (recipe.recipeType == "meal") "meal" else "recipe"}"
+                            }
+                        )
+                    }
+                    // logInstanceId can only ever be set for
+                    // recipe_type="recipe" (a "meal" log always expands
+                    // into per-ingredient item logs instead, see
+                    // MealDetailUiState.recipeLogInstanceId's doc
+                    // comment) -- deletes just THIS logged instance, not
+                    // the recipe itself (that's "Delete this recipe"
+                    // in edit mode above).
+                    if (logInstanceId != null) {
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                        TextButton(onClick = onDeleteInstance, enabled = !isLogging) {
+                            Text("Delete this log", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 20.dp))
@@ -1486,6 +1505,21 @@ private fun RecipeInfoScreen(
                 onCancel = { clearCropState() }
             )
         }
+    }
+}
+
+/** Small per-macro value used in the recipe info screen's macro
+ * breakdown, shown before the ingredients list (see design discussion:
+ * "when you open a recipe info page you should see the macros first,
+ * then the ingredients list"). Fat/Carbs/Fiber/Protein order, matching
+ * the general list/form macro ordering convention used elsewhere in
+ * this app (not the Protein-first exception specific to the collapsed
+ * ring/bar summaries). */
+@Composable
+private fun RecipeMacroChip(label: String, grams: Int) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("${grams}g", style = MaterialTheme.typography.titleSmall)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1598,12 +1632,13 @@ private fun IngredientRow(
 
 /**
  * Full-page item log screen -- same hero-image/scrollable-card/macro-bar
- * treatment as LogDetailDialog below, reused here for an item that
- * ISN'T logged yet (per design discussion: "you almost had it before,
- * you just had to add the unit/serving picker to the existing page").
- * Unlike LogDetailDialog, macros here ARE live-recomputed as you change
- * quantity/unit (item.kcal100g etc. * grams/100) since there's no saved
- * log snapshot yet to fall back on.
+ * treatment used throughout this file for full-page item/recipe info,
+ * reused here for an item that ISN'T logged yet (per design discussion:
+ * "you almost had it before, you just had to add the unit/serving
+ * picker to the existing page"). Unlike editing an already-logged item,
+ * macros here ARE live-recomputed as you change quantity/unit
+ * (item.kcal100g etc. * grams/100) since there's no saved log snapshot
+ * yet to fall back on.
  *
  * Unit is either raw grams or one of the item's named ServingSizes. With
  * a serving selected, the quantity typed is a MULTIPLIER of that
@@ -2062,148 +2097,6 @@ private fun EditNumberField(label: String, value: String, onValueChange: (String
         singleLine = true,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
     )
-}
-
-/**
- * Full-screen log detail: hero image up top, scrollable card below with
- * kcal for the CURRENTLY SAVED quantity, an editable quantity field, and
- * macro progress bars shown as a fraction of the MEAL's goal (not the
- * day's) -- matches design reference. Deliberately does not include
- * "Customize" or "Input and benefits" sections from that reference, per
- * design discussion ("ignore" those).
- *
- * KNOWN SIMPLIFICATION: the kcal/macro numbers shown reflect the log's
- * last-SAVED snapshot, not a live recompute as you type a new quantity
- * in the field below -- there's no client-side per-gram macro data to
- * recompute against without a round-trip. They update once you tap Save
- * and the meal reloads. A live preview would need either shipping the
- * item's per-100g macros down to this dialog, or a debounced preview
- * call to the backend -- not done here.
- */
-@Composable
-private fun LogDetailDialog(
-    log: Log,
-    goalKcal: Int,
-    goalFat: Int,
-    goalProtein: Int,
-    goalCarbs: Int,
-    goalFiber: Int,
-    editQuantityInput: String,
-    isSaving: Boolean,
-    error: String?,
-    onQuantityChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-    ) {
-        val view = LocalView.current
-        SideEffect {
-            val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-            window?.setLayout(
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT
-            )
-        }
-
-        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            Box(modifier = Modifier.fillMaxWidth().height(240.dp)) {
-                if (log.imagePath != null) {
-                    coil3.compose.AsyncImage(
-                        model = com.mealtracker.android.BuildConfig.BASE_URL + log.imagePath,
-                        contentDescription = null,
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    // This dialog only ever shows recipe-based logs (see
-                    // its own doc comment) -- "recipe" is a reasonable
-                    // fixed default here since Log doesn't carry
-                    // recipe_type (recipe vs meal) the way a full Recipe
-                    // object would.
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(CatalogVisuals.backgroundFor("recipe")),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            CatalogVisuals.iconFor("recipe"),
-                            contentDescription = null,
-                            tint = CatalogVisuals.iconTint(),
-                            modifier = Modifier.size(64.dp)
-                        )
-                    }
-                }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .statusBarsPadding()
-                        .padding(8.dp)
-                        .background(Color.White.copy(alpha = 0.8f), CircleShape)
-                ) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp)
-            ) {
-                Text(
-                    log.itemName ?: log.recipeName ?: "Item",
-                    style = MaterialTheme.typography.headlineSmall
-                )
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-
-                OutlinedTextField(
-                    value = editQuantityInput,
-                    onValueChange = onQuantityChange,
-                    label = { Text("Quantity (g)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (error != null) {
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-
-                Text(
-                    "${log.kcalLogged} Cal for this quantity",
-                    style = MaterialTheme.typography.titleMedium
-                )
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
-                Text("Share of this meal's goal", style = MaterialTheme.typography.titleSmall)
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-
-                LogMacroBar("Protein", log.proteinGLogged, goalProtein, MacroColors.Protein)
-                LogMacroBar("Fat", log.fatGLogged, goalFat, MacroColors.Fat)
-                LogMacroBar("Carbs", log.carbsGLogged, goalCarbs, MacroColors.Carbs)
-                LogMacroBar("Fiber", log.fiberGLogged, goalFiber, MacroColors.Fiber)
-
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 24.dp))
-
-                Button(onClick = onSave, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (isSaving) "Saving..." else "Save Quantity")
-                }
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 24.dp))
-            }
-        }
-    }
 }
 
 @Composable

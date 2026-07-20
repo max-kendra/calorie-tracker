@@ -87,6 +87,14 @@ data class Log(
     // sodium/sugar/saturated-fat threshold card and its "top
     // contributors" breakdown.
     @SerialName("sugar_g_logged") val sugarGLogged: Int = 0,
+    // Sugar excluding raw USDA-import-origin ingredients (see design
+    // discussion: "my highest sugar source is freaking bananas" --
+    // added-sugar dietary guidance targets added/free sugars, not
+    // sugar naturally occurring in whole foods). This is what the
+    // sugar threshold card and its "top contributors" list should
+    // actually sum/rank by, NOT sugarGLogged -- a heuristic based on
+    // item origin, not a true added-vs-total-sugar lookup.
+    @SerialName("countable_sugar_g_logged") val countableSugarGLogged: Int = 0,
     @SerialName("saturated_fat_g_logged") val saturatedFatGLogged: Int = 0,
     @SerialName("sodium_mg_logged") val sodiumMgLogged: Int = 0,
     @SerialName("item_name") val itemName: String? = null,

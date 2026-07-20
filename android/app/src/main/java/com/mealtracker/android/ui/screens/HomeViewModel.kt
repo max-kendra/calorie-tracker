@@ -281,7 +281,17 @@ class HomeViewModel : ViewModel() {
                 .take(3)
 
         val sodiumEaten = weekLogs.sumOf { it.sodiumMgLogged }
-        val sugarEaten = weekLogs.sumOf { it.sugarGLogged }
+        // Uses countableSugarGLogged, not sugarGLogged -- excludes raw
+        // USDA-import-origin ingredients (e.g. a banana) from this
+        // total, since added-sugar dietary guidance targets added/free
+        // sugars specifically, not sugar naturally occurring in whole
+        // foods (see design discussion: "my highest sugar source is
+        // freaking bananas... i'm not sure we should be counting
+        // that"). Sodium and saturated fat deliberately stay as raw
+        // totals above/below -- that guidance is about TOTAL intake
+        // regardless of source, a raw ingredient's natural sodium/fat
+        // counts the same as a packaged food's.
+        val sugarEaten = weekLogs.sumOf { it.countableSugarGLogged }
         val satFatEaten = weekLogs.sumOf { it.saturatedFatGLogged }
 
         val sodiumMaxPerDay = sodiumGuideline?.maxValue?.toInt() ?: FALLBACK_SODIUM_MAX_MG_PER_DAY
@@ -305,7 +315,7 @@ class HomeViewModel : ViewModel() {
                 eatenWeekly = sugarEaten,
                 maxWeekly = ((weeklyKcalGoal * sugarMaxPctOfKcal) / KCAL_PER_G_SUGAR).toInt(),
                 unit = "g",
-                topContributors = topContributors { it.sugarGLogged },
+                topContributors = topContributors { it.countableSugarGLogged },
                 basis = sugarGuideline?.basis ?: FALLBACK_ADDED_SUGAR_BASIS
             ),
             saturatedFat = ThresholdNutrient(

@@ -355,10 +355,10 @@ private fun MacroBarsRow(
     modifier: Modifier = Modifier
 ) {
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        MacroBar("Protein", proteinEaten, proteinGoal, MacroColors.Protein, Modifier.weight(1f))
         MacroBar("Fat", fatEaten, fatGoal, MacroColors.Fat, Modifier.weight(1f))
         MacroBar("Carbs", carbsEaten, carbsGoal, MacroColors.Carbs, Modifier.weight(1f))
         MacroBar("Fiber", fiberEaten, fiberGoal, MacroColors.Fiber, Modifier.weight(1f))
-        MacroBar("Protein", proteinEaten, proteinGoal, MacroColors.Protein, Modifier.weight(1f))
     }
 }
 

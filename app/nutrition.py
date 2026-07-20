@@ -46,6 +46,15 @@ class RawTotals:
     fat_g: Decimal
     fiber_g: Decimal
     sugar_g: Decimal
+    # Sugar excluding raw USDA-import-origin ingredients (see design
+    # discussion: "keep an eye on metrics" flagging bananas as a top
+    # sugar source, when added-sugar dietary guidance is about added/
+    # free sugars specifically, not sugar naturally occurring in whole
+    # foods). A heuristic, not a true added-vs-total-sugar distinction -
+    # packaged foods only ever give "carbs, of which sugars" with no
+    # further breakdown, so item origin (raw USDA ingredient vs a
+    # scanned/manual product) is the best available proxy.
+    countable_sugar_g: Decimal
     saturated_fat_g: Decimal
     sodium_mg: Decimal
 
@@ -57,6 +66,7 @@ class RawTotals:
             fat_g=self.fat_g + other.fat_g,
             fiber_g=self.fiber_g + other.fiber_g,
             sugar_g=self.sugar_g + other.sugar_g,
+            countable_sugar_g=self.countable_sugar_g + other.countable_sugar_g,
             saturated_fat_g=self.saturated_fat_g + other.saturated_fat_g,
             sodium_mg=self.sodium_mg + other.sodium_mg,
         )
@@ -69,6 +79,7 @@ class RawTotals:
             fat_g=self.fat_g * factor,
             fiber_g=self.fiber_g * factor,
             sugar_g=self.sugar_g * factor,
+            countable_sugar_g=self.countable_sugar_g * factor,
             saturated_fat_g=self.saturated_fat_g * factor,
             sodium_mg=self.sodium_mg * factor,
         )
@@ -84,6 +95,7 @@ ZERO_TOTALS = RawTotals(
     fat_g=ZERO,
     fiber_g=ZERO,
     sugar_g=ZERO,
+    countable_sugar_g=ZERO,
     saturated_fat_g=ZERO,
     sodium_mg=ZERO,
 )
@@ -117,6 +129,7 @@ def to_display_extended(totals: RawTotals) -> ExtendedNutritionTotals:
         fat_g=ceil_int(totals.fat_g),
         fiber_g=ceil_int(totals.fiber_g),
         sugar_g=ceil_int(totals.sugar_g),
+        countable_sugar_g=ceil_int(totals.countable_sugar_g),
         saturated_fat_g=ceil_int(totals.saturated_fat_g),
         sodium_mg=ceil_int(totals.sodium_mg),
     )
@@ -161,6 +174,7 @@ def compute_item_totals(
 ) -> RawTotals:
     grams = resolve_grams(quantity, serving_size)
     factor = grams / Decimal("100")
+    sugar_g = (item.sugar_100g or ZERO) * factor
 
     return RawTotals(
         kcal=(item.kcal_100g or ZERO) * factor,
@@ -168,7 +182,14 @@ def compute_item_totals(
         carbs_g=(item.carbs_100g or ZERO) * factor,
         fat_g=(item.fat_100g or ZERO) * factor,
         fiber_g=(item.fiber_100g or ZERO) * factor,
-        sugar_g=(item.sugar_100g or ZERO) * factor,
+        sugar_g=sugar_g,
+        # Raw USDA-import ingredients (e.g. a banana) don't count toward
+        # "countable" sugar - see RawTotals.countable_sugar_g's doc
+        # comment. Everything else (scanned products, manually-entered
+        # items, OCR-assisted) does, since a packaged food's sugar figure
+        # could plausibly include added sugar and we have no finer-
+        # grained label data to separate it out.
+        countable_sugar_g=ZERO if item.origin == "usda_import" else sugar_g,
         saturated_fat_g=(item.saturated_fat_100g or ZERO) * factor,
         sodium_mg=(item.sodium_mg_100g or ZERO) * factor,
     )

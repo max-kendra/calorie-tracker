@@ -158,6 +158,7 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
             fat_g_logged=totals.fat_g,
             fiber_g_logged=totals.fiber_g,
             sugar_g_logged=totals.sugar_g,
+            countable_sugar_g_logged=totals.countable_sugar_g,
             saturated_fat_g_logged=totals.saturated_fat_g,
             sodium_mg_logged=totals.sodium_mg,
         )

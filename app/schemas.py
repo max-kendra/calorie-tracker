@@ -287,6 +287,14 @@ class ExtendedNutritionTotals(NutritionTotals):
     """
 
     sugar_g: int
+    # Sugar excluding raw USDA-import-origin ingredients (e.g. a
+    # banana) -- what the sugar-tracking threshold card should actually
+    # display, since added-sugar dietary guidance targets added/free
+    # sugars, not sugar naturally occurring in whole foods (see design
+    # discussion: "my highest sugar source is freaking bananas"). A
+    # heuristic based on item origin, not a true added-vs-total-sugar
+    # lookup - see RawTotals.countable_sugar_g's doc comment for why.
+    countable_sugar_g: int
     saturated_fat_g: int
     sodium_mg: int
 
@@ -397,6 +405,15 @@ class LogOut(LoggableEntryBase):
     # design discussion), which wants a fuller picture than just the
     # five main-tracked macros.
     sugar_g_logged: int
+    # Sugar excluding raw USDA-import-origin ingredients (see design
+    # discussion: "my highest sugar source is freaking bananas") -- what
+    # the Home screen's sugar threshold card and its "top contributors"
+    # list should actually sum/rank by, since that card reads individual
+    # logs directly rather than a daily/weekly aggregate. Same
+    # heuristic as RawTotals.countable_sugar_g -- see that field's doc
+    # comment for why it's origin-based rather than a true added-vs-
+    # total-sugar lookup.
+    countable_sugar_g_logged: int
     saturated_fat_g_logged: int
     sodium_mg_logged: int
     # Denormalized for convenient display, not stored on the row itself.

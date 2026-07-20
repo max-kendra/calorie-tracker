@@ -164,6 +164,18 @@ data class MealDetailUiState(
     // concept to adjust for that type.
     val recipeLogQuantityInput: String = "1",
     val isLoggingRecipeDetail: Boolean = false,
+    // Non-null = this info screen was opened by tapping an ALREADY-
+    // LOGGED recipe (see openLogDetail), meaning recipeLogQuantityInput
+    // is THIS SPECIFIC LOG's quantity, and confirming PATCHes that one
+    // log rather than creating a new one -- same "editing this instance
+    // vs logging fresh" distinction ItemLogPageDialog already has via
+    // editingLogId, applied here for recipes (see design discussion:
+    // "we should be able to edit that recipe from there (that instance
+    // and the global recipe, but not past instances)"). A "meal" can
+    // never reach this, since meal logs always expand into per-
+    // ingredient item logs (recipe_id is never set for those) -- only
+    // an actual recipe_type="recipe" log references a recipe directly.
+    val recipeLogInstanceId: Int? = null,
 
     // Edit mode (pencil button) on the recipe info screen -- name and
     // servings only, same "edit metadata separately from ingredients"
@@ -213,14 +225,6 @@ data class MealDetailUiState(
     // the UI can show a per-row spinner instead of a global one.
     val quickLoggingItemId: Int? = null,
     val quickLogError: String? = null,
-    // Log detail/edit sheet - fallback for RECIPE-based logs only (see
-    // openLogDetail's doc comment for why item-based logs go through
-    // itemToLog/ItemLogPageDialog instead, same screen as logging a new
-    // item).
-    val selectedLog: Log? = null,
-    val editQuantityInput: String = "",
-    val isSavingLogEdit: Boolean = false,
-    val logEditError: String? = null,
 
     // Opens ItemLogPageDialog - used for BOTH logging a new item
     // (tapping a search result) AND editing an already-logged item
@@ -616,7 +620,7 @@ class MealDetailViewModel : ViewModel() {
     }
 
     fun dismissRecipeDetail() {
-        _uiState.value = _uiState.value.copy(recipeToView = null, recipeDetailError = null)
+        _uiState.value = _uiState.value.copy(recipeToView = null, recipeDetailError = null, recipeLogInstanceId = null)
     }
 
     fun updateRecipeLogQuantityInput(value: String) {
@@ -630,6 +634,13 @@ class MealDetailViewModel : ViewModel() {
      * still has no quantity to adjust (see recipeLogQuantityInput's doc
      * comment on MealDetailUiState), so ignores the input entirely and
      * behaves identically to logRecipeQuickly for that type. */
+    /** Confirms the quantity field at the bottom of the recipe info
+     * screen -- branches on whether recipeLogInstanceId is set (see
+     * that field's doc comment): if so, this is editing an ALREADY-
+     * LOGGED instance's quantity (PATCH), not logging a new one (POST/
+     * meal-expansion). A "meal" can never reach the instance-edit
+     * branch (see recipeLogInstanceId's doc comment on why), so the
+     * meal-expansion path here is only ever hit when logging fresh. */
     fun confirmRecipeLog() {
         val state = _uiState.value
         val recipe = state.recipeToView ?: return
@@ -642,10 +653,13 @@ class MealDetailViewModel : ViewModel() {
             return
         }
 
+        val instanceId = state.recipeLogInstanceId
         _uiState.value = state.copy(isLoggingRecipeDetail = true, recipeDetailError = null)
         viewModelScope.launch {
             try {
-                if (recipe.recipeType == "meal") {
+                if (instanceId != null) {
+                    ApiClient.service.updateLog(instanceId, LogUpdateRequest(quantity = quantity!!))
+                } else if (recipe.recipeType == "meal") {
                     ApiClient.service.createLogsFromMeal(
                         LogFromMealRequest(
                             recipeId = recipe.recipeId,
@@ -665,10 +679,14 @@ class MealDetailViewModel : ViewModel() {
                 }
                 _uiState.value = _uiState.value.copy(
                     isLoggingRecipeDetail = false,
-                    recipeToView = null
+                    recipeToView = null,
+                    recipeLogInstanceId = null
                 )
                 load(date, state.mealType)
-                refreshSearchAfterAdd()
+                // Only for the new-log case - editing an existing log's
+                // quantity isn't "adding" (see refreshSearchAfterAdd's
+                // doc comment).
+                if (instanceId == null) refreshSearchAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoggingRecipeDetail = false,
@@ -676,6 +694,17 @@ class MealDetailViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    /** Deletes THIS SPECIFIC LOGGED INSTANCE (see recipeLogInstanceId's
+     * doc comment) -- distinct from confirmDeleteRecipe, which deletes
+     * the recipe/meal itself (and every instance it was ever logged
+     * as). Reuses deleteLog, same as swiping a row in the logged-items
+     * list. */
+    fun deleteRecipeLogInstance() {
+        val instanceId = _uiState.value.recipeLogInstanceId ?: return
+        deleteLog(instanceId)
+        _uiState.value = _uiState.value.copy(recipeToView = null, recipeLogInstanceId = null)
     }
 
     // --- Edit recipe (pencil button) ---
@@ -1360,11 +1389,17 @@ class MealDetailViewModel : ViewModel() {
      * log, with editingLogId set so confirming PATCHes instead of
      * POSTing a new one.
      *
-     * Recipe-based logs (log.itemId == null) fall back to the simpler
-     * selectedLog/AlertDialog flow below - recipes don't have
-     * per-100g macros or serving sizes the same way items do, so the
-     * unified page doesn't apply to them. Not extended to cover recipes
-     * in this pass. */
+     * Recipe-based logs (log.itemId == null) open the SAME rich
+     * RecipeInfoScreen used for browsing/logging a recipe from search
+     * (see design discussion: "tapping a logged recipe opens the info
+     * page but that should include the ingredient list as well and we
+     * should be able to edit that recipe from there") - fetches the
+     * full RecipeDetail and pre-fills recipeLogQuantityInput with THIS
+     * log's quantity, with recipeLogInstanceId set so confirming
+     * PATCHes that one log instead of creating a new one. A "meal" can
+     * never reach this branch, since meal logs always expand into per-
+     * ingredient item logs (recipe_id is never set for those) - only an
+     * actual recipe_type="recipe" log references a recipe directly. */
     fun openLogDetail(log: Log) {
         val itemId = log.itemId
         if (itemId != null) {
@@ -1387,41 +1422,21 @@ class MealDetailViewModel : ViewModel() {
             return
         }
 
+        val recipeId = log.recipeId ?: return
         _uiState.value = _uiState.value.copy(
-            selectedLog = log,
-            editQuantityInput = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity,
-            logEditError = null
+            isLoadingRecipeDetail = true,
+            recipeDetailError = null,
+            recipeLogQuantityInput = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity,
+            recipeLogInstanceId = log.id
         )
-    }
-
-    fun dismissLogDetail() {
-        _uiState.value = _uiState.value.copy(selectedLog = null, logEditError = null)
-    }
-
-    fun updateEditQuantityInput(value: String) {
-        _uiState.value = _uiState.value.copy(editQuantityInput = value)
-    }
-
-    fun saveLogQuantity() {
-        val state = _uiState.value
-        val log = state.selectedLog ?: return
-        val date = state.date ?: return
-        val quantity = state.editQuantityInput.toDoubleOrNull()
-        if (quantity == null || quantity <= 0.0) {
-            _uiState.value = state.copy(logEditError = "Enter a valid quantity")
-            return
-        }
-
-        _uiState.value = state.copy(isSavingLogEdit = true, logEditError = null)
         viewModelScope.launch {
             try {
-                ApiClient.service.updateLog(log.id, LogUpdateRequest(quantity = quantity))
-                _uiState.value = _uiState.value.copy(isSavingLogEdit = false, selectedLog = null)
-                load(date, state.mealType)
+                val detail = ApiClient.service.getRecipe(recipeId)
+                _uiState.value = _uiState.value.copy(isLoadingRecipeDetail = false, recipeToView = detail)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    isSavingLogEdit = false,
-                    logEditError = e.message ?: "Couldn't save"
+                    isLoadingRecipeDetail = false,
+                    recipeDetailError = e.message ?: "Couldn't load that recipe"
                 )
             }
         }
@@ -1435,12 +1450,12 @@ class MealDetailViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 ApiClient.service.deleteLog(logId)
-                if (state.selectedLog?.id == logId) {
-                    _uiState.value = _uiState.value.copy(selectedLog = null)
+                if (state.recipeLogInstanceId == logId) {
+                    _uiState.value = _uiState.value.copy(recipeToView = null, recipeLogInstanceId = null)
                 }
                 load(date, state.mealType)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(logEditError = e.message ?: "Couldn't delete")
+                _uiState.value = _uiState.value.copy(recipeDetailError = e.message ?: "Couldn't delete")
             }
         }
     }

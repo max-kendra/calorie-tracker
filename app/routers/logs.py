@@ -111,6 +111,7 @@ def _log_to_out(
         fat_g_logged=ceil_int(log.fat_g_logged),
         fiber_g_logged=ceil_int(log.fiber_g_logged),
         sugar_g_logged=ceil_int(log.sugar_g_logged),
+        countable_sugar_g_logged=ceil_int(log.countable_sugar_g_logged),
         saturated_fat_g_logged=ceil_int(log.saturated_fat_g_logged),
         sodium_mg_logged=ceil_int(log.sodium_mg_logged),
         item_name=item_name,
@@ -142,6 +143,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         fat_g_logged=totals.fat_g,
         fiber_g_logged=totals.fiber_g,
         sugar_g_logged=totals.sugar_g,
+        countable_sugar_g_logged=totals.countable_sugar_g,
         saturated_fat_g_logged=totals.saturated_fat_g,
         sodium_mg_logged=totals.sodium_mg,
     )
@@ -225,6 +227,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             fat_g_logged=totals.fat_g,
             fiber_g_logged=totals.fiber_g,
             sugar_g_logged=totals.sugar_g,
+            countable_sugar_g_logged=totals.countable_sugar_g,
             saturated_fat_g_logged=totals.saturated_fat_g,
             sodium_mg_logged=totals.sodium_mg,
         )
@@ -383,6 +386,7 @@ def daily_summary(
                 "fat_g": zero,
                 "fiber_g": zero,
                 "sugar_g": zero,
+                "countable_sugar_g": zero,
                 "saturated_fat_g": zero,
                 "sodium_mg": zero,
             },
@@ -390,9 +394,10 @@ def daily_summary(
         d["kcal"] += l.kcal_logged
         d["protein_g"] += l.protein_g_logged
         d["carbs_g"] += l.carbs_g_logged
-        d["fat_g"] += l.fat_g_logged
         d["fiber_g"] += l.fiber_g_logged
         d["sugar_g"] += l.sugar_g_logged
+        d["countable_sugar_g"] += l.countable_sugar_g_logged
+        d["fat_g"] += l.fat_g_logged
         d["saturated_fat_g"] += l.saturated_fat_g_logged
         d["sodium_mg"] += l.sodium_mg_logged
 
@@ -406,6 +411,7 @@ def daily_summary(
                 fat_g=ceil_int(totals["fat_g"]),
                 fiber_g=ceil_int(totals["fiber_g"]),
                 sugar_g=ceil_int(totals["sugar_g"]),
+                countable_sugar_g=ceil_int(totals["countable_sugar_g"]),
                 saturated_fat_g=ceil_int(totals["saturated_fat_g"]),
                 sodium_mg=ceil_int(totals["sodium_mg"]),
             ),
@@ -450,6 +456,7 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
     log.fat_g_logged = totals.fat_g
     log.fiber_g_logged = totals.fiber_g
     log.sugar_g_logged = totals.sugar_g
+    log.countable_sugar_g_logged = totals.countable_sugar_g
     log.saturated_fat_g_logged = totals.saturated_fat_g
     log.sodium_mg_logged = totals.sodium_mg
     if log.item_id is not None:
