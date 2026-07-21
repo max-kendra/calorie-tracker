@@ -65,7 +65,13 @@ data class Item(
     // count/exclude regardless of origin (see design discussion: "my
     // third highest ranking added sugar source is frozen berry mix...
     // this is silly").
-    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null
+    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null,
+    // Was already used server-side for ordering, now also exposed so the
+    // client can merge-sort items and recipes together by shared
+    // recency (see design discussion: "the idea was always to have one
+    // list where they're all together"). ISO datetime string, same
+    // format as other timestamp fields in this app.
+    @SerialName("last_logged_at") val lastLoggedAt: String? = null
 )
 
 /**
@@ -267,7 +273,10 @@ data class Recipe(
     @SerialName("recipe_type") val recipeType: String = "recipe",
     @SerialName("image_path") val imagePath: String? = null,
     val servings: String = "1",
-    @SerialName("totals_per_serving") val totalsPerServing: NutritionTotals? = null
+    @SerialName("totals_per_serving") val totalsPerServing: NutritionTotals? = null,
+    // Same reasoning as Item.lastLoggedAt -- lets the client merge-sort
+    // items and recipes together by shared recency.
+    @SerialName("last_logged_at") val lastLoggedAt: String? = null
 )
 
 /** Mirrors RecipeIngredientOut from app/schemas.py -- item_name is

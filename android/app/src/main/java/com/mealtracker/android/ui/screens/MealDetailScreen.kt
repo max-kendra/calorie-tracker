@@ -106,6 +106,7 @@ import com.mealtracker.android.ui.components.decodeBitmapWithCorrectOrientation
 import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.MacroRingsRow
 import com.mealtracker.android.ui.components.MealVisuals
+import com.mealtracker.android.ui.theme.KcalGreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -117,6 +118,42 @@ import java.time.LocalDate
 
 private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
 private val SEARCH_BAR_SHAPE = RoundedCornerShape(24.dp)
+
+/** Wraps either an Item or a Recipe so both can live in ONE list
+ * together, sorted by shared last-logged recency (see design
+ * discussion: "the idea was always to have one list where they're all
+ * together... what did you think we had the filters for"). Only used
+ * for the ALL filter's rendering -- Product/Ingredient/Recipe/Meal each
+ * only ever show one type, so they don't need this. */
+private sealed class CatalogEntry {
+    abstract val lastLoggedAt: String?
+
+    data class ItemEntry(val item: Item) : CatalogEntry() {
+        override val lastLoggedAt: String? = item.lastLoggedAt
+    }
+
+    data class RecipeEntry(val recipe: Recipe) : CatalogEntry() {
+        override val lastLoggedAt: String? = recipe.lastLoggedAt
+    }
+}
+
+/** Merges items and recipes into ONE list ordered by shared
+ * last_logged_at, descending (most recent first) -- both types already
+ * come back individually sorted this way from their own endpoints (see
+ * items.py/recipes.py's own list_ orderings), but merging two
+ * separately-sorted lists still needs the actual timestamp to compare
+ * across types, which is why Item/Recipe.lastLoggedAt exists on the
+ * client at all now (previously only used server-side). Entries with no
+ * last_logged_at (never logged) sort last, same "nullslast" convention
+ * the backend already uses. */
+private fun mergeByLastLogged(items: List<Item>, recipes: List<Recipe>): List<CatalogEntry> {
+    val combined: List<CatalogEntry> = items.map { CatalogEntry.ItemEntry(it) } +
+        recipes.map { CatalogEntry.RecipeEntry(it) }
+    return combined.sortedByDescending { entry ->
+        entry.lastLoggedAt?.let { raw -> runCatching { java.time.Instant.parse(raw) }.getOrNull() }
+            ?: java.time.Instant.EPOCH
+    }
+}
 
 /**
  * Opens for ANY meal card tap, even an empty one (per design doc).
@@ -373,7 +410,21 @@ fun MealDetailScreen(
                                 FilterChip(
                                     selected = state.searchFilter == filter,
                                     onClick = { viewModel.updateSearchFilter(filter) },
-                                    label = { Text(filter.label) }
+                                    label = { Text(filter.label) },
+                                    // Without this, the selected state
+                                    // falls back to Material3's own
+                                    // unset default (secondaryContainer),
+                                    // which is a baseline purple neither
+                                    // color scheme ever sets explicitly -
+                                    // same root cause as the bottom nav
+                                    // and profile screen's period chips
+                                    // (see design discussion: "the
+                                    // accents in the search filters are
+                                    // still purple").
+                                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
                                 )
                             }
                         }
@@ -394,31 +445,74 @@ fun MealDetailScreen(
                                 onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
                                 onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
                             )
-                        } else {
-                            // ALL also shows recipes/meals, stacked above
-                            // items -- previously ALL only ever queried
-                            // items, so a recipe/meal never showed up
-                            // unless you specifically switched to that
-                            // tab (see design discussion: "they only
-                            // show up if we filter for recipes... not
-                            // with the rest of the items when it's set
-                            // to show all"). Only rendered when there
-                            // are actual matches, so the combined view
-                            // doesn't clutter itself with a "no recipes"
-                            // placeholder on every ordinary item search.
-                            val recipesForAll = if (showingRecent) state.recentRecipes else state.recipeSearchResults
-                            if (state.searchFilter == SearchFilter.ALL && recipesForAll.isNotEmpty()) {
-                                RecipeResultsList(
-                                    recipes = recipesForAll,
-                                    isLoading = false,
-                                    emptyMessage = "",
-                                    quickLoggingRecipeId = state.quickLoggingRecipeId,
-                                    onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
-                                    onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) },
-                                    scrollable = false
-                                )
-                                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                        } else if (state.searchFilter == SearchFilter.ALL) {
+                            // True interleaving, not stacked sections -
+                            // items and recipes/meals sorted together by
+                            // shared last-logged recency (see design
+                            // discussion: "the idea was always to have
+                            // one list where they're all together...
+                            // what did you think we had the filters
+                            // for"). Reuses ItemResultsList/
+                            // RecipeResultsList's own row rendering by
+                            // calling each with a SINGLE-element list in
+                            // the right order, rather than duplicating
+                            // their row UI in a third composable -
+                            // scrollable=false on both (see those
+                            // composables' own doc comments) so this
+                            // reads as one continuous list under the
+                            // outer sheet's own scroll, not N separate
+                            // tiny scrollable boxes.
+                            val allItems = if (showingRecent) state.recentItems else state.searchResults
+                            val allRecipes = if (showingRecent) state.recentRecipes else state.recipeSearchResults
+                            val isLoadingAll = if (showingRecent) {
+                                state.isLoadingRecentItems
+                            } else {
+                                state.isSearching || state.isSearchingRecipes
                             }
+                            when {
+                                isLoadingAll -> {
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        androidx.compose.material3.CircularProgressIndicator()
+                                    }
+                                }
+                                allItems.isEmpty() && allRecipes.isEmpty() -> {
+                                    Text(
+                                        if (showingRecent) "Nothing yet" else "No matches",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                }
+                                else -> {
+                                    mergeByLastLogged(allItems, allRecipes).forEach { entry ->
+                                        when (entry) {
+                                            is CatalogEntry.ItemEntry -> ItemResultsList(
+                                                items = listOf(entry.item),
+                                                isLoading = false,
+                                                emptyMessage = "",
+                                                quickLoggingItemId = state.quickLoggingItemId,
+                                                lastLoggedAmounts = state.lastLoggedAmounts,
+                                                onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
+                                                onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) },
+                                                scrollable = false
+                                            )
+                                            is CatalogEntry.RecipeEntry -> RecipeResultsList(
+                                                recipes = listOf(entry.recipe),
+                                                isLoading = false,
+                                                emptyMessage = "",
+                                                quickLoggingRecipeId = state.quickLoggingRecipeId,
+                                                onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
+                                                onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) },
+                                                scrollable = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
                             ItemResultsList(
                                 items = if (showingRecent) state.recentItems else state.searchResults,
                                 isLoading = if (showingRecent) state.isLoadingRecentItems else state.isSearching,
@@ -427,12 +521,10 @@ fun MealDetailScreen(
                                 lastLoggedAmounts = state.lastLoggedAmounts,
                                 onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
                                 onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) },
-                                // Only disabled under ALL (where a recipe
-                                // section may be stacked above this) --
-                                // PRODUCT/INGREDIENT have nothing stacked
-                                // above them, so keep the normal bounded/
-                                // scrollable box there.
-                                scrollable = state.searchFilter != SearchFilter.ALL
+                                // PRODUCT/INGREDIENT have nothing else
+                                // stacked with them, so keep the normal
+                                // bounded/scrollable box.
+                                scrollable = true
                             )
                         }
                         // USDA lookup lives ONLY here now, not in the
@@ -828,6 +920,7 @@ private fun DefaultMealContent(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
                 LinearProgressIndicator(
                     progress = { kcalFraction },
+                    color = KcalGreen,
                     modifier = Modifier.fillMaxWidth().height(10.dp)
                 )
 
@@ -905,7 +998,7 @@ private fun CompactMealHeader(displayName: String, eatenKcal: Int, goalKcal: Int
                     modifier = Modifier
                         .fillMaxWidth(kcalFraction)
                         .height(6.dp)
-                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
+                        .background(KcalGreen, RoundedCornerShape(3.dp))
                 )
             }
         }

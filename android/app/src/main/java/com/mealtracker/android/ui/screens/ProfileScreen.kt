@@ -159,7 +159,21 @@ fun ProfileScreen(
                         FilterChip(
                             selected = state.selectedRange == range,
                             onClick = { viewModel.selectRange(context, range) },
-                            label = { Text(range.label) }
+                            label = { Text(range.label) },
+                            // Without this, the selected state falls back
+                            // to Material3's own unset default
+                            // (secondaryContainer), which is a baseline
+                            // purple neither color scheme ever sets
+                            // explicitly -- same root cause as the bottom
+                            // nav's selected-tab indicator (see design
+                            // discussion: "the accents for picking the
+                            // time period for the chart in the profile
+                            // screen are still purple"). primaryContainer
+                            // is already the pastel-blue/navy pair.
+                            colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
                         )
                     }
                 }

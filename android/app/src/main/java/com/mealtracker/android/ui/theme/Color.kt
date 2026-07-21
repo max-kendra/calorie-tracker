@@ -6,17 +6,34 @@ import androidx.compose.ui.graphics.Color
 // our theme unified... i like the pastel blue we have for our journal
 // hero card... all the dark green buttons would be a navy blue that
 // complements the pastel blue"). NavyPrimary drives buttons/the kcal
-// ring/anything reading colorScheme.primary -- ONE navy value in both
-// light and dark mode, deliberately (that's the actual fix: the old
-// TealPrimary was ALSO the same dark green in both themes, which is
-// exactly why it read fine in light mode but nearly vanished against
-// dark backgrounds in dark mode -- a dark, saturated color needs a
-// genuinely dark-mode-appropriate companion, not just itself again).
-// JournalHeroPastel/Dark (below) fill the softer "accent" role as
-// primaryContainer, same blue hue family as the navy, so the whole
-// palette reads as one coordinated identity instead of separate
-// systems bumping into each other.
+// ring/anything reading colorScheme.primary in LIGHT mode.
 val NavyPrimary = Color(0xFF1B3A5C)
+// Dark mode gets its own, brighter primary (see design discussion:
+// "the navy text is too dark for dark mode (like the highlighted day
+// or when it says how many kg to go)... would something like #365CFF
+// work?"). NavyPrimary itself is fine as a BUTTON background in either
+// theme (onPrimary=White covers that case regardless), but
+// colorScheme.primary also gets read directly as TEXT/icon color in
+// several places (calendar day highlights, "X kg to go", etc), where
+// navy text on a dark background is illegible -- which is exactly
+// what was happening. This is really Material3's own standard
+// convention (a theme's primary is usually LIGHTER in dark mode,
+// DARKER in light mode, specifically because it doubles as an on-
+// background accent color, not just a button fill) -- the earlier
+// "same value in both themes" approach fixed the original visibility
+// bug but broke this other, equally real use case in the process.
+val NavyPrimaryDark = Color(0xFF365CFF)
+// Dedicated green for kcal displays specifically, deliberately NOT tied
+// to colorScheme.primary (see design discussion: "can the total kcal
+// have a dedicated color rather than the system color... i still want
+// total kcal to be green in the progress bars", later extended to
+// "in meal/item info, the kcal progress bars should also be green").
+// Shared/public so it's one source of truth rather than getting
+// re-hardcoded per file (HomeScreen's weekly bars, the meal detail
+// screen's own kcal progress bar and its compact collapsed-header
+// version all read this same constant).
+val KcalGreen = Color(0xFF2C6E63)
+
 val AppBackground = Color(0xFFFAFAFA)
 val NeutralSurfaceVariant = Color(0xFFF0F0F0)
 
@@ -30,6 +47,18 @@ val JournalHeroPastel = Color(0xFFBFEAFB)
 // little different [in dark mode]... darker versions of themselves").
 // Same double duty as primaryContainer in dark mode.
 val JournalHeroPastelDark = Color(0xFF1B4A5A)
+
+// Dedicated to Journal's big kcal ring specifically (see design
+// discussion: "the overall macro circle should be white in dark mode,
+// and like a dark gray in light mode" followed by "actually... can we
+// just make the overall kcal circle and the value inside it white for
+// both themes? i think that'd work better, it's too stark right now").
+// Kept as a light/dark PAIR (rather than one shared constant) since the
+// ring sits on different backgrounds in each theme and a future design
+// change might want them to diverge again -- right now they just
+// happen to be the same value.
+val KcalRingLight = Color.White
+val KcalRingDark = Color.White
 
 // Dark theme - mostly an inversion (dark gray backgrounds, white text/
 // neutral icons); every COLORED/branded element (MacroColors,

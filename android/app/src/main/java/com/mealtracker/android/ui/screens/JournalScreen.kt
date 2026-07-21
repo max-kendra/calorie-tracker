@@ -63,6 +63,8 @@ import com.mealtracker.android.ui.components.MacroRingsRow
 import com.mealtracker.android.ui.components.MealVisuals
 import com.mealtracker.android.ui.theme.JournalHeroPastel
 import com.mealtracker.android.ui.theme.JournalHeroPastelDark
+import com.mealtracker.android.ui.theme.KcalRingDark
+import com.mealtracker.android.ui.theme.KcalRingLight
 import com.mealtracker.android.ui.theme.LocalIsAppDarkTheme
 import java.time.LocalDate
 import java.time.YearMonth
@@ -305,21 +307,36 @@ private fun KcalHeroSection(totals: DailyTotals) {
     val kcalFraction = if (totals.goalKcal > 0) {
         (totals.eatenKcal.toFloat() / totals.goalKcal.toFloat()).coerceIn(0f, 1f)
     } else 0f
+    // Plain white in both themes now (see design discussion: "can we
+    // just make the overall kcal circle and the value inside it white
+    // for both themes? i think that'd work better, it's too stark right
+    // now" -- the earlier gray-in-light/white-in-dark split created too
+    // much contrast against the rest of the light-mode card). Still
+    // read through the light/dark pair rather than a raw Color.White,
+    // matching KcalRingLight/Dark's own doc comment in Color.kt.
+    val kcalRingColor = if (LocalIsAppDarkTheme.current) KcalRingDark else KcalRingLight
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         DonutChart(
-            segments = listOf(kcalFraction to MaterialTheme.colorScheme.primary),
+            segments = listOf(kcalFraction to kcalRingColor),
             diameter = 130.dp,
             strokeWidth = 12.dp,
-            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+            trackColor = kcalRingColor.copy(alpha = 0.18f),
             centerContent = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (remaining >= 0) {
-                        Text("$remaining", style = MaterialTheme.typography.headlineMedium)
-                        Text("Cal left", style = MaterialTheme.typography.bodySmall)
+                        // White, matching the ring itself (see design
+                        // discussion: "can we just make the overall kcal
+                        // circle and the value inside it white for both
+                        // themes"). The over-budget branch below keeps
+                        // colorScheme.error instead -- that's a
+                        // deliberate warning color, not part of this
+                        // change.
+                        Text("$remaining", style = MaterialTheme.typography.headlineMedium, color = kcalRingColor)
+                        Text("Cal left", style = MaterialTheme.typography.bodySmall, color = kcalRingColor)
                     } else {
                         Text(
                             "${-remaining}",

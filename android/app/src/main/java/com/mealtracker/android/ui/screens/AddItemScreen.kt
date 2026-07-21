@@ -1028,12 +1028,20 @@ private fun ItemFormContent(
             FilterChip(
                 selected = state.itemType == "product",
                 onClick = { viewModel.updateItemType("product") },
-                label = { Text("Product") }
+                label = { Text("Product") },
+                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             )
             FilterChip(
                 selected = state.itemType == "ingredient",
                 onClick = { viewModel.updateItemType("ingredient") },
-                label = { Text("Ingredient") }
+                label = { Text("Ingredient") },
+                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             )
         }
 

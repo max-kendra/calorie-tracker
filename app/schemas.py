@@ -96,6 +96,15 @@ class ItemOut(ItemBase):
     # ViewModel instance).
     last_logged_quantity: Optional[Decimal] = None
     last_logged_serving_size_id: Optional[int] = None
+    # Was already used server-side for ORDER BY (see items.py's
+    # list_items) but never actually serialized to the client - meaning
+    # the client had no way to compare an item's recency against a
+    # recipe's when trying to show both together in one truly
+    # interleaved list (see design discussion: "the idea was always to
+    # have one list where they're all together... what did you think we
+    # had the filters for"). Exposed now so the client can merge-sort
+    # both types by this shared timestamp itself.
+    last_logged_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -345,6 +354,10 @@ class RecipeOut(RecipeBase):
     # screens").
     totals: ExtendedNutritionTotals  # for the whole recipe (all servings combined)
     totals_per_serving: ExtendedNutritionTotals
+    # Same reasoning as ItemOut.last_logged_at -- was already used
+    # server-side for ORDER BY (see recipes.py's list_recipes) but never
+    # serialized to the client until now.
+    last_logged_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

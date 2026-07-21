@@ -49,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.StreakCalendarDialog
 import com.mealtracker.android.ui.components.WeekPickerDialog
+import com.mealtracker.android.ui.theme.KcalGreen
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
@@ -57,7 +58,10 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val CARD_CORNER_RADIUS = 24.dp
-private val KcalColor = Color(0xFF1B3A5C) // NavyPrimary -- kcal isn't a "macro" per se, gets the app's accent color instead of a MacroColors entry
+// Dedicated green, deliberately NOT tied to colorScheme.primary - see
+// KcalGreen's own doc comment in Color.kt. Aliased locally so call
+// sites in this file don't need renaming.
+private val KcalColor = KcalGreen
 
 /**
  * Home screen. Layout, top to bottom:

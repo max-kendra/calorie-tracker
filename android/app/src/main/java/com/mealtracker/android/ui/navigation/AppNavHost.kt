@@ -110,6 +110,22 @@ fun AppNavHost(
                             icon = { Icon(destination.icon, contentDescription = destination.label) },
                             label = { Text(destination.label) },
                             selected = currentDestination?.hierarchy?.any { it.route == destination.route } == true,
+                            // Without this, the selected-tab indicator pill
+                            // falls back to Material3's own unset default
+                            // (secondaryContainer), which is a baseline
+                            // purple neither of our color schemes ever set
+                            // explicitly -- same stock color the app icon
+                            // had before it was fixed (see design
+                            // discussion: "the little accents on the
+                            // navbar when you select a page, those are
+                            // still purple, can we try to make them match
+                            // the journal hero page"). primaryContainer
+                            // already IS that exact pastel-blue/navy pair.
+                            colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
                             onClick = {
                                 navController.navigate(destination.route) {
                                     // Standard bottom-nav behavior: avoid piling up
