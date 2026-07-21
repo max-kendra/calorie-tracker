@@ -469,6 +469,14 @@ fun MealDetailScreen(
                             } else {
                                 state.isSearching || state.isSearchingRecipes
                             }
+                            state.allFilterRecipeError ?.let { error ->
+                                Text(
+                                    state.allFilterRecipeError!!,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                )
+                            }
                             when {
                                 isLoadingAll -> {
                                     androidx.compose.foundation.layout.Box(
@@ -924,7 +932,7 @@ private fun DefaultMealContent(
                     modifier = Modifier.fillMaxWidth().height(10.dp)
                 )
 
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
 
                 MacroRingsRow(
                     fatEaten = state.eatenFat, fatGoal = state.goalFat,

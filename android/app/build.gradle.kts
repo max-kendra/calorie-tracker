@@ -108,16 +108,6 @@ dependencies {
     // bug in OUR crop/rotate logic, just a step that was never being
     // done at all.
     implementation("androidx.exifinterface:exifinterface:1.3.7")
-    // Vico - Compose-native charting library for the Profile screen's
-    // weight-trend graph (see design discussion: "let's do vico...
-    // i'd just [like] something prettier than what we have now" -
-    // replacing the hand-rolled Canvas line chart in
-    // WeightLineChart.kt). compose-m3 pulls in both the core and
-    // compose artifacts, plus Material3-aware theming helpers. Vico's
-    // API has moved across several alpha releases - if this version has
-    // since been superseded, check https://github.com/patrykandpatrick/vico
-    // for the latest and this may need small adjustments to match.
-    implementation("com.patrykandpatrick.vico:compose-m3:2.0.0-alpha.28")
     // Forces a real Guava dependency into the graph - without this,
     // Health Connect's transitive deps can pull in the empty
     // com.google.guava:listenablefuture:1.0 placeholder artifact (some

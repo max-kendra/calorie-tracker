@@ -225,6 +225,16 @@ data class MealDetailUiState(
     // the UI can show a per-row spinner instead of a global one.
     val quickLoggingItemId: Int? = null,
     val quickLogError: String? = null,
+    // Surfaces a failure fetching recipes/meals for the ALL filter --
+    // this used to fail silently (a bare comment saying "not core
+    // functionality"), which meant a genuine failure looked identical
+    // to "there are just no recipes to show", and was completely
+    // undiagnosable from the UI (see design discussion: "this is
+    // genuinely infuriating, why is it so hard to just aggregate the
+    // recipe and item tables... it's only items in there again" - the
+    // actual bug, whatever it turns out to be, was invisible because of
+    // this silent catch, not necessarily the merge logic itself).
+    val allFilterRecipeError: String? = null,
 
     // Opens ItemLogPageDialog - used for BOTH logging a new item
     // (tapping a search result) AND editing an already-logged item
@@ -455,9 +465,11 @@ class MealDetailViewModel : ViewModel() {
             viewModelScope.launch {
                 try {
                     val recipes = ApiClient.service.searchRecipes(query = null, recipeType = null)
-                    _uiState.value = _uiState.value.copy(recentRecipes = recipes)
+                    _uiState.value = _uiState.value.copy(recentRecipes = recipes, allFilterRecipeError = null)
                 } catch (e: Exception) {
-                    // Not core functionality - fails quietly.
+                    _uiState.value = _uiState.value.copy(
+                        allFilterRecipeError = "Couldn't load recipes: ${e.message ?: e.javaClass.simpleName}"
+                    )
                 }
             }
         }
@@ -559,7 +571,7 @@ class MealDetailViewModel : ViewModel() {
         // search under "All" would never surface a matching recipe/meal
         // at all, only items.
         if (filter == SearchFilter.ALL) {
-            _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
+            _uiState.value = _uiState.value.copy(isSearchingRecipes = true, allFilterRecipeError = null)
             allFilterRecipeSearchJob = viewModelScope.launch {
                 delay(SEARCH_DEBOUNCE_MS)
                 try {
@@ -569,7 +581,10 @@ class MealDetailViewModel : ViewModel() {
                     }
                 } catch (e: Exception) {
                     if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false)
+                        _uiState.value = _uiState.value.copy(
+                            isSearchingRecipes = false,
+                            allFilterRecipeError = "Couldn't search recipes: ${e.message ?: e.javaClass.simpleName}"
+                        )
                     }
                 }
             }

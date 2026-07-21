@@ -352,6 +352,7 @@ private fun KcalHeroSection(totals: DailyTotals) {
                 }
             }
         )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
         Text(
             "${totals.eatenKcal} eaten \u00b7 ${totals.goalKcal} goal",
             style = MaterialTheme.typography.bodySmall
