@@ -172,32 +172,15 @@ fun HealthConnectSettingsScreen(onBack: () -> Unit) {
                             backfillProgress = null
                             backfillError = null
                             try {
-                                val logs = com.mealtracker.android.network.ApiClient.service.getLogsInRange(
-                                    startDate = "2000-01-01",
-                                    endDate = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                                val total = HealthConnectManager.syncLogsInRange(
+                                    context = context,
+                                    startDate = java.time.LocalDate.parse("2000-01-01"),
+                                    endDate = java.time.LocalDate.now(),
+                                    onProgress = { completed, total ->
+                                        backfillProgress = "Syncing $completed of $total..."
+                                    }
                                 )
-                                val byMeal = logs.groupBy { it.date to it.mealType }
-                                byMeal.entries.forEachIndexed { index, (key, mealLogs) ->
-                                    val (date, mealType) = key
-                                    backfillProgress = "Syncing ${index + 1} of ${byMeal.size}..."
-                                    val totals = HealthConnectManager.MealNutritionTotals(
-                                        kcal = mealLogs.sumOf { it.kcalLogged }.toDouble(),
-                                        proteinG = mealLogs.sumOf { it.proteinGLogged }.toDouble(),
-                                        carbsG = mealLogs.sumOf { it.carbsGLogged }.toDouble(),
-                                        fatG = mealLogs.sumOf { it.fatGLogged }.toDouble(),
-                                        saturatedFatG = mealLogs.sumOf { it.saturatedFatGLogged }.toDouble(),
-                                        sugarG = mealLogs.sumOf { it.sugarGLogged }.toDouble(),
-                                        fiberG = mealLogs.sumOf { it.fiberGLogged }.toDouble(),
-                                        sodiumMg = mealLogs.sumOf { it.sodiumMgLogged }.toDouble()
-                                    )
-                                    HealthConnectManager.writeMealNutrition(
-                                        context,
-                                        java.time.LocalDate.parse(date),
-                                        mealType,
-                                        totals
-                                    )
-                                }
-                                backfillProgress = "Synced ${byMeal.size} meal${if (byMeal.size == 1) "" else "s"}."
+                                backfillProgress = "Synced $total meal${if (total == 1) "" else "s"}."
                             } catch (e: Exception) {
                                 backfillError = e.message ?: "Couldn't sync past meals"
                             } finally {

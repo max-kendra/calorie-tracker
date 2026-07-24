@@ -12,9 +12,11 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Mass
+import com.mealtracker.android.network.ApiClient
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * Thin wrapper around the Health Connect SDK. Started out read-only
@@ -230,5 +232,72 @@ object HealthConnectManager {
             recordIdsList = emptyList(),
             clientRecordIdsList = listOf(clientRecordId(date, mealType))
         )
+    }
+
+    /**
+     * Fetches every log in [startDate, endDate] (inclusive), sums it up
+     * per (date, mealType), and upserts one NutritionRecord per meal via
+     * writeMealNutrition. Shared by the Settings "sync all past meals"
+     * backfill and the app-startup today-only sync below - both are
+     * "push everything currently logged for some date range," just with
+     * a different range and a different caller-side progress display.
+     *
+     * Deliberately does NOT check nutritionExportEnabled/isAvailable/
+     * hasNutritionPermission itself - callers differ on what should
+     * happen if those are false (the Settings button is only ever shown
+     * once all three are already true; startup sync needs to bail out
+     * silently instead), so gating stays at the call site.
+     *
+     * onProgress is called after each meal is written, with (completed,
+     * total) - defaults to a no-op for callers (e.g. startup sync) that
+     * don't display progress.
+     */
+    suspend fun syncLogsInRange(
+        context: Context,
+        startDate: LocalDate,
+        endDate: LocalDate,
+        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
+    ): Int {
+        val logs = ApiClient.service.getLogsInRange(
+            startDate = startDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
+            endDate = endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        )
+        val byMeal = logs.groupBy { it.date to it.mealType }
+        byMeal.entries.forEachIndexed { index, (key, mealLogs) ->
+            val (date, mealType) = key
+            val totals = MealNutritionTotals(
+                kcal = mealLogs.sumOf { it.kcalLogged }.toDouble(),
+                proteinG = mealLogs.sumOf { it.proteinGLogged }.toDouble(),
+                carbsG = mealLogs.sumOf { it.carbsGLogged }.toDouble(),
+                fatG = mealLogs.sumOf { it.fatGLogged }.toDouble(),
+                saturatedFatG = mealLogs.sumOf { it.saturatedFatGLogged }.toDouble(),
+                sugarG = mealLogs.sumOf { it.sugarGLogged }.toDouble(),
+                fiberG = mealLogs.sumOf { it.fiberGLogged }.toDouble(),
+                sodiumMg = mealLogs.sumOf { it.sodiumMgLogged }.toDouble()
+            )
+            writeMealNutrition(context, LocalDate.parse(date), mealType, totals)
+            onProgress(index + 1, byMeal.size)
+        }
+        return byMeal.size
+    }
+
+    /**
+     * Opportunistic app-startup sync: pushes only today's meals, and
+     * only if export is already fully set up. Silently no-ops otherwise
+     * (e.g. export disabled, permission not granted, Health Connect not
+     * installed) rather than surfacing anything at startup - the
+     * Settings backfill button remains the deliberate, visible fallback
+     * for anyone who needs to recover from a gap. Safe to call on every
+     * cold start: writeMealNutrition's clientRecordId/clientRecordVersion
+     * upsert means re-pushing unchanged data just replaces the existing
+     * record, not a duplicate.
+     */
+    suspend fun syncToday(context: Context) {
+        if (!HealthConnectPreferences.isNutritionExportEnabled(context)) return
+        if (!isAvailable(context)) return
+        if (!hasNutritionPermission(context)) return
+
+        val today = LocalDate.now()
+        syncLogsInRange(context, today, today)
     }
 }
