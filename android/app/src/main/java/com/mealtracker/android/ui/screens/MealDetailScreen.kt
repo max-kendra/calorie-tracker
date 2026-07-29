@@ -90,6 +90,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.ApiClient
+import com.mealtracker.android.network.models.ExtendedNutritionTotals
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeDetail
@@ -734,6 +735,8 @@ fun MealDetailScreen(
             goalCarbs = state.goalCarbs,
             goalFiber = state.goalFiber,
             logInstanceId = state.recipeLogInstanceId,
+            frozenTotals = state.recipeLogFrozenTotals,
+            frozenIngredients = state.recipeLogFrozenIngredients,
             onDeleteInstance = { viewModel.deleteRecipeLogInstance() },
             isEditing = state.isEditingRecipe,
             editName = state.editRecipeName,
@@ -1228,6 +1231,14 @@ private fun RecipeInfoScreen(
     // this log" (editing/removing THAT INSTANCE) instead of "Log this
     // recipe" (creating a new one).
     logInstanceId: Int?,
+    // Non-null (both together) when logInstanceId's own Log has a
+    // frozen ingredient snapshot - see MealDetailUiState.
+    // recipeLogFrozenTotals's own doc comment. When present, these
+    // (not `recipe`'s live totals/ingredients scaled by loggedServings)
+    // are what gets displayed - the whole point being to show what was
+    // ACTUALLY logged, not what the recipe currently is.
+    frozenTotals: ExtendedNutritionTotals?,
+    frozenIngredients: List<RecipeIngredient>?,
     onDeleteInstance: () -> Unit,
     isEditing: Boolean,
     editName: String,
@@ -1520,7 +1531,15 @@ private fun RecipeInfoScreen(
                         // a servings count for that type would be
                         // showing a number that's never actually
                         // meaningful, see this composable's doc comment.
-                        if (recipe.recipeType == "meal") {
+                        // When viewing a logged instance that has a
+                        // frozen snapshot (see frozenTotals' own doc
+                        // comment), shows what was ACTUALLY eaten
+                        // instead of the live recipe's per-serving
+                        // reference value - those two only coincide if
+                        // the recipe hasn't changed since.
+                        if (!isEditing && logInstanceId != null && frozenTotals != null) {
+                            "${frozenTotals.kcal} Cal logged"
+                        } else if (recipe.recipeType == "meal") {
                             "${recipe.totalsPerServing.kcal} Cal"
                         } else {
                             "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total"
@@ -1531,30 +1550,48 @@ private fun RecipeInfoScreen(
                 }
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-                // When viewing a LOGGED INSTANCE (not browsing/editing
-                // the global recipe), macros and ingredient quantities
-                // should reflect the amount actually eaten (the logged
-                // number of servings), not the recipe's flat per-
-                // serving reference values or its full stored
-                // ingredient list (see design discussion: "we should be
-                // showing the macros and ingredient quantities for the
-                // amount of servings, not the ingredient quantities for
-                // the entire recipe"). totalsPerServing is already
-                // per-ONE-serving, so multiplying by the logged
-                // quantity directly gives the actual amount consumed;
-                // each ingredient's stored quantity represents the
-                // WHOLE recipe (recipe.servings servings' worth), so
-                // that one needs dividing by recipe.servings first.
-                // Browsing/editing the global recipe (logInstanceId ==
-                // null) shows the unscaled per-serving/whole-recipe
-                // reference values, same as before.
+                // Editing always operates on the LIVE recipe regardless
+                // of which logged instance you tapped from (edits are
+                // global, not per-log) - see this composable's own doc
+                // comment. So the frozen snapshot only ever applies to
+                // the non-editing DISPLAY case, and only when this
+                // specific log actually has one (older logs, from
+                // before ingredient snapshotting existed, have nothing
+                // to fall back to - see frozenTotals/frozenIngredients'
+                // own doc comment on MealDetailScreen's call site).
+                val usingFrozenSnapshot = !isEditing && frozenTotals != null && frozenIngredients != null
+                // When viewing a LOGGED INSTANCE without a frozen
+                // snapshot (pre-existing logs only, see above), macros
+                // and ingredient quantities fall back to the OLD
+                // behavior: scaled from the live recipe's own totals/
+                // ingredients by the logged number of servings (see
+                // design discussion: "we should be showing the macros
+                // and ingredient quantities for the amount of servings,
+                // not the ingredient quantities for the entire
+                // recipe"). totalsPerServing is already per-ONE-
+                // serving, so multiplying by the logged quantity
+                // directly gives the actual amount consumed; each
+                // ingredient's stored quantity represents the WHOLE
+                // recipe (recipe.servings servings' worth), so that one
+                // needs dividing by recipe.servings first. Browsing/
+                // editing the global recipe (logInstanceId == null)
+                // shows the unscaled per-serving/whole-recipe reference
+                // values, same as always.
                 val loggedServings = if (logInstanceId != null) quantityInput.toDoubleOrNull() ?: 1.0 else 1.0
                 val recipeServingsCount = recipe.servings.toDoubleOrNull() ?: 1.0
-                val ingredientScaleFactor = if (logInstanceId != null && recipeServingsCount > 0) {
-                    loggedServings / recipeServingsCount
-                } else {
-                    1.0
+                val ingredientScaleFactor = when {
+                    usingFrozenSnapshot -> 1.0 // frozen quantities are already the exact amount eaten
+                    logInstanceId != null && recipeServingsCount > 0 -> loggedServings / recipeServingsCount
+                    else -> 1.0
                 }
+                val displayProteinG = if (usingFrozenSnapshot) frozenTotals!!.proteinG else (recipe.totalsPerServing.proteinG * loggedServings).roundToInt()
+                val displayFatG = if (usingFrozenSnapshot) frozenTotals!!.fatG else (recipe.totalsPerServing.fatG * loggedServings).roundToInt()
+                val displaySaturatedFatG = if (usingFrozenSnapshot) frozenTotals!!.saturatedFatG else (recipe.totalsPerServing.saturatedFatG * loggedServings).roundToInt()
+                val displayCarbsG = if (usingFrozenSnapshot) frozenTotals!!.carbsG else (recipe.totalsPerServing.carbsG * loggedServings).roundToInt()
+                val displaySugarG = if (usingFrozenSnapshot) frozenTotals!!.sugarG else (recipe.totalsPerServing.sugarG * loggedServings).roundToInt()
+                val displayFiberG = if (usingFrozenSnapshot) frozenTotals!!.fiberG else (recipe.totalsPerServing.fiberG * loggedServings).roundToInt()
+                val displaySodiumMg = if (usingFrozenSnapshot) frozenTotals!!.sodiumMg else (recipe.totalsPerServing.sodiumMg * loggedServings).roundToInt()
+                val displayIngredients = if (usingFrozenSnapshot) frozenIngredients!! else recipe.ingredients
                 // Same colored progress-bar treatment as the item info
                 // screen's LogMacroBar (see design discussion: "i wanted
                 // recipes and meals to show macro info the same way
@@ -1562,28 +1599,20 @@ private fun RecipeInfoScreen(
                 // reusing that exact shared composable rather than a
                 // separate flat-chip display, so the two screens stay
                 // visually consistent.
+                LogMacroBar("Protein", displayProteinG, goalProtein, MacroColors.Protein)
                 LogMacroBar(
-                    "Protein", (recipe.totalsPerServing.proteinG * loggedServings).roundToInt(),
-                    goalProtein, MacroColors.Protein
+                    "Fat", displayFatG, goalFat, MacroColors.Fat,
+                    subLabel = "Saturated fat: ${displaySaturatedFatG}g"
                 )
                 LogMacroBar(
-                    "Fat", (recipe.totalsPerServing.fatG * loggedServings).roundToInt(),
-                    goalFat, MacroColors.Fat,
-                    subLabel = "Saturated fat: ${(recipe.totalsPerServing.saturatedFatG * loggedServings).roundToInt()}g"
+                    "Carbs", displayCarbsG, goalCarbs, MacroColors.Carbs,
+                    subLabel = "Sugar: ${displaySugarG}g"
                 )
-                LogMacroBar(
-                    "Carbs", (recipe.totalsPerServing.carbsG * loggedServings).roundToInt(),
-                    goalCarbs, MacroColors.Carbs,
-                    subLabel = "Sugar: ${(recipe.totalsPerServing.sugarG * loggedServings).roundToInt()}g"
-                )
-                LogMacroBar(
-                    "Fiber", (recipe.totalsPerServing.fiberG * loggedServings).roundToInt(),
-                    goalFiber, MacroColors.Fiber
-                )
+                LogMacroBar("Fiber", displayFiberG, goalFiber, MacroColors.Fiber)
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
                 Text(
-                    "Sodium: ${(recipe.totalsPerServing.sodiumMg * loggedServings).roundToInt()}mg",
+                    "Sodium: ${displaySodiumMg}mg",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1591,14 +1620,18 @@ private fun RecipeInfoScreen(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 20.dp))
                 Text("Ingredients", style = MaterialTheme.typography.titleSmall)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-                if (recipe.ingredients.isEmpty()) {
+                if (displayIngredients.isEmpty()) {
                     Text(
-                        "No ingredients listed.",
+                        if (usingFrozenSnapshot) {
+                            "No ingredients recorded for this log."
+                        } else {
+                            "No ingredients listed."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    recipe.ingredients.forEach { ingredient ->
+                    displayIngredients.forEach { ingredient ->
                         IngredientRow(
                             ingredient = ingredient,
                             isEditing = isEditing,

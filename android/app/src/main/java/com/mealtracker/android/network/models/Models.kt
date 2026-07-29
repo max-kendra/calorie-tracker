@@ -124,7 +124,47 @@ data class Log(
     // The serving's own weight_g (not multiplied by quantity) - lets us
     // show the gram equivalent alongside a custom serving, e.g.
     // "2 slices (75g)" for quantity=2, this=37.5.
-    @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null
+    @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null,
+    // Frozen per-ingredient breakdown for a RECIPE log - see backend
+    // LoggedRecipeIngredient's docstring. Empty for item-based logs,
+    // and for recipe logs created before this feature existed (see
+    // hasIngredientSnapshot below for telling those two "empty" cases
+    // apart). THIS, not a fresh GET /recipes/{id}, is what a logged
+    // recipe instance's ingredient list should be built from - a live
+    // refetch shows whatever the recipe currently is, not what was
+    // actually eaten (see design discussion: "when i open a logged
+    // recipe, i still get the current recipe's ingredients, not
+    // whatever ingredients had been logged").
+    val ingredients: List<LoggedRecipeIngredientOut> = emptyList(),
+    // True for every log created after the ingredient-snapshot feature
+    // shipped (item AND recipe logs alike) - False only for rows that
+    // predate it. Lets the client tell "ingredients is empty because
+    // this is an item log / a recipe with genuinely no ingredients"
+    // apart from "empty because this log predates snapshotting and
+    // that history is gone" - both otherwise look like the same empty
+    // list.
+    @SerialName("has_ingredient_snapshot") val hasIngredientSnapshot: Boolean = false
+)
+
+/** One frozen ingredient row on a recipe Log - mirrors
+ * LoggedRecipeIngredientOut from app/schemas.py exactly. Deliberately a
+ * separate type from RecipeIngredient (the LIVE recipe's own ingredient
+ * shape) even though the fields mostly overlap - itemId here is
+ * genuinely nullable (the backend keeps the row via ON DELETE SET NULL
+ * if the underlying item is later deleted from the catalog, so the
+ * frozen name/amount survive even though the id no longer resolves to
+ * anything), which RecipeIngredient's non-nullable itemId can't safely
+ * represent. */
+@Serializable
+data class LoggedRecipeIngredientOut(
+    @SerialName("item_id") val itemId: Int? = null,
+    @SerialName("item_name") val itemName: String,
+    @SerialName("serving_size_id") val servingSizeId: Int? = null,
+    @SerialName("serving_size_name") val servingSizeName: String? = null,
+    @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null,
+    val quantity: String,
+    val grams: String,
+    val kcal: Int
 )
 
 /**

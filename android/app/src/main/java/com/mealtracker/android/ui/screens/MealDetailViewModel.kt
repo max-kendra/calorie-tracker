@@ -3,12 +3,14 @@ package com.mealtracker.android.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
+import com.mealtracker.android.network.models.ExtendedNutritionTotals
 import com.mealtracker.android.network.models.Item
 import com.mealtracker.android.network.models.ItemMacrosUpdateRequest
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.LogCreateRequest
 import com.mealtracker.android.network.models.LogFromMealRequest
 import com.mealtracker.android.network.models.LogUpdateRequest
+import com.mealtracker.android.network.models.LoggedRecipeIngredientOut
 import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.network.models.RecipeCreateRequest
 import com.mealtracker.android.network.models.RecipeDetail
@@ -96,6 +98,46 @@ enum class SearchFilter(val label: String) {
 }
 
 data class LoggedAmount(val quantity: Double, val servingSizeId: Int?)
+
+/** Builds the SAME ExtendedNutritionTotals shape a live recipe/item
+ * fetch would, directly from this Log's own frozen *_logged columns -
+ * no network call needed, since these are already the exact numbers
+ * that counted for this log (see Log's own doc comment on
+ * hasIngredientSnapshot/ingredients). Used by RecipeInfoScreen to show
+ * a logged recipe instance's ACTUAL totals instead of recomputing from
+ * the live recipe. */
+fun Log.toFrozenTotals(): ExtendedNutritionTotals = ExtendedNutritionTotals(
+    kcal = kcalLogged,
+    proteinG = proteinGLogged,
+    carbsG = carbsGLogged,
+    fatG = fatGLogged,
+    fiberG = fiberGLogged,
+    sugarG = sugarGLogged,
+    countableSugarG = countableSugarGLogged,
+    saturatedFatG = saturatedFatGLogged,
+    sodiumMg = sodiumMgLogged
+)
+
+/** Maps this Log's frozen ingredient snapshot onto RecipeIngredient -
+ * the shape IngredientRow already knows how to render - rather than
+ * teaching that composable a second, near-identical ingredient type.
+ * imagePath is always null here (the frozen snapshot doesn't carry a
+ * per-ingredient photo - see LoggedRecipeIngredientOut), so these rows
+ * fall back to the generic icon instead of a thumbnail; itemId falls
+ * back to 0 for the rare case it's null (the underlying item was
+ * deleted from the catalog since - see LoggedRecipeIngredientOut's own
+ * doc comment) since RecipeIngredient's itemId isn't nullable and
+ * nothing here actually navigates using it, only displays it. */
+fun LoggedRecipeIngredientOut.toRecipeIngredient(): RecipeIngredient = RecipeIngredient(
+    itemId = itemId ?: 0,
+    servingSizeId = servingSizeId,
+    quantity = quantity,
+    itemName = itemName,
+    servingSizeName = servingSizeName,
+    servingSizeWeightG = servingSizeWeightG,
+    imagePath = null,
+    kcal = kcal
+)
 
 data class MealDetailUiState(
     val isLoading: Boolean = true,
@@ -192,6 +234,22 @@ data class MealDetailUiState(
     // ingredient item logs (recipe_id is never set for those) -- only
     // an actual recipe_type="recipe" log references a recipe directly.
     val recipeLogInstanceId: Int? = null,
+    // Set alongside recipeLogInstanceId, straight from the tapped Log's
+    // own frozen snapshot (Log.toFrozenTotals()/ingredients.map{...}) -
+    // no network call, since these ARE the exact numbers/ingredients
+    // that counted for this log. Null when browsing/editing the global
+    // recipe (logInstanceId == null), or when this particular log
+    // predates ingredient snapshotting (hasIngredientSnapshot false) -
+    // in the latter case RecipeInfoScreen falls back to the OLD
+    // scaled-from-the-live-recipe display, same as before this feature
+    // existed, since there's no frozen history to show instead (see
+    // design discussion: "when i open a logged recipe, i still get the
+    // current recipe's ingredients, not whatever ingredients had been
+    // logged" - this is the actual fix for that: previously nothing on
+    // the client ever read the backend's already-frozen snapshot at
+    // all, it just re-fetched the live recipe unconditionally).
+    val recipeLogFrozenTotals: ExtendedNutritionTotals? = null,
+    val recipeLogFrozenIngredients: List<RecipeIngredient>? = null,
 
     // Edit mode (pencil button) on the recipe info screen -- name and
     // servings only, same "edit metadata separately from ingredients"
@@ -705,7 +763,10 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(
             isLoadingRecipeDetail = true,
             recipeDetailError = null,
-            recipeLogQuantityInput = "1"
+            recipeLogQuantityInput = "1",
+            recipeLogInstanceId = null,
+            recipeLogFrozenTotals = null,
+            recipeLogFrozenIngredients = null
         )
         viewModelScope.launch {
             try {
@@ -721,7 +782,13 @@ class MealDetailViewModel : ViewModel() {
     }
 
     fun dismissRecipeDetail() {
-        _uiState.value = _uiState.value.copy(recipeToView = null, recipeDetailError = null, recipeLogInstanceId = null)
+        _uiState.value = _uiState.value.copy(
+            recipeToView = null,
+            recipeDetailError = null,
+            recipeLogInstanceId = null,
+            recipeLogFrozenTotals = null,
+            recipeLogFrozenIngredients = null
+        )
     }
 
     fun updateRecipeLogQuantityInput(value: String) {
@@ -1657,7 +1724,21 @@ class MealDetailViewModel : ViewModel() {
             isLoadingRecipeDetail = true,
             recipeDetailError = null,
             recipeLogQuantityInput = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity,
-            recipeLogInstanceId = log.id
+            recipeLogInstanceId = log.id,
+            // Straight from this Log's own frozen columns/rows - see
+            // recipeLogFrozenTotals/recipeLogFrozenIngredients' own doc
+            // comment. Only set when this particular log actually has a
+            // snapshot (hasIngredientSnapshot) - a log from before this
+            // feature shipped has nothing to fall back to here, so
+            // RecipeInfoScreen uses the old scaled-from-the-live-recipe
+            // display for those instead (see that screen's own
+            // ingredientScaleFactor logic).
+            recipeLogFrozenTotals = if (log.hasIngredientSnapshot) log.toFrozenTotals() else null,
+            recipeLogFrozenIngredients = if (log.hasIngredientSnapshot) {
+                log.ingredients.map { it.toRecipeIngredient() }
+            } else {
+                null
+            }
         )
         viewModelScope.launch {
             try {
