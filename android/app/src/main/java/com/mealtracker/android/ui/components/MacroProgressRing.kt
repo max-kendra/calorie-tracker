@@ -29,6 +29,14 @@ fun MacroProgressRing(
     modifier: Modifier = Modifier
 ) {
     val fraction = if (goal > 0) (eaten.toFloat() / goal.toFloat()).coerceIn(0f, 1f) else 0f
+    // Same "darker arc painted over the already-full ring" treatment as
+    // JournalScreen's kcal hero ring, applied here too so every macro
+    // ring - not just the kcal one - shows how far over goal you are
+    // instead of just silently capping at a full ring (see design
+    // discussion: "can we do this for the macro wheels everywhere").
+    val overflowFraction = if (goal > 0 && eaten > goal) {
+        ((eaten - goal).toFloat() / goal.toFloat()).coerceIn(0f, 1f)
+    } else 0f
 
     Column(
         modifier = modifier,
@@ -44,6 +52,7 @@ fun MacroProgressRing(
             // itself as eaten approaches goal, rather than the ring
             // looking like a different color underneath.
             trackColor = color.copy(alpha = 0.22f),
+            overlaySegments = listOf(overflowFraction to darkenMacroColor(color)),
             centerContent = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("$eaten", style = MaterialTheme.typography.titleMedium)
@@ -87,3 +96,17 @@ object MacroColors {
     val Carbs = Color(0xFF7EC8E3)
     val Fiber = Color(0xFF9C7A54)
 }
+
+/** A darker shade of the same macro color, for the "how far over goal"
+ * overlay on rings/bars - mixes toward black rather than switching to a
+ * different hue (e.g. error red), so going over reads as "more of the
+ * same macro" rather than a separate warning color unrelated to what's
+ * actually being shown. Shared between MacroProgressRing (rings) and
+ * HomeScreen's WeeklyMacroBar (bars) so the "over" treatment looks the
+ * same wherever a macro goal appears, wheel or bar. */
+fun darkenMacroColor(color: Color, factor: Float = 0.35f): Color = Color(
+    red = color.red * (1f - factor),
+    green = color.green * (1f - factor),
+    blue = color.blue * (1f - factor),
+    alpha = color.alpha
+)

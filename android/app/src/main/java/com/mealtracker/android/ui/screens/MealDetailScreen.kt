@@ -465,7 +465,7 @@ fun MealDetailScreen(
                             val allItems = if (showingRecent) state.recentItems else state.searchResults
                             val allRecipes = if (showingRecent) state.recentRecipes else state.recipeSearchResults
                             val isLoadingAll = if (showingRecent) {
-                                state.isLoadingRecentItems
+                                state.isLoadingRecentItems || state.isLoadingRecentRecipes
                             } else {
                                 state.isSearching || state.isSearchingRecipes
                             }

@@ -39,6 +39,7 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
         servings=recipe.servings,
         created_at=recipe.created_at,
         updated_at=recipe.updated_at,
+        last_logged_at=recipe.last_logged_at,
         ingredients=[
             {
                 "item_id": ri.item_id,

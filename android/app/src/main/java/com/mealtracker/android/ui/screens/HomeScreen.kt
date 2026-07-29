@@ -49,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.StreakCalendarDialog
 import com.mealtracker.android.ui.components.WeekPickerDialog
+import com.mealtracker.android.ui.components.darkenMacroColor
 import com.mealtracker.android.ui.theme.KcalGreen
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -334,6 +335,12 @@ private fun WeekNavRow(
 private fun WeeklyMacroBar(label: String, eaten: Int, goal: Int, color: Color, unit: String = "g") {
     val fraction = if (goal > 0) (eaten.toFloat() / goal.toFloat()).coerceIn(0f, 1f) else 0f
     val over = eaten - goal
+    // Same treatment as MacroProgressRing's overlay - see that
+    // composable's own doc comment. Here "painted over the top" means a
+    // second Box the same height/shape, fillMaxWidth'd to the overflow
+    // fraction, stacked in the same Box as the base fill rather than
+    // appended after it (the bar has no room to extend past 100% width).
+    val overflowFraction = if (goal > 0 && over > 0) (over.toFloat() / goal.toFloat()).coerceIn(0f, 1f) else 0f
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -359,6 +366,15 @@ private fun WeeklyMacroBar(label: String, eaten: Int, goal: Int, color: Color, u
                     .clip(RoundedCornerShape(5.dp))
                     .background(color)
             )
+            if (overflowFraction > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(overflowFraction)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(darkenMacroColor(color))
+                )
+            }
         }
         if (over > 0) {
             Spacer(modifier = Modifier.height(2.dp))

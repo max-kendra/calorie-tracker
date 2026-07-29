@@ -148,6 +148,22 @@ data class MealDetailUiState(
     val recentRecipes: List<Recipe> = emptyList(),
     val recipeSearchResults: List<Recipe> = emptyList(),
     val isSearchingRecipes: Boolean = false,
+    // Blank-query ("recent") equivalent of isSearchingRecipes above -
+    // separate flag because loadRecentItems's ALL branch fetches
+    // recipes and items in two independent, unsynchronized coroutines
+    // (see that function's own doc comment). Without this, the ALL
+    // filter's "recent" view had no way to know the recipe half was
+    // still in flight, only the item half (isLoadingRecentItems) - and
+    // GET /recipes is reliably slower than GET /items (it eager-loads
+    // every recipe's full ingredient list), so items routinely finished
+    // first, the screen decided loading was over, and rendered an
+    // items-only list a beat before recipes actually arrived. Recipes
+    // WOULD still show up once that second fetch landed (the state
+    // update itself was never broken), but with no loading indicator
+    // covering that gap it looked exactly like "recipes never show up
+    // under All" (see design discussion: "meals and recipes only show
+    // up if we filter for them").
+    val isLoadingRecentRecipes: Boolean = false,
     // Same idea as quickLoggingItemId but for the recipe list.
     val quickLoggingRecipeId: Int? = null,
     // Recipe/meal info screen -- tapping a recipe/meal row (not its "+")
@@ -473,12 +489,18 @@ class MealDetailViewModel : ViewModel() {
         // recipes... not with the rest of the items when it's set to
         // show all").
         if (filter == SearchFilter.ALL) {
+            _uiState.value = _uiState.value.copy(isLoadingRecentRecipes = true)
             viewModelScope.launch {
                 try {
                     val recipes = ApiClient.service.searchRecipes(query = null, recipeType = null)
-                    _uiState.value = _uiState.value.copy(recentRecipes = recipes, allFilterRecipeError = null)
+                    _uiState.value = _uiState.value.copy(
+                        isLoadingRecentRecipes = false,
+                        recentRecipes = recipes,
+                        allFilterRecipeError = null
+                    )
                 } catch (e: Exception) {
                     _uiState.value = _uiState.value.copy(
+                        isLoadingRecentRecipes = false,
                         allFilterRecipeError = "Couldn't load recipes: ${e.message ?: e.javaClass.simpleName}"
                     )
                 }
