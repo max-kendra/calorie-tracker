@@ -316,6 +316,22 @@ private fun KcalHeroSection(totals: DailyTotals) {
     // matching KcalRingLight/Dark's own doc comment in Color.kt.
     val kcalRingColor = if (LocalIsAppDarkTheme.current) KcalRingDark else KcalRingLight
 
+    // How far past the goal we are, as a fraction of the goal itself -
+    // e.g. 200/1800 over reads as ~0.11. Coerced to 1f rather than left
+    // unbounded so a very large overage (a goal of 100 logged as 1000)
+    // still reads as "the whole ring is over," not an exception or a
+    // sweep angle beyond 360°.
+    val overflowFraction = if (remaining < 0 && totals.goalKcal > 0) {
+        (-remaining.toFloat() / totals.goalKcal.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+    // Reuses colorScheme.error rather than a hand-darkened version of
+    // kcalRingColor - the "Cal over" number/label right below already
+    // switches to this same color once over budget (see the `else`
+    // branch in centerContent), so the ring overlay and the center text
+    // read as one consistent "you're over" signal instead of two
+    // different colors both meaning the same thing.
+    val overflowColor = MaterialTheme.colorScheme.error
+
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -325,6 +341,7 @@ private fun KcalHeroSection(totals: DailyTotals) {
             diameter = 130.dp,
             strokeWidth = 12.dp,
             trackColor = kcalRingColor.copy(alpha = 0.18f),
+            overlaySegments = listOf(overflowFraction to overflowColor),
             centerContent = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (remaining >= 0) {

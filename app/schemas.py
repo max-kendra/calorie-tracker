@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -414,6 +414,24 @@ class LogUpdate(BaseModel):
     serving_size_id: Optional[int] = None
 
 
+class LoggedRecipeIngredientOut(BaseModel):
+    """One frozen ingredient row from LoggedRecipeIngredient - see that
+    model's docstring. item_id/serving_size_id are included only for
+    traceability; item_name/serving_size_name/grams/kcal are the frozen
+    values and are what should actually be displayed. Built explicitly
+    in the router (not from_attributes) so kcal gets the same ceil_int
+    rounding as every other *_logged figure in LogOut."""
+
+    item_id: Optional[int] = None
+    item_name: str
+    serving_size_id: Optional[int] = None
+    serving_size_name: Optional[str] = None
+    serving_size_weight_g: Optional[Decimal] = None
+    quantity: Decimal
+    grams: Decimal
+    kcal: int
+
+
 class LogOut(LoggableEntryBase):
     id: int
     logged_at: datetime
@@ -461,6 +479,18 @@ class LogOut(LoggableEntryBase):
     # (e.g. "2 slices (75g)": quantity=2, this=37.5), same reasoning as
     # serving_size_name above.
     serving_size_weight_g: Optional[Decimal] = None
+    # Frozen per-ingredient breakdown - see LoggedRecipeIngredient's
+    # docstring. Only ever non-empty for recipe_id-based logs, and only
+    # for those created after this feature shipped (older recipe logs
+    # have no snapshot to recover - see that migration's own note on
+    # why backfill isn't possible here). None/empty for item-based logs.
+    ingredients: List[LoggedRecipeIngredientOut] = []
+    # True for every log created after this feature shipped, item or
+    # recipe alike. Lets the client tell "ingredients is empty because
+    # the recipe genuinely had none" apart from "empty because this log
+    # predates snapshotting and that history is gone" - both otherwise
+    # look like the same empty list.
+    has_ingredient_snapshot: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

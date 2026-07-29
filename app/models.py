@@ -200,6 +200,56 @@ class RecipeIngredient(Base):
     serving_size = relationship("ServingSize")
 
 
+class LoggedRecipeIngredient(Base):
+    """
+    Frozen per-log snapshot of one ingredient in a RECIPE log, taken once
+    at create_log time and never touched again - the recipe-log
+    equivalent of item_id/serving_size_id/quantity/kcal_logged on `logs`
+    itself, just one level deeper.
+
+    RecipeIngredient (the recipe's CURRENT composition) is fully live -
+    editing a recipe's ingredients later has no history of its own, so
+    without this table there was no way to answer "what did this recipe
+    log actually consist of" for anything but the moment you looked,
+    which silently drifted every time the recipe changed (see design
+    discussion: changing a recipe's name/ingredients was retroactively
+    changing what old logs of it appeared to contain).
+
+    item_id/serving_size_id are kept for traceability only (ON DELETE
+    SET NULL - an ingredient being deleted from the catalog shouldn't
+    delete history of it having been eaten). Display must always prefer
+    item_name_logged/serving_size_name_logged/grams_logged/kcal_logged,
+    never re-resolve through those ids live.
+    """
+
+    __tablename__ = "logged_recipe_ingredients"
+
+    id = Column(Integer, primary_key=True)
+    log_id = Column(Integer, ForeignKey("logs.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="SET NULL"), nullable=True)
+    item_name_logged = Column(String, nullable=False)
+
+    serving_size_id = Column(Integer, ForeignKey("serving_sizes.id", ondelete="SET NULL"), nullable=True)
+    serving_size_name_logged = Column(String, nullable=True)
+    serving_size_weight_g_logged = Column(Numeric, nullable=True)
+
+    # Same dual semantics as logs.quantity/RecipeIngredient.quantity: grams
+    # directly if no serving, else a multiplier of
+    # serving_size_weight_g_logged.
+    quantity = Column(Numeric, nullable=False)
+    # Resolved actual grams for this ingredient at the RECIPE's logged
+    # quantity as a whole (already scaled by however many servings were
+    # consumed) - frozen so the client can display it directly without
+    # redoing serving-size math against catalog data that may have since
+    # changed or been deleted.
+    grams_logged = Column(Numeric, nullable=False)
+    kcal_logged = Column(Numeric, nullable=False)
+
+    item = relationship("Item")
+    serving_size = relationship("ServingSize")
+
+
 class Log(Base):
     """
     Actual, committed food log entries.
@@ -209,6 +259,15 @@ class Log(Base):
     change — historical days/weekly summaries reflect what was actually
     counted at the time. item_id/recipe_id are kept for traceability and
     re-logging, but the numbers that counted toward that day are frozen.
+
+    The DISPLAY identity of what was logged is frozen the same way, via
+    item_name_logged/recipe_name_logged/image_path_logged - previously
+    these were resolved live against the current Item/Recipe on every
+    read, so renaming a recipe (or changing its photo) retroactively
+    changed the label on every past log referencing it. NULL on an
+    existing pre-migration row means "no frozen value available, fall
+    back to a live lookup" - every row created from here on always has
+    these populated (see create_log).
     """
 
     __tablename__ = "logs"
@@ -224,6 +283,21 @@ class Log(Base):
     recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), nullable=True)
     serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
     quantity = Column(Numeric, nullable=False)
+
+    item_name_logged = Column(String, nullable=True)
+    recipe_name_logged = Column(String, nullable=True)
+    image_path_logged = Column(String, nullable=True)
+    # True for every log created after the name/ingredient-freeze feature
+    # shipped (item AND recipe logs alike) - False only for pre-existing
+    # rows migrated in before it existed. Exists so the client can tell
+    # "this recipe log's `ingredients` is empty because the recipe
+    # genuinely had none" apart from "empty because this log predates
+    # ingredient snapshotting and that history is simply gone" - both
+    # look identical as an empty list otherwise. Not meaningful on its
+    # own for item logs (they never have an ingredients list either
+    # way), but set True on them too rather than left ambiguous, since
+    # nothing about their own data is actually missing.
+    has_ingredient_snapshot = Column(Boolean, nullable=False, server_default="false")
 
     kcal_logged = Column(Numeric, nullable=False)
     protein_g_logged = Column(Numeric, nullable=False)
@@ -248,6 +322,14 @@ class Log(Base):
     logged_at = Column(DateTime(timezone=True), server_default=func.now())
 
     serving_size = relationship("ServingSize")
+    # Per-log recipe ingredient snapshot (empty for item-based logs, and
+    # for recipe logs created before this feature existed - see
+    # LoggedRecipeIngredient's own docstring). cascade="all, delete-orphan"
+    # so deleting a log cleans up its snapshot rows without needing a
+    # separate query.
+    ingredients = relationship(
+        "LoggedRecipeIngredient", cascade="all, delete-orphan", order_by="LoggedRecipeIngredient.id"
+    )
 
     __table_args__ = (
         CheckConstraint(

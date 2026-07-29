@@ -505,6 +505,11 @@ data class ItemCreateRequest(
     @SerialName("sugar_100g") val sugar100g: Double? = null,
     @SerialName("saturated_fat_100g") val saturatedFat100g: Double? = null,
     @SerialName("sodium_mg_100g") val sodiumMg100g: Double? = null,
+    // See ItemOut.countsAsAddedSugar's doc comment for the null/true/
+    // false semantics - was already PATCHable via update_item, this
+    // just lets it be set at creation time too instead of requiring a
+    // create-then-immediately-edit round trip.
+    @SerialName("counts_as_added_sugar") val countsAsAddedSugar: Boolean? = null,
     val type: String = "product",
     val origin: String = "manual"
 )

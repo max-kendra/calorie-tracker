@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
 from app.database import get_db
-from app.models import Item, Log, MealPlan, Recipe
+from app.models import Item, Log, LoggedRecipeIngredient, MealPlan, Recipe
 from app.routers.logs import _validate_and_compute
 from app.nutrition import to_display
 from app.schemas import (
@@ -32,7 +32,7 @@ def _plan_to_out(plan: MealPlan, db: Session) -> MealPlanOut:
     it's committed (see design doc: meal_plans stays live-reference,
     unlike logs which freeze at write time).
     """
-    totals, item_name, recipe_name, _, _, _ = _validate_and_compute(plan, db)
+    totals, item_name, recipe_name, _, _, _, _ = _validate_and_compute(plan, db)
     return MealPlanOut(
         id=plan.id,
         date=plan.date,
@@ -143,7 +143,7 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
 
     log_ids = []
     for plan in plans:
-        totals, _, _, _, _, _ = _validate_and_compute(plan, db)
+        totals, item_name, recipe_name, image_path, _, _, ingredient_snapshot = _validate_and_compute(plan, db)
 
         log = Log(
             date=plan.date,
@@ -152,6 +152,10 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
             recipe_id=plan.recipe_id,
             serving_size_id=plan.serving_size_id,
             quantity=plan.quantity,
+            item_name_logged=item_name,
+            recipe_name_logged=recipe_name,
+            image_path_logged=image_path,
+            has_ingredient_snapshot=True,
             kcal_logged=totals.kcal,
             protein_g_logged=totals.protein_g,
             carbs_g_logged=totals.carbs_g,
@@ -162,6 +166,28 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
             saturated_fat_g_logged=totals.saturated_fat_g,
             sodium_mg_logged=totals.sodium_mg,
         )
+        if ingredient_snapshot is not None:
+            # Same freezing as create_log - this is the exact moment a
+            # pre-tracked recipe plan becomes a real, historical log, so
+            # it needs the same protection against the recipe changing
+            # later as any other recipe log (see LoggedRecipeIngredient's
+            # docstring, and the design discussion this whole feature
+            # came out of: pre-tracking the same dish multiple ways
+            # across different days and needing to tell them apart
+            # afterward).
+            log.ingredients = [
+                LoggedRecipeIngredient(
+                    item_id=ri.item_id,
+                    item_name_logged=ri.item.name,
+                    serving_size_id=ri.serving_size_id,
+                    serving_size_name_logged=ri.serving_size.name if ri.serving_size else None,
+                    serving_size_weight_g_logged=ri.serving_size.weight_g if ri.serving_size else None,
+                    quantity=ri.quantity,
+                    grams_logged=grams,
+                    kcal_logged=ing_totals.kcal,
+                )
+                for ri, ing_totals, grams in ingredient_snapshot
+            ]
         db.add(log)
         db.flush()
         log_ids.append(log.id)

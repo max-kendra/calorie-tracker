@@ -814,7 +814,8 @@ fun MealDetailScreen(
             },
             onDismiss = { viewModel.dismissItemQuantityPicker() },
             onImageUpdated = { updated -> viewModel.onItemImageUpdated(updated) },
-            onEditClick = { viewModel.openEditItemDialog() }
+            onEditClick = { viewModel.openEditItemDialog() },
+            onEditServingClick = { viewModel.openEditServingDialog(it) }
         )
 
         if (state.showCreateServingDialog) {
@@ -827,6 +828,21 @@ fun MealDetailScreen(
                 onWeightChange = { viewModel.updateNewServingWeight(it) },
                 onConfirm = { viewModel.createNewServing() },
                 onDismiss = { viewModel.dismissCreateServingDialog() }
+            )
+        }
+
+        if (state.editingServingId != null) {
+            CreateServingDialog(
+                name = state.editServingName,
+                weightG = state.editServingWeightG,
+                isCreating = state.isSavingServing,
+                error = state.editServingError,
+                onNameChange = { viewModel.updateEditServingName(it) },
+                onWeightChange = { viewModel.updateEditServingWeight(it) },
+                onConfirm = { viewModel.saveEditingServing() },
+                onDismiss = { viewModel.dismissEditServingDialog() },
+                isEditing = true,
+                onDelete = { viewModel.deleteEditingServing() }
             )
         }
 
@@ -1875,7 +1891,8 @@ private fun ItemLogPageDialog(
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
     onImageUpdated: (Item) -> Unit,
-    onEditClick: () -> Unit
+    onEditClick: () -> Unit,
+    onEditServingClick: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -2136,10 +2153,40 @@ private fun ItemLogPageDialog(
                                 onClick = { onServingChange(null); unitMenuExpanded = false }
                             )
                             item.servingSizes.forEach { serving ->
-                                DropdownMenuItem(
-                                    text = { Text("${serving.name} (${serving.weightG}g)") },
-                                    onClick = { onServingChange(serving.id); unitMenuExpanded = false }
-                                )
+                                // Not a plain DropdownMenuItem -- that's
+                                // a single click target for the whole
+                                // row, but this needs TWO independent
+                                // actions (select this serving to log
+                                // with vs. edit/delete it), so it's a
+                                // custom Row with its own text-clickable
+                                // and a separate trailing IconButton
+                                // instead (see design discussion: "let
+                                // the user delete and edit existing
+                                // servings per-item").
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onServingChange(serving.id); unitMenuExpanded = false },
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "${serving.name} (${serving.weightG}g)",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp)
+                                    )
+                                    IconButton(onClick = {
+                                        unitMenuExpanded = false
+                                        onEditServingClick(serving.id)
+                                    }) {
+                                        Icon(
+                                            Icons.Filled.Edit,
+                                            contentDescription = "Edit ${serving.name} serving",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
                             }
                             HorizontalDivider()
                             DropdownMenuItem(

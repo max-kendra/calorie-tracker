@@ -25,6 +25,16 @@ import androidx.compose.ui.unit.dp
  * need to sum to exactly 1f - if they sum to less, the remainder is
  * simply left as empty track, which is useful for showing an
  * incomplete/invalid split visually (e.g. only 92% allocated).
+ *
+ * `overlaySegments` are drawn AFTER `segments`, but each one starts
+ * back at the same -90° top-of-circle origin rather than continuing
+ * from where the previous arc left off - so they layer on top of the
+ * base ring instead of extending it. Used by JournalScreen's kcal ring
+ * to show "how far over the goal" as a darker arc painted over the
+ * already-full base ring, once eaten > goal (see design discussion:
+ * "if the value exceeds the daily goal, the line runs over a bit
+ * darker" - the base ring alone has no way to show overage once it
+ * hits 100%, since its fraction is coerced to 1f).
  */
 @Composable
 fun DonutChart(
@@ -33,6 +43,7 @@ fun DonutChart(
     diameter: Dp = 160.dp,
     strokeWidth: Dp = 22.dp,
     trackColor: Color = Color(0xFFE0E0E0),
+    overlaySegments: List<Pair<Float, Color>> = emptyList(),
     centerContent: @Composable () -> Unit = {}
 ) {
     Box(
@@ -69,6 +80,23 @@ fun DonutChart(
                     style = Stroke(width = strokePx, cap = StrokeCap.Round)
                 )
                 startAngle += sweep
+            }
+
+            // Each overlay restarts at -90° rather than picking up from
+            // `startAngle` above - intentional, this is what makes it
+            // paint "on top of" the base ring rather than "after" it.
+            for ((fraction, color) in overlaySegments) {
+                val sweep = fraction.coerceIn(0f, 1f) * 360f
+                if (sweep <= 0f) continue
+                drawArc(
+                    color = color,
+                    startAngle = -90f,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                )
             }
         }
         centerContent()

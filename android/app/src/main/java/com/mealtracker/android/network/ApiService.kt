@@ -146,6 +146,31 @@ interface ApiService {
         @Query("weight_g") weightG: Double
     ): Item
 
+    // Both params optional/partial - same query-param convention as
+    // createServingSize above (see update_serving_size). Only ever
+    // called with both set from the client today (the edit dialog
+    // always has a name+weight to submit), but left optional to match
+    // the backend's own partial-update contract rather than narrowing
+    // it artificially.
+    @PATCH("items/{itemId}/serving-sizes/{servingId}")
+    suspend fun updateServingSize(
+        @Path("itemId") itemId: Int,
+        @Path("servingId") servingId: Int,
+        @Query("name") name: String? = null,
+        @Query("weight_g") weightG: Double? = null
+    ): Item
+
+    // Backend 400s via FK constraint if any log/meal_plan still
+    // references this serving_size_id (see delete_serving_size's own
+    // comment) - the client surfaces that failure as-is rather than
+    // pre-checking, same as every other delete-with-references case in
+    // this app (e.g. deleting a still-referenced recipe).
+    @DELETE("items/{itemId}/serving-sizes/{servingId}")
+    suspend fun deleteServingSize(
+        @Path("itemId") itemId: Int,
+        @Path("servingId") servingId: Int
+    )
+
     // The goal currently in effect (backend: GET /goals/active,
     // end_date IS NULL). Throws a 404 HttpException if none exists yet --
     // callers should catch that specifically to distinguish "no goal set

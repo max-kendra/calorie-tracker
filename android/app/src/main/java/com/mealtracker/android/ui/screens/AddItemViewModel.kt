@@ -165,6 +165,14 @@ data class AddItemUiState(
     // same rounded factor used on EU nutrition labels). This field
     // itself always holds SALT in grams, never sodium.
     val saltG100g: String = "",
+    // 3-state override, same "Auto"/Yes/No semantics as
+    // MealDetailViewModel's editItemCountsAsAddedSugar (see that
+    // field's doc comment) - null means "use the default heuristic"
+    // (counts scanned/manual items, not raw USDA ingredients), which is
+    // a real, distinct state a plain Boolean can't represent. Previously
+    // this override was only reachable by creating the item first and
+    // then editing it - there was no way to set it at creation time.
+    val countsAsAddedSugar: Boolean? = null,
 
     val saveError: String? = null,
     val createdItem: Item? = null,
@@ -599,6 +607,16 @@ class AddItemViewModel : ViewModel() {
     fun updateSugar(value: String) { _uiState.value = _uiState.value.copy(sugar100g = value) }
     fun updateSaturatedFat(value: String) { _uiState.value = _uiState.value.copy(saturatedFat100g = value) }
     fun updateSalt(value: String) { _uiState.value = _uiState.value.copy(saltG100g = value) }
+    /** Cycles null -> true -> false -> null, same semantics/reasoning as
+     * MealDetailViewModel's cycleEditItemCountsAsAddedSugar. */
+    fun cycleCountsAsAddedSugar() {
+        val next = when (_uiState.value.countsAsAddedSugar) {
+            null -> true
+            true -> false
+            false -> null
+        }
+        _uiState.value = _uiState.value.copy(countsAsAddedSugar = next)
+    }
 
     /** Lets the user go back and retake/reupload the nutrition label
      * photo from ITEM_FORM if they're unhappy with the OCR results -
@@ -652,6 +670,7 @@ class AddItemViewModel : ViewModel() {
                         // same as every other macro above, THEN apply
                         // the salt:sodium unit conversion on top.
                         sodiumMg100g = toPer100g(state.saltG100g)?.times(1000.0)?.div(SALT_TO_SODIUM_RATIO),
+                        countsAsAddedSugar = state.countsAsAddedSugar,
                         type = state.itemType,
                         origin = when {
                             state.usdaImportUsed -> "usda_import"

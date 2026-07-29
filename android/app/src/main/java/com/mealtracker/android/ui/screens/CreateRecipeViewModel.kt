@@ -16,10 +16,54 @@ import kotlinx.coroutines.launch
 
 private const val INGREDIENT_SEARCH_DEBOUNCE_MS = 350L
 
-/** One ingredient added to the recipe being built. */
+/** One ingredient added to the recipe being built.
+ *
+ * Stores the SAME quantity/servingSizeId pair the backend and every
+ * other picker in the app use (quantity is a multiplier of the serving
+ * if servingSizeId is set, otherwise raw grams) - NOT pre-collapsed to
+ * grams. Collapsing to grams here was the reason editing an already-
+ * added ingredient was effectively impossible: reopening the picker had
+ * no way to recover "2 slices", only "75g", so any edit silently
+ * dropped back to raw grams even if that's not how it was entered (see
+ * design discussion: "can't edit amounts once added, gotta delete and
+ * re-add it instead"). */
 data class CreateRecipeIngredientRow(
     val item: Item,
-    val quantityG: Double
+    val quantity: Double,
+    val servingSizeId: Int?
+) {
+    val servingSize get() = item.servingSizes.find { it.id == servingSizeId }
+    val grams: Double
+        get() = if (servingSize != null) quantity * (servingSize!!.weightG.toDoubleOrNull() ?: 0.0) else quantity
+    val kcal: Double get() = (item.kcal100g?.toDoubleOrNull() ?: 0.0) * grams / 100.0
+    val proteinG: Double get() = (item.protein100g?.toDoubleOrNull() ?: 0.0) * grams / 100.0
+    val carbsG: Double get() = (item.carbs100g?.toDoubleOrNull() ?: 0.0) * grams / 100.0
+    val fatG: Double get() = (item.fat100g?.toDoubleOrNull() ?: 0.0) * grams / 100.0
+    val fiberG: Double get() = (item.fiber100g?.toDoubleOrNull() ?: 0.0) * grams / 100.0
+}
+
+/** Live running totals for the recipe being built, computed straight
+ * from `ingredients` client-side - same per-100g x grams/100 math the
+ * backend's compute_recipe_totals does, just done here too so the
+ * screen can show "X Cal total / Y Cal per serving" WHILE building,
+ * instead of only after saving (see design discussion: "you have to
+ * create the recipe first to see the total and per-serving calories
+ * and macros"). Never sent anywhere - purely a preview; the backend
+ * remains the source of truth once saved. */
+data class RecipeTotalsPreview(
+    val kcal: Double, val proteinG: Double, val carbsG: Double, val fatG: Double, val fiberG: Double
+) {
+    fun perServing(servings: Double) = if (servings > 0) {
+        RecipeTotalsPreview(kcal / servings, proteinG / servings, carbsG / servings, fatG / servings, fiberG / servings)
+    } else this
+}
+
+private fun List<CreateRecipeIngredientRow>.totals() = RecipeTotalsPreview(
+    kcal = sumOf { it.kcal },
+    proteinG = sumOf { it.proteinG },
+    carbsG = sumOf { it.carbsG },
+    fatG = sumOf { it.fatG },
+    fiberG = sumOf { it.fiberG }
 )
 
 /**
@@ -74,6 +118,14 @@ data class CreateRecipeUiState(
 
     val isSaveValid: Boolean
         get() = isDetailsValid && ingredients.isNotEmpty()
+
+    /** Whole-recipe totals from what's added so far, and the same
+     * divided by the servings count - see RecipeTotalsPreview's own
+     * doc comment for why this is computed here rather than waiting on
+     * a save round-trip. */
+    val totalsPreview: RecipeTotalsPreview get() = ingredients.totals()
+    val perServingPreview: RecipeTotalsPreview
+        get() = totalsPreview.perServing(servings.toDoubleOrNull() ?: 0.0)
 }
 
 /**
@@ -164,8 +216,8 @@ class CreateRecipeViewModel : ViewModel() {
         val servingSizeId: Int?
         when {
             existing != null -> {
-                quantity = existing.quantityG
-                servingSizeId = null
+                quantity = existing.quantity
+                servingSizeId = existing.servingSizeId
             }
             remembered != null -> {
                 quantity = remembered.quantity
@@ -198,33 +250,28 @@ class CreateRecipeViewModel : ViewModel() {
     }
 
     /** Adds (or updates, if already in the list) the ingredient with
-     * whatever quantity/serving is currently set in the picker -- mirrors
-     * LoggableEntryBase's quantity semantics (quantity is a multiplier of
-     * the selected serving's weight, or raw grams with no serving
-     * selected) exactly, same as ItemQuantityDialog computes for the
-     * live preview. */
+     * whatever quantity/serving is currently set in the picker - stores
+     * that quantity/servingSizeId pair as-is (see
+     * CreateRecipeIngredientRow's doc comment for why NOT grams). */
     fun confirmQuantityPicker() {
         val state = _uiState.value
         val item = state.itemForQuantityPicker ?: return
         val quantityValue = state.quantityPickerInput.toDoubleOrNull() ?: return
-        val serving = item.servingSizes.find { it.id == state.quantityPickerServingSizeId }
-        val grams = if (serving != null) {
-            quantityValue * (serving.weightG.toDoubleOrNull() ?: return)
-        } else {
-            quantityValue
-        }
-        if (grams <= 0.0) return
+        if (quantityValue <= 0.0) return
+        val row = CreateRecipeIngredientRow(item, quantityValue, state.quantityPickerServingSizeId)
+        if (row.grams <= 0.0) return
 
         val withoutExisting = state.ingredients.filterNot { it.item.itemId == item.itemId }
         _uiState.value = state.copy(
-            ingredients = withoutExisting + CreateRecipeIngredientRow(item, grams),
+            ingredients = withoutExisting + row,
             itemForQuantityPicker = null
         )
     }
 
     fun removeIngredient(itemId: Int) {
         _uiState.value = _uiState.value.copy(
-            ingredients = _uiState.value.ingredients.filterNot { it.item.itemId == itemId }
+            ingredients = _uiState.value.ingredients.filterNot { it.item.itemId == itemId },
+            itemForQuantityPicker = if (_uiState.value.itemForQuantityPicker?.itemId == itemId) null else _uiState.value.itemForQuantityPicker
         )
     }
 
@@ -319,7 +366,8 @@ class CreateRecipeViewModel : ViewModel() {
                         ingredients = state.ingredients.map {
                             RecipeIngredientCreateRequest(
                                 itemId = it.item.itemId,
-                                quantity = it.quantityG
+                                servingSizeId = it.servingSizeId,
+                                quantity = it.quantity
                             )
                         }
                     )

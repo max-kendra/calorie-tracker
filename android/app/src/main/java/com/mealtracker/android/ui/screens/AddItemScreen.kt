@@ -1072,6 +1072,40 @@ private fun ItemFormContent(
         NumberField("Saturated fat (g)", state.saturatedFat100g, viewModel::updateSaturatedFat)
         NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
         NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        // Same 3-state "Auto"/Yes/No override as the edit-existing-item
+        // dialog (see AddItemUiState.countsAsAddedSugar's doc comment) -
+        // previously only reachable by saving the item first and then
+        // editing it.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = viewModel::cycleCountsAsAddedSugar)
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "Counts as added sugar",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                when (state.countsAsAddedSugar) {
+                    null -> "Auto"
+                    true -> "Yes"
+                    false -> "No"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Text(
+            "\"Auto\" counts scanned/manual items but not raw USDA ingredients (e.g. a banana). Override if this item is a whole food sold as a product, like frozen fruit.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
         NumberField("Fiber (g)", state.fiber100g, viewModel::updateFiber)
         NumberField("Protein (g)", state.protein100g, viewModel::updateProtein)
         NumberField("Salt (g)", state.saltG100g, viewModel::updateSalt, isLast = true)

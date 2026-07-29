@@ -1,6 +1,7 @@
 package com.mealtracker.android.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.ui.components.CreateServingDialog
 import com.mealtracker.android.ui.components.ItemQuantityDialog
 import com.mealtracker.android.ui.components.ItemResultsList
+import kotlin.math.roundToInt
 
 /**
  * Entry point for the meal-detail add sheet's "Create" method -- just
@@ -193,20 +195,59 @@ private fun CreateRecipeIngredientsScreen(
                 Text("Added so far", style = MaterialTheme.typography.titleSmall)
                 state.ingredients.forEach { row ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // Tap the row itself to edit quantity/serving
+                            // (reopens the same ItemQuantityDialog used to
+                            // add it, pre-filled with what's actually
+                            // stored - see CreateRecipeIngredientRow's doc
+                            // comment) instead of the old delete-and-re-add
+                            // dance.
+                            .clickable { viewModel.openQuantityPicker(row.item, lastLoggedAmounts) }
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            "${row.item.name} \u00b7 ${"%.0f".format(row.quantityG)}g",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { viewModel.removeIngredient(row.item.itemId) }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Remove ${row.item.name}")
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                                .background(com.mealtracker.android.ui.components.CatalogVisuals.backgroundFor(row.item.type)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (row.item.imagePath != null) {
+                                coil3.compose.AsyncImage(
+                                    model = com.mealtracker.android.BuildConfig.BASE_URL + row.item.imagePath,
+                                    contentDescription = null,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    com.mealtracker.android.ui.components.CatalogVisuals.iconFor(row.item.type),
+                                    contentDescription = null,
+                                    tint = com.mealtracker.android.ui.components.CatalogVisuals.iconTint(),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(row.item.name, style = MaterialTheme.typography.bodyMedium)
+                            val servingSuffix = row.servingSize?.let { " (${formatQuantity(row.grams)}g)" } ?: ""
+                            Text(
+                                "${formatQuantity(row.quantity)}${row.servingSize?.let { " ${it.name}" } ?: "g"}$servingSuffix",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("${row.kcal.roundToInt()} Cal", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                RecipeTotalsPreviewCard(state.totalsPreview, state.perServingPreview)
+
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
                 Button(
                     onClick = { viewModel.save() },
                     enabled = state.isSaveValid && !state.isSaving,
@@ -286,18 +327,22 @@ private fun CreateRecipeIngredientsScreen(
     }
 
     if (state.itemForQuantityPicker != null) {
+        val isEditingExisting = state.ingredients.any { it.item.itemId == state.itemForQuantityPicker!!.itemId }
         ItemQuantityDialog(
             item = state.itemForQuantityPicker!!,
             quantityInput = state.quantityPickerInput,
             servingSizeId = state.quantityPickerServingSizeId,
             isSaving = false,
             error = null,
-            confirmLabel = "Add ingredient",
+            confirmLabel = if (isEditingExisting) "Update ingredient" else "Add ingredient",
             onQuantityChange = viewModel::updateQuantityPickerInput,
             onServingChange = viewModel::updateQuantityPickerServing,
             onCreateNewServing = { viewModel.openCreateServingDialog() },
             onConfirm = { viewModel.confirmQuantityPicker() },
-            onDismiss = { viewModel.dismissQuantityPicker() }
+            onDismiss = { viewModel.dismissQuantityPicker() },
+            onRemove = if (isEditingExisting) {
+                { viewModel.removeIngredient(state.itemForQuantityPicker!!.itemId) }
+            } else null
         )
     }
 
@@ -311,6 +356,40 @@ private fun CreateRecipeIngredientsScreen(
             onWeightChange = viewModel::updateNewServingWeightG,
             onConfirm = { viewModel.createServing() },
             onDismiss = { viewModel.dismissCreateServingDialog() }
+        )
+    }
+}
+
+/** Shows the recipe's running total AND per-serving macros, computed
+ * live from whatever's currently in the ingredient list (see
+ * RecipeTotalsPreview's own doc comment) - previously this information
+ * was only available after saving, since the screen had no client-side
+ * math of its own and just waited on the created Recipe's own totals. */
+@Composable
+private fun RecipeTotalsPreviewCard(total: RecipeTotalsPreview, perServing: RecipeTotalsPreview) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "${total.kcal.roundToInt()} Cal total",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                "${perServing.kcal.roundToInt()} Cal / serving",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
+        Text(
+            "Per serving: ${perServing.proteinG.roundToInt()}P \u00b7 ${perServing.fatG.roundToInt()}F \u00b7 " +
+                "${perServing.carbsG.roundToInt()}C \u00b7 ${perServing.fiberG.roundToInt()}Fi",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

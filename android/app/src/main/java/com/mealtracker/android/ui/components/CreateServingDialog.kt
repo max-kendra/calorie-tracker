@@ -23,7 +23,15 @@ import androidx.compose.ui.unit.dp
  * /items/{id}/serving-sizes), just needed a client UI to reach it.
  * Shared across every place that offers "+ Create new serving" (meal
  * logging, recipe ingredient picking) rather than each maintaining its
- * own copy. */
+ * own copy.
+ *
+ * Also doubles as the EDIT dialog for an existing serving (isEditing) -
+ * same form, just PATCHing instead of POSTing and offering delete. The
+ * backend's update_serving_size/delete_serving_size endpoints existed
+ * from the start; this was purely a missing client entry point (see
+ * design discussion: "let the user delete and edit existing servings
+ * per-item" - previously the only way to fix a wrong serving was
+ * deleting the whole item and starting over). */
 @Composable
 fun CreateServingDialog(
     name: String,
@@ -33,11 +41,17 @@ fun CreateServingDialog(
     onNameChange: (String) -> Unit,
     onWeightChange: (String) -> Unit,
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isEditing: Boolean = false,
+    // Non-null only when editing an existing serving - renders a small
+    // red "Delete" text below Cancel, same "smaller tappable text"
+    // convention used elsewhere for a destructive secondary action
+    // (e.g. ItemQuantityDialog's own onRemove).
+    onDelete: (() -> Unit)? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New serving") },
+        title = { Text(if (isEditing) "Edit serving" else "New serving") },
         text = {
             val focusManager = LocalFocusManager.current
             Column {
@@ -67,11 +81,23 @@ fun CreateServingDialog(
                 if (error != null) {
                     Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
+                if (onDelete != null) {
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                    TextButton(onClick = onDelete, enabled = !isCreating) {
+                        Text("Delete this serving", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = onConfirm, enabled = !isCreating) {
-                Text(if (isCreating) "Creating..." else "Create")
+                Text(
+                    if (isCreating) {
+                        if (isEditing) "Saving..." else "Creating..."
+                    } else {
+                        if (isEditing) "Save" else "Create"
+                    }
+                )
             }
         },
         dismissButton = {

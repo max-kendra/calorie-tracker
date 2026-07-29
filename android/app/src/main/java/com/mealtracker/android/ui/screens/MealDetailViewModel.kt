@@ -263,6 +263,17 @@ data class MealDetailUiState(
     val isCreatingServing: Boolean = false,
     val createServingError: String? = null,
 
+    // Edit (pencil)/delete on an EXISTING serving - reached from the
+    // same unit dropdown as "Create new serving" above, just tapping an
+    // already-listed serving's edit icon instead. editingServingId is
+    // the discriminator for "dialog open in edit mode" (nested under
+    // itemToLog same as the creation state above).
+    val editingServingId: Int? = null,
+    val editServingName: String = "",
+    val editServingWeightG: String = "",
+    val isSavingServing: Boolean = false,
+    val editServingError: String? = null,
+
     // Edit (pencil) button on the item info page - name + macros only.
     // Nested under itemToLog same as the serving-creation state above.
     val showEditItemDialog: Boolean = false,
@@ -1375,6 +1386,107 @@ class MealDetailViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(
                     isCreatingServing = false,
                     createServingError = e.message ?: "Couldn't create that serving"
+                )
+            }
+        }
+    }
+
+    // --- Edit/delete an EXISTING serving (pencil icon next to a
+    // serving in the same unit dropdown "Create new serving" is in) ---
+
+    fun openEditServingDialog(servingId: Int) {
+        val item = _uiState.value.itemToLog ?: return
+        val serving = item.servingSizes.find { it.id == servingId } ?: return
+        _uiState.value = _uiState.value.copy(
+            editingServingId = servingId,
+            editServingName = serving.name,
+            editServingWeightG = serving.weightG,
+            editServingError = null
+        )
+    }
+
+    fun dismissEditServingDialog() {
+        _uiState.value = _uiState.value.copy(editingServingId = null, editServingError = null)
+    }
+
+    fun updateEditServingName(value: String) {
+        _uiState.value = _uiState.value.copy(editServingName = value)
+    }
+
+    fun updateEditServingWeight(value: String) {
+        _uiState.value = _uiState.value.copy(editServingWeightG = value)
+    }
+
+    /** Same "update itemToLog from the returned Item" reasoning as
+     * createNewServing - the dropdown needs to reflect the corrected
+     * name/weight immediately, not just on next reload. If the serving
+     * being edited is also the one currently selected for THIS log
+     * (logServingSizeId), a weight correction changes what quantity
+     * means in grams - deliberately left alone rather than silently
+     * rescaling the already-typed quantity, since "2 slices" should
+     * still mean "2 of whatever a slice now weighs," not have its
+     * gram total quietly preserved by changing the 2. */
+    fun saveEditingServing() {
+        val state = _uiState.value
+        val item = state.itemToLog ?: return
+        val servingId = state.editingServingId ?: return
+        val name = state.editServingName.trim()
+        val weightG = state.editServingWeightG.toDoubleOrNull()
+        if (name.isEmpty()) {
+            _uiState.value = state.copy(editServingError = "Enter a name")
+            return
+        }
+        if (weightG == null || weightG <= 0.0) {
+            _uiState.value = state.copy(editServingError = "Enter a valid weight in grams")
+            return
+        }
+
+        _uiState.value = state.copy(isSavingServing = true, editServingError = null)
+        viewModelScope.launch {
+            try {
+                val updatedItem = ApiClient.service.updateServingSize(item.itemId, servingId, name, weightG)
+                _uiState.value = _uiState.value.copy(
+                    isSavingServing = false,
+                    editingServingId = null,
+                    itemToLog = updatedItem
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isSavingServing = false,
+                    editServingError = e.message ?: "Couldn't save that serving"
+                )
+            }
+        }
+    }
+
+    /** Backend blocks this via FK constraint (400) if any log/meal_plan
+     * still references this serving_size_id (see delete_serving_size) -
+     * surfaced as editServingError as-is, same as every other
+     * delete-with-references failure in this app rather than a
+     * separate pre-check. If the serving being deleted is the one
+     * currently selected for THIS log, falls back to raw grams (same
+     * as if "g" had been picked from the dropdown) rather than leaving
+     * logServingSizeId pointing at something that no longer exists. */
+    fun deleteEditingServing() {
+        val state = _uiState.value
+        val item = state.itemToLog ?: return
+        val servingId = state.editingServingId ?: return
+
+        _uiState.value = state.copy(isSavingServing = true, editServingError = null)
+        viewModelScope.launch {
+            try {
+                ApiClient.service.deleteServingSize(item.itemId, servingId)
+                val updatedItem = item.copy(servingSizes = item.servingSizes.filterNot { it.id == servingId })
+                _uiState.value = _uiState.value.copy(
+                    isSavingServing = false,
+                    editingServingId = null,
+                    itemToLog = updatedItem,
+                    logServingSizeId = if (_uiState.value.logServingSizeId == servingId) null else _uiState.value.logServingSizeId
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isSavingServing = false,
+                    editServingError = e.message ?: "Couldn't delete that serving - it may still be used by a log"
                 )
             }
         }
