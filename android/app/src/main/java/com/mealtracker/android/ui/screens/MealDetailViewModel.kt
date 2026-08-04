@@ -250,6 +250,12 @@ data class MealDetailUiState(
     // all, it just re-fetched the live recipe unconditionally).
     val recipeLogFrozenTotals: ExtendedNutritionTotals? = null,
     val recipeLogFrozenIngredients: List<RecipeIngredient>? = null,
+    // The recipe's frozen total servings yield, straight from
+    // log.recipeServingsLogged - see that field's own doc comment.
+    // Paired with recipeLogQuantityInput (how many were consumed) to
+    // show "X of Y servings" for a logged instance, instead of just the
+    // consumed count on its own.
+    val recipeLogFrozenServingsYield: String? = null,
 
     // Edit mode (pencil button) on the recipe info screen -- name and
     // servings only, same "edit metadata separately from ingredients"
@@ -412,6 +418,117 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
+    /** Same purpose as refreshSearchAfterAdd, but for actions that only
+     * ever affect ITEM recency - logging/editing an item bumps that
+     * item's own last_logged_at server-side, but has no effect
+     * whatsoever on any recipe's ordering (see items.py/recipes.py:
+     * last_logged_at is tracked independently per type). Skips the
+     * recipe fetch entirely rather than needlessly re-running it for a
+     * result that would come back identical to what's already shown -
+     * this used to go through refreshSearchAfterAdd like everything
+     * else, which re-fetched recipes on every single item log for no
+     * reason, and after the ALL filter's "recent" loading state was
+     * fixed to correctly wait on that recipe fetch too (see
+     * isLoadingRecentRecipes' doc comment), that unnecessary refetch
+     * started actually blocking the UI with a visible spinner instead
+     * of just quietly happening in the background (see design
+     * discussion: "whenever i log an item now, the whole screen
+     * disappears behind the loading animation for a split second"). */
+    fun refreshItemsAfterAdd() {
+        val query = _uiState.value.searchQuery
+        if (query.isBlank()) {
+            loadRecentItems(includeRecipes = false)
+            return
+        }
+
+        val filter = _uiState.value.searchFilter
+        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) return // nothing item-related here
+
+        // Re-runs ONLY the items half of the current search, leaving
+        // recipeSearchResults exactly as-is - same reasoning as above,
+        // just for the typed-search case instead of the blank-query
+        // "recent" one.
+        val itemType = when (filter) {
+            SearchFilter.PRODUCT -> "product"
+            SearchFilter.INGREDIENT -> "ingredient"
+            else -> null
+        }
+        searchJob?.cancel()
+        _uiState.value = _uiState.value.copy(isSearching = true)
+        searchJob = viewModelScope.launch {
+            try {
+                val results = ApiClient.service.searchItems(query = query, type = itemType)
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearching = false, searchResults = results)
+                }
+            } catch (e: Exception) {
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearching = false)
+                }
+            }
+        }
+    }
+
+    /** Mirror image of refreshItemsAfterAdd - for actions that only
+     * ever affect RECIPE (or meal) recency: logging/editing/deleting a
+     * recipe, changing its photo, or saving one from the current
+     * meal's items (saveAsMeal). None of these touch any item's
+     * last_logged_at, so this skips the item fetch entirely rather
+     * than needlessly re-running it (see refreshItemsAfterAdd's own
+     * doc comment for the matching item-side reasoning, and design
+     * discussion: "but what if i log a recipe?" - the recipe fetch
+     * itself is NOT skippable here, since recipe ordering genuinely
+     * did change and the list needs to reflect that; only the
+     * unrelated item fetch is). */
+    fun refreshRecipesAfterAdd() {
+        val query = _uiState.value.searchQuery
+        if (query.isBlank()) {
+            loadRecentItems(includeItems = false)
+            return
+        }
+
+        val filter = _uiState.value.searchFilter
+        if (filter == SearchFilter.PRODUCT || filter == SearchFilter.INGREDIENT) return // no recipe list shown under these
+
+        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
+            val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
+            _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
+            searchJob?.cancel()
+            searchJob = viewModelScope.launch {
+                try {
+                    val results = ApiClient.service.searchRecipes(query = query, recipeType = recipeType)
+                    if (_uiState.value.searchQuery == query) {
+                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
+                    }
+                } catch (e: Exception) {
+                    if (_uiState.value.searchQuery == query) {
+                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false)
+                    }
+                }
+            }
+            return
+        }
+
+        // ALL
+        allFilterRecipeSearchJob?.cancel()
+        _uiState.value = _uiState.value.copy(isSearchingRecipes = true, allFilterRecipeError = null)
+        allFilterRecipeSearchJob = viewModelScope.launch {
+            try {
+                val results = ApiClient.service.searchRecipes(query = query, recipeType = null)
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
+                }
+            } catch (e: Exception) {
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(
+                        isSearchingRecipes = false,
+                        allFilterRecipeError = "Couldn't search recipes: ${e.message ?: e.javaClass.simpleName}"
+                    )
+                }
+            }
+        }
+    }
+
     fun load(date: LocalDate, mealType: String) {
         // Preserves sheet state (mode, search query/results, recent
         // items) across this reset - logItemQuickly() calls load()
@@ -522,10 +639,27 @@ class MealDetailViewModel : ViewModel() {
      * list with products and ingredients and select ingredient,
      * everything stays the same" - that's this blank-query "recent"
      * state specifically, non-blank search already filtered correctly). */
-    private fun loadRecentItems() {
+    /** includeRecipes=false skips the RECIPE/MEAL and ALL branches'
+     * recipe fetch entirely (still fetches items either way, unless
+     * includeItems=false) - used by refreshItemsAfterAdd for actions
+     * that only touch item recency (logging/editing an item), where
+     * nothing about recipe ordering changed. See that function's own
+     * doc comment for why this matters: re-fetching recipes on every
+     * trivial item log otherwise shows a visible loading flash (GET
+     * /recipes is meaningfully slower than GET /items - see
+     * isLoadingRecentRecipes' doc comment) for a fetch whose result
+     * would be identical to what's already shown.
+     *
+     * includeItems=false is the mirror image, used by
+     * refreshRecipesAfterAdd for actions that only touch RECIPE
+     * recency (logging/editing/deleting a recipe/meal) - no item's
+     * last_logged_at ever changes from those, so there's equally no
+     * reason to re-fetch items there either. */
+    private fun loadRecentItems(includeRecipes: Boolean = true, includeItems: Boolean = true) {
         val filter = _uiState.value.searchFilter
 
         if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
+            if (!includeRecipes) return // nothing recipe-related to refresh under this call
             val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
             viewModelScope.launch {
                 try {
@@ -546,7 +680,7 @@ class MealDetailViewModel : ViewModel() {
         // design discussion: "they only show up if we filter for
         // recipes... not with the rest of the items when it's set to
         // show all").
-        if (filter == SearchFilter.ALL) {
+        if (filter == SearchFilter.ALL && includeRecipes) {
             _uiState.value = _uiState.value.copy(isLoadingRecentRecipes = true)
             viewModelScope.launch {
                 try {
@@ -564,6 +698,8 @@ class MealDetailViewModel : ViewModel() {
                 }
             }
         }
+
+        if (!includeItems) return
 
         val itemType = when (filter) {
             SearchFilter.PRODUCT -> "product"
@@ -744,7 +880,7 @@ class MealDetailViewModel : ViewModel() {
                 }
                 _uiState.value = _uiState.value.copy(quickLoggingRecipeId = null)
                 load(date, state.mealType)
-                refreshSearchAfterAdd()
+                refreshRecipesAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     quickLoggingRecipeId = null,
@@ -766,7 +902,8 @@ class MealDetailViewModel : ViewModel() {
             recipeLogQuantityInput = "1",
             recipeLogInstanceId = null,
             recipeLogFrozenTotals = null,
-            recipeLogFrozenIngredients = null
+            recipeLogFrozenIngredients = null,
+            recipeLogFrozenServingsYield = null
         )
         viewModelScope.launch {
             try {
@@ -787,7 +924,8 @@ class MealDetailViewModel : ViewModel() {
             recipeDetailError = null,
             recipeLogInstanceId = null,
             recipeLogFrozenTotals = null,
-            recipeLogFrozenIngredients = null
+            recipeLogFrozenIngredients = null,
+            recipeLogFrozenServingsYield = null
         )
     }
 
@@ -857,7 +995,7 @@ class MealDetailViewModel : ViewModel() {
                 // last_logged_at server-side (see update_log on the
                 // backend), and the recipe search/recent list needs to
                 // reflect that too, not just brand-new logs.
-                refreshSearchAfterAdd()
+                refreshRecipesAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoggingRecipeDetail = false,
@@ -936,7 +1074,7 @@ class MealDetailViewModel : ViewModel() {
                     isEditingRecipe = false,
                     recipeToView = updated
                 )
-                refreshSearchAfterAdd()
+                refreshRecipesAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isSavingRecipeEdit = false,
@@ -967,7 +1105,7 @@ class MealDetailViewModel : ViewModel() {
                     showDeleteRecipeConfirm = false,
                     recipeToView = null
                 )
-                refreshSearchAfterAdd()
+                refreshRecipesAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isDeletingRecipe = false,
@@ -1209,7 +1347,7 @@ class MealDetailViewModel : ViewModel() {
                     RecipeUpdateRequest(imagePath = imagePath)
                 )
                 _uiState.value = _uiState.value.copy(isUploadingRecipeImage = false, recipeToView = updated)
-                refreshSearchAfterAdd()
+                refreshRecipesAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isUploadingRecipeImage = false,
@@ -1268,9 +1406,9 @@ class MealDetailViewModel : ViewModel() {
                 )
                 // Refresh this meal's totals/logs, reset search, and
                 // refetch recent items (this item just became the most
-                // recent) - see refreshSearchAfterAdd's doc comment.
+                // recent) - see refreshItemsAfterAdd's doc comment.
                 load(date, state.mealType)
-                refreshSearchAfterAdd()
+                refreshItemsAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     quickLoggingItemId = null,
@@ -1401,8 +1539,12 @@ class MealDetailViewModel : ViewModel() {
                 // servings as 100g, even if that's not the saved value,
                 // we're overriding the display to 100g somewhere" -- it
                 // wasn't an override, it was this list never refreshing
-                // after an edit).
-                refreshSearchAfterAdd()
+                // after an edit). Uses refreshItemsAfterAdd, not
+                // refreshSearchAfterAdd - see that function's own doc
+                // comment: an item log/edit never affects recipe
+                // ordering, so there's no reason to re-fetch recipes
+                // here too.
+                refreshItemsAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoggingItem = false,
@@ -1738,7 +1880,8 @@ class MealDetailViewModel : ViewModel() {
                 log.ingredients.map { it.toRecipeIngredient() }
             } else {
                 null
-            }
+            },
+            recipeLogFrozenServingsYield = if (log.hasIngredientSnapshot) log.recipeServingsLogged else null
         )
         viewModelScope.launch {
             try {
@@ -1828,7 +1971,7 @@ class MealDetailViewModel : ViewModel() {
                 // (logItemQuickly, confirmLogItemQuantity, etc) already
                 // calls this after a successful save; this one just
                 // hadn't been wired up to do the same.
-                refreshSearchAfterAdd()
+                refreshRecipesAfterAdd()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isSavingMeal = false,

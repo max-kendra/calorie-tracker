@@ -136,6 +136,14 @@ data class Log(
     // recipe, i still get the current recipe's ingredients, not
     // whatever ingredients had been logged").
     val ingredients: List<LoggedRecipeIngredientOut> = emptyList(),
+    // The recipe's total servings YIELD at the time this was logged
+    // (e.g. "4", for a recipe that made 4 servings) - only set for
+    // recipe_id logs. `quantity` above is how many of those servings
+    // were actually consumed; this is the denominator needed to make
+    // sense of that ratio once the recipe's own servings count has
+    // since been edited (see backend Log.recipe_servings_logged's own
+    // doc comment).
+    @SerialName("recipe_servings_logged") val recipeServingsLogged: String? = null,
     // True for every log created after the ingredient-snapshot feature
     // shipped (item AND recipe logs alike) - False only for rows that
     // predate it. Lets the client tell "ingredients is empty because

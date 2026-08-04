@@ -485,6 +485,13 @@ class LogOut(LoggableEntryBase):
     # have no snapshot to recover - see that migration's own note on
     # why backfill isn't possible here). None/empty for item-based logs.
     ingredients: List[LoggedRecipeIngredientOut] = []
+    # The recipe's total servings YIELD at the time this was logged
+    # (e.g. 4, for a recipe that made 4 servings) - only set for
+    # recipe_id logs. `quantity` above is how many of those servings
+    # were actually consumed; this is the denominator needed to make
+    # sense of that number once the recipe's own servings count has
+    # since been edited (see that migration's own doc comment).
+    recipe_servings_logged: Optional[Decimal] = None
     # True for every log created after this feature shipped, item or
     # recipe alike. Lets the client tell "ingredients is empty because
     # the recipe genuinely had none" apart from "empty because this log

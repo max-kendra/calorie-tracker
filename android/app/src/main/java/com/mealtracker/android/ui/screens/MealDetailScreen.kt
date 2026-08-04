@@ -737,6 +737,7 @@ fun MealDetailScreen(
             logInstanceId = state.recipeLogInstanceId,
             frozenTotals = state.recipeLogFrozenTotals,
             frozenIngredients = state.recipeLogFrozenIngredients,
+            frozenServingsYield = state.recipeLogFrozenServingsYield,
             onDeleteInstance = { viewModel.deleteRecipeLogInstance() },
             isEditing = state.isEditingRecipe,
             editName = state.editRecipeName,
@@ -1239,6 +1240,12 @@ private fun RecipeInfoScreen(
     // ACTUALLY logged, not what the recipe currently is.
     frozenTotals: ExtendedNutritionTotals?,
     frozenIngredients: List<RecipeIngredient>?,
+    // Paired with `quantityInput` (servings consumed) to show "X of Y
+    // servings" - see MealDetailUiState.recipeLogFrozenServingsYield's
+    // doc comment. Null whenever frozenTotals/frozenIngredients are
+    // (no snapshot to pull it from), or if this particular log's
+    // snapshot predates recipe_servings_logged existing.
+    frozenServingsYield: String?,
     onDeleteInstance: () -> Unit,
     isEditing: Boolean,
     editName: String,
@@ -1538,7 +1545,10 @@ private fun RecipeInfoScreen(
                         // reference value - those two only coincide if
                         // the recipe hasn't changed since.
                         if (!isEditing && logInstanceId != null && frozenTotals != null) {
-                            "${frozenTotals.kcal} Cal logged"
+                            val servingsSuffix = frozenServingsYield?.let { totalServings ->
+                                " (${quantityInput} of ${formatQuantity(totalServings.toDoubleOrNull() ?: 1.0)} servings)"
+                            } ?: ""
+                            "${frozenTotals.kcal} Cal logged$servingsSuffix"
                         } else if (recipe.recipeType == "meal") {
                             "${recipe.totalsPerServing.kcal} Cal"
                         } else {

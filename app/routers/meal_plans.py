@@ -32,7 +32,7 @@ def _plan_to_out(plan: MealPlan, db: Session) -> MealPlanOut:
     it's committed (see design doc: meal_plans stays live-reference,
     unlike logs which freeze at write time).
     """
-    totals, item_name, recipe_name, _, _, _, _ = _validate_and_compute(plan, db)
+    totals, item_name, recipe_name, _, _, _, _, _ = _validate_and_compute(plan, db)
     return MealPlanOut(
         id=plan.id,
         date=plan.date,
@@ -143,7 +143,9 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
 
     log_ids = []
     for plan in plans:
-        totals, item_name, recipe_name, image_path, _, _, ingredient_snapshot = _validate_and_compute(plan, db)
+        totals, item_name, recipe_name, image_path, _, _, ingredient_snapshot, recipe_servings = _validate_and_compute(
+            plan, db
+        )
 
         log = Log(
             date=plan.date,
@@ -155,6 +157,7 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
             item_name_logged=item_name,
             recipe_name_logged=recipe_name,
             image_path_logged=image_path,
+            recipe_servings_logged=recipe_servings,
             has_ingredient_snapshot=True,
             kcal_logged=totals.kcal,
             protein_g_logged=totals.protein_g,

@@ -38,25 +38,32 @@ router = APIRouter(
 
 def _validate_and_compute(payload, db: Session) -> tuple[
     RawTotals, Optional[str], Optional[str], Optional[str], Optional[str], Optional[Decimal],
-    Optional[list[tuple["RecipeIngredient", RawTotals, Decimal]]],
+    Optional[list[tuple["RecipeIngredient", RawTotals, Decimal]]], Optional[Decimal],
 ]:
     """
     Shared validation + macro computation for both logs and meal_plans.
     Returns (totals, item_name, recipe_name, image_path, serving_name,
-    serving_weight_g, ingredient_snapshot) for convenience/display -
-    image_path/serving_name/serving_weight_g denormalized onto LogOut so
-    the client can show a thumbnail and the actual unit logged (e.g. "2
-    slices (75g)") without a separate lookup per row. Without
-    serving_name, the client only has serving_size_id and has no way to
-    resolve what unit that actually was, which is why the log list was
-    always showing quantity in grams even when a named serving was used;
-    serving_weight_g on top of that is what lets it also show the gram
-    equivalent alongside the serving name, rather than just the serving
-    name on its own.
+    serving_weight_g, ingredient_snapshot, recipe_servings) for
+    convenience/display - image_path/serving_name/serving_weight_g
+    denormalized onto LogOut so the client can show a thumbnail and the
+    actual unit logged (e.g. "2 slices (75g)") without a separate lookup
+    per row. Without serving_name, the client only has serving_size_id
+    and has no way to resolve what unit that actually was, which is why
+    the log list was always showing quantity in grams even when a named
+    serving was used; serving_weight_g on top of that is what lets it
+    also show the gram equivalent alongside the serving name, rather
+    than just the serving name on its own.
 
     ingredient_snapshot is only non-None for recipe_id logs - see
     compute_recipe_ingredient_snapshot's own docstring for why this needs
     to be captured once at create_log time rather than resolved live.
+
+    recipe_servings is the recipe's total servings YIELD at this exact
+    moment (only non-None for recipe_id logs) - frozen onto
+    Log.recipe_servings_logged the same way, for the same reason: it's
+    the denominator needed to make sense of "how many servings were
+    consumed" once the recipe's own servings count has since been edited
+    (see that column's own doc comment on the Log model).
     """
     if (payload.item_id is None) == (payload.recipe_id is None):
         raise HTTPException(
@@ -85,7 +92,7 @@ def _validate_and_compute(payload, db: Session) -> tuple[
         totals = compute_item_totals(item, payload.quantity, serving)
         return (
             totals, item.name, None, item.image_path,
-            serving.name if serving else None, serving.weight_g if serving else None, None,
+            serving.name if serving else None, serving.weight_g if serving else None, None, None,
         )
 
     else:
@@ -100,7 +107,7 @@ def _validate_and_compute(payload, db: Session) -> tuple[
 
         totals = compute_recipe_totals_for_quantity(recipe, payload.quantity)
         ingredient_snapshot = compute_recipe_ingredient_snapshot(recipe, payload.quantity)
-        return totals, None, recipe.name, recipe.image_path, None, None, ingredient_snapshot
+        return totals, None, recipe.name, recipe.image_path, None, None, ingredient_snapshot, recipe.servings
 
 
 def _log_to_out(
@@ -151,6 +158,7 @@ def _log_to_out(
         quantity=log.quantity,
         ingredients=ingredients,
         has_ingredient_snapshot=log.has_ingredient_snapshot,
+        recipe_servings_logged=log.recipe_servings_logged,
         logged_at=log.logged_at,
         kcal_logged=ceil_int(log.kcal_logged),
         protein_g_logged=ceil_int(log.protein_g_logged),
@@ -178,7 +186,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     LoggedRecipeIngredient rows freeze the same way, for the same reason -
     see Log's and LoggedRecipeIngredient's own docstrings.
     """
-    totals, item_name, recipe_name, image_path, serving_name, serving_weight_g, ingredient_snapshot = (
+    totals, item_name, recipe_name, image_path, serving_name, serving_weight_g, ingredient_snapshot, recipe_servings = (
         _validate_and_compute(payload, db)
     )
 
@@ -192,6 +200,7 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         item_name_logged=item_name,
         recipe_name_logged=recipe_name,
         image_path_logged=image_path,
+        recipe_servings_logged=recipe_servings,
         has_ingredient_snapshot=True,
         kcal_logged=totals.kcal,
         protein_g_logged=totals.protein_g,
@@ -561,9 +570,17 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
         item_name, recipe_name, image_path = log.item_name_logged, log.recipe_name_logged, log.image_path_logged
         serving_name, serving_weight_g = None, None
     else:
-        totals, item_name, recipe_name, image_path, serving_name, serving_weight_g, _ = _validate_and_compute(
-            merged, db
+        totals, item_name, recipe_name, image_path, serving_name, serving_weight_g, _, recipe_servings = (
+            _validate_and_compute(merged, db)
         )
+        # Opportunistic: a legacy recipe log with no ingredient snapshot
+        # (the branch above is for logs that DO have one) had no
+        # recipe_servings_logged either - fill it in now from whatever
+        # the recipe's servings count is at this edit, same
+        # "recompute against the live recipe" fallback this whole
+        # branch already uses for everything else.
+        if log.recipe_id is not None:
+            log.recipe_servings_logged = recipe_servings
 
     log.serving_size_id = merged.serving_size_id
     log.quantity = merged.quantity

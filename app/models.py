@@ -287,6 +287,16 @@ class Log(Base):
     item_name_logged = Column(String, nullable=True)
     recipe_name_logged = Column(String, nullable=True)
     image_path_logged = Column(String, nullable=True)
+    # Freezes recipe.servings (the recipe's total YIELD at log time,
+    # e.g. "made 4 servings") - only meaningful for recipe_id logs.
+    # quantity (below) already freezes how many of those servings YOU
+    # consumed; this is the other half of that fraction, needed to
+    # answer "1.5 servings out of how many total" for an old log once
+    # the recipe's own servings count has since been edited. Doesn't
+    # affect the nutrition math (kcal_logged etc and the ingredient
+    # snapshot are already absolute, computed once at creation time) -
+    # this is purely so that ratio remains answerable historically.
+    recipe_servings_logged = Column(Numeric, nullable=True)
     # True for every log created after the name/ingredient-freeze feature
     # shipped (item AND recipe logs alike) - False only for pre-existing
     # rows migrated in before it existed. Exists so the client can tell
