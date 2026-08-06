@@ -1073,14 +1073,15 @@ private fun ItemFormContent(
         NumberField("Carbs (g)", state.carbs100g, viewModel::updateCarbs)
         NumberField("Sugar (g)", state.sugar100g, viewModel::updateSugar)
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-        // Same 3-state "Auto"/Yes/No override as the edit-existing-item
-        // dialog (see AddItemUiState.countsAsAddedSugar's doc comment) -
-        // previously only reachable by saving the item first and then
-        // editing it.
+        // Plain Yes/No toggle, set manually at creation - no more
+        // "Auto" guess (see AddItemUiState.countsAsAddedSugar's doc
+        // comment for why the old origin-based heuristic was dropped:
+        // "product means it has a barcode, which frozen berries do",
+        // so there was never a reliable field to guess this from).
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = viewModel::cycleCountsAsAddedSugar)
+                .clickable(onClick = viewModel::toggleCountsAsAddedSugar)
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -1091,17 +1092,13 @@ private fun ItemFormContent(
                 modifier = Modifier.weight(1f)
             )
             Text(
-                when (state.countsAsAddedSugar) {
-                    null -> "Auto"
-                    true -> "Yes"
-                    false -> "No"
-                },
+                if (state.countsAsAddedSugar) "Yes" else "No",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
         }
         Text(
-            "\"Auto\" counts scanned/manual items but not raw USDA ingredients (e.g. a banana). Override if this item is a whole food sold as a product, like frozen fruit.",
+            "Whether this item's sugar counts toward added-sugar tracking - e.g. yes for candy or soda, no for plain fruit, dairy, or other whole foods.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

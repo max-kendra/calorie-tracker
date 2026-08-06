@@ -165,14 +165,14 @@ data class AddItemUiState(
     // same rounded factor used on EU nutrition labels). This field
     // itself always holds SALT in grams, never sodium.
     val saltG100g: String = "",
-    // 3-state override, same "Auto"/Yes/No semantics as
-    // MealDetailViewModel's editItemCountsAsAddedSugar (see that
-    // field's doc comment) - null means "use the default heuristic"
-    // (counts scanned/manual items, not raw USDA ingredients), which is
-    // a real, distinct state a plain Boolean can't represent. Previously
-    // this override was only reachable by creating the item first and
-    // then editing it - there was no way to set it at creation time.
-    val countsAsAddedSugar: Boolean? = null,
+    // Whether this item's sugar counts toward "added sugar" tracking -
+    // a plain flag, no smart default (see design discussion: dropped
+    // the old origin-based "Auto" guess entirely - "product means it
+    // has a barcode, which frozen berries do", so neither origin nor
+    // type reliably distinguished a whole food from an added-sugar
+    // product). Starts unset/false and has to be set manually; the
+    // backend treats unset the same as false either way.
+    val countsAsAddedSugar: Boolean = false,
 
     val saveError: String? = null,
     val createdItem: Item? = null,
@@ -607,15 +607,11 @@ class AddItemViewModel : ViewModel() {
     fun updateSugar(value: String) { _uiState.value = _uiState.value.copy(sugar100g = value) }
     fun updateSaturatedFat(value: String) { _uiState.value = _uiState.value.copy(saturatedFat100g = value) }
     fun updateSalt(value: String) { _uiState.value = _uiState.value.copy(saltG100g = value) }
-    /** Cycles null -> true -> false -> null, same semantics/reasoning as
-     * MealDetailViewModel's cycleEditItemCountsAsAddedSugar. */
-    fun cycleCountsAsAddedSugar() {
-        val next = when (_uiState.value.countsAsAddedSugar) {
-            null -> true
-            true -> false
-            false -> null
-        }
-        _uiState.value = _uiState.value.copy(countsAsAddedSugar = next)
+    /** Plain on/off toggle - no more "Auto" state (see
+     * countsAsAddedSugar's own doc comment for why the old
+     * origin-based guess was dropped). */
+    fun toggleCountsAsAddedSugar() {
+        _uiState.value = _uiState.value.copy(countsAsAddedSugar = !_uiState.value.countsAsAddedSugar)
     }
 
     /** Lets the user go back and retake/reupload the nutrition label

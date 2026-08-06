@@ -46,14 +46,18 @@ class RawTotals:
     fat_g: Decimal
     fiber_g: Decimal
     sugar_g: Decimal
-    # Sugar excluding raw USDA-import-origin ingredients (see design
-    # discussion: "keep an eye on metrics" flagging bananas as a top
-    # sugar source, when added-sugar dietary guidance is about added/
-    # free sugars specifically, not sugar naturally occurring in whole
-    # foods). A heuristic, not a true added-vs-total-sugar distinction -
-    # packaged foods only ever give "carbs, of which sugars" with no
-    # further breakdown, so item origin (raw USDA ingredient vs a
-    # scanned/manual product) is the best available proxy.
+    # Sugar counted toward "added sugar" tracking, per each item's own
+    # explicit counts_as_added_sugar flag (see design discussion: "keep
+    # an eye on metrics" flagging bananas as a top sugar source, when
+    # added-sugar dietary guidance is about added/free sugars
+    # specifically, not sugar naturally occurring in whole foods).
+    # Packaged foods only ever give "carbs, of which sugars" with no
+    # further breakdown, so there's no way to derive this from the
+    # macros alone - it has to be set per item. Unset (None) is treated
+    # the same as False (not counted) - no origin/type-based guessing
+    # (see Item.countsAsAddedSugar's own doc comment for why that was
+    # dropped: neither field reliably distinguishes a whole food from
+    # an added-sugar product, since a barcode belongs to both equally).
     countable_sugar_g: Decimal
     saturated_fat_g: Decimal
     sodium_mg: Decimal
@@ -176,23 +180,15 @@ def compute_item_totals(
     factor = grams / Decimal("100")
     sugar_g = (item.sugar_100g or ZERO) * factor
 
-    if item.counts_as_added_sugar is not None:
-        # Manual override wins outright, regardless of origin -- see
-        # design discussion: "my third highest ranking added sugar
-        # source is frozen berry mix... this is silly". A whole food
-        # sold as a scanned/barcoded product (frozen fruit, dried fruit)
-        # has no reliable automatic signal to catch, so this is a
-        # deliberate per-item escape hatch rather than a smarter
-        # heuristic.
-        countable_sugar_g = sugar_g if item.counts_as_added_sugar else ZERO
-    else:
-        # Raw USDA-import ingredients (e.g. a banana) don't count toward
-        # "countable" sugar - see RawTotals.countable_sugar_g's doc
-        # comment. Everything else (scanned products, manually-entered
-        # items, OCR-assisted) does, since a packaged food's sugar figure
-        # could plausibly include added sugar and we have no finer-
-        # grained label data to separate it out.
-        countable_sugar_g = ZERO if item.origin == "usda_import" else sugar_g
+    # No more origin-based guessing (see design discussion: "product
+    # means it has a barcode, which frozen berries do" - origin/type
+    # were never a reliable signal for whether a food has added sugar
+    # in the first place, since a barcode can belong to frozen berries
+    # just as easily as a candy bar). counts_as_added_sugar is now a
+    # plain, explicit per-item flag set at creation time - unset (None,
+    # the same as False) simply means "not counted," full stop, rather
+    # than triggering any inference.
+    countable_sugar_g = sugar_g if item.counts_as_added_sugar else ZERO
 
     return RawTotals(
         kcal=(item.kcal_100g or ZERO) * factor,

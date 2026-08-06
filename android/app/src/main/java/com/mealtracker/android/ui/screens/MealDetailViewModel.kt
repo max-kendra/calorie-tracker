@@ -93,8 +93,30 @@ fun formatQuantity(value: Double): String =
  * MealDetailUiState.searchFilter's doc comment for why RECIPE/MEAL take
  * a completely different query/results path than ALL/PRODUCT/
  * INGREDIENT. */
+/** Which kind of thing the search tab is DISPLAYING - no longer
+ * affects what gets FETCHED at all (see loadRecentItems/
+ * updateSearchQuery's own doc comments) - both the items and recipes
+ * endpoints are always queried unfiltered (type=null/recipe_type=null)
+ * regardless of which chip is active, and each chip just picks/slices
+ * whichever of those two already-fetched lists it needs. Switching
+ * filters is therefore instant, no network call, and there's nothing
+ * left to merge/interleave/sort across types the way the old ALL
+ * filter had to (see design discussion: "the all section in the
+ * recents list just complicates everything... i guess i could just
+ * filter it instead of having a shared view" - this whole class of bug
+ * this conversation kept finding - the sort-by-last-logged bug, the
+ * loading-flash bug, the "switching filters does nothing" bug - all
+ * stemmed from that merged view, not from anything inherent to
+ * showing items vs recipes).
+ *
+ * ITEMS is the default and shows every item unfiltered by type
+ * (product AND ingredient together) - previously this was ALL's job
+ * combined with items; there's no separate PRODUCT filter anymore
+ * since "everything, minus ingredients" was never actually a
+ * meaningful distinct view - INGREDIENT (a real subset people want in
+ * isolation) is kept, PRODUCT (the arbitrary remainder) is not. */
 enum class SearchFilter(val label: String) {
-    ALL("All"), PRODUCT("Product"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
+    ITEMS("Items"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
 }
 
 data class LoggedAmount(val quantity: Double, val servingSizeId: Int?)
@@ -181,30 +203,23 @@ data class MealDetailUiState(
     val searchQuery: String = "",
     val searchResults: List<Item> = emptyList(),
     val isSearching: Boolean = false,
-    // Filter chips above the search results - ALL/PRODUCT/INGREDIENT
-    // search Items (with an optional type= param); RECIPE/MEAL search
-    // Recipes instead (recipe_type= param), a completely different
-    // result list/quick-log path since Recipes don't have per-100g
-    // macros or serving sizes the way Items do.
-    val searchFilter: SearchFilter = SearchFilter.ALL,
+    // Filter chips above the search results - purely which of the two
+    // already-fetched lists (items vs recipes) to DISPLAY, and how to
+    // slice it (Items = unfiltered, Ingredient/Recipe/Meal = narrowed
+    // by type) - see SearchFilter's own doc comment. Both
+    // searchResults/recipeSearchResults (and recentItems/recentRecipes)
+    // are always populated regardless of which filter is active, so
+    // changing this never triggers a network call.
+    val searchFilter: SearchFilter = SearchFilter.ITEMS,
     val recentRecipes: List<Recipe> = emptyList(),
     val recipeSearchResults: List<Recipe> = emptyList(),
     val isSearchingRecipes: Boolean = false,
-    // Blank-query ("recent") equivalent of isSearchingRecipes above -
-    // separate flag because loadRecentItems's ALL branch fetches
-    // recipes and items in two independent, unsynchronized coroutines
-    // (see that function's own doc comment). Without this, the ALL
-    // filter's "recent" view had no way to know the recipe half was
-    // still in flight, only the item half (isLoadingRecentItems) - and
-    // GET /recipes is reliably slower than GET /items (it eager-loads
-    // every recipe's full ingredient list), so items routinely finished
-    // first, the screen decided loading was over, and rendered an
-    // items-only list a beat before recipes actually arrived. Recipes
-    // WOULD still show up once that second fetch landed (the state
-    // update itself was never broken), but with no loading indicator
-    // covering that gap it looked exactly like "recipes never show up
-    // under All" (see design discussion: "meals and recipes only show
-    // up if we filter for them").
+    // Blank-query ("recent") loading flag for the recipes list -
+    // independent from isLoadingRecentItems since items and recipes
+    // are always fetched as two separate, unsynchronized coroutines
+    // (see loadRecentItems). Only relevant to the Recipe/Meal filters'
+    // own loading display now that fetching no longer depends on which
+    // filter is active - see SearchFilter's own doc comment.
     val isLoadingRecentRecipes: Boolean = false,
     // Same idea as quickLoggingItemId but for the recipe list.
     val quickLoggingRecipeId: Int? = null,
@@ -305,16 +320,17 @@ data class MealDetailUiState(
     // the UI can show a per-row spinner instead of a global one.
     val quickLoggingItemId: Int? = null,
     val quickLogError: String? = null,
-    // Surfaces a failure fetching recipes/meals for the ALL filter --
-    // this used to fail silently (a bare comment saying "not core
-    // functionality"), which meant a genuine failure looked identical
-    // to "there are just no recipes to show", and was completely
-    // undiagnosable from the UI (see design discussion: "this is
-    // genuinely infuriating, why is it so hard to just aggregate the
-    // recipe and item tables... it's only items in there again" - the
-    // actual bug, whatever it turns out to be, was invisible because of
-    // this silent catch, not necessarily the merge logic itself).
-    val allFilterRecipeError: String? = null,
+    // Surfaces a failure fetching recipes/meals - this used to fail
+    // silently (a bare comment saying "not core functionality"), which
+    // meant a genuine failure looked identical to "there are just no
+    // recipes to show", and was completely undiagnosable from the UI
+    // (see design discussion: "this is genuinely infuriating, why is
+    // it so hard to just aggregate the recipe and item tables... it's
+    // only items in there again"). No longer tied to a specific
+    // filter's fetch, since recipes are always fetched regardless of
+    // which chip is active (see SearchFilter's own doc comment) -
+    // shown whenever the Recipe/Meal display has one to show.
+    val recipeFetchError: String? = null,
 
     // Opens ItemLogPageDialog - used for BOTH logging a new item
     // (tapping a search result) AND editing an already-logged item
@@ -369,12 +385,14 @@ data class MealDetailUiState(
     // (food labels show salt, not sodium; converted at the boundary,
     // see saveItemEdit()).
     val editItemSaltG: String = "",
-    // Manual override for the origin-based "countable sugar" heuristic
-    // (see design discussion: "my third highest ranking added sugar
-    // source is frozen berry mix... this is silly"). Three-state:
-    // null = use the origin heuristic (default), true/false = force
-    // count/exclude regardless of origin.
-    val editItemCountsAsAddedSugar: Boolean? = null,
+    // Whether this item's sugar counts toward "added sugar" tracking -
+    // a plain flag, no smart default (see AddItemUiState.
+    // countsAsAddedSugar's own doc comment for why the old origin-based
+    // "Auto" guess was dropped). Existing items with a NULL value from
+    // before this change display as "No" here (unset == not counted,
+    // same as the backend treats it) - saving always writes back an
+    // explicit true/false from here on.
+    val editItemCountsAsAddedSugar: Boolean = false,
     val isSavingItemEdit: Boolean = false,
     val editItemError: String? = null
 )
@@ -409,6 +427,13 @@ class MealDetailViewModel : ViewModel() {
      * items directly. Clearing the search box is now an explicit, opt-
      * in action (the search field's own "x" button) rather than
      * something that happens as a side effect of adding something. */
+    /** Refetches whichever of items/recipes is still relevant to
+     * refresh after something changed - kept for symmetry/documentation
+     * purposes but no call site actually needs BOTH refreshed at once
+     * (see refreshItemsAfterAdd/refreshRecipesAfterAdd below - every
+     * action in this ViewModel affects exactly one side's recency,
+     * never both), so this just re-runs whatever's currently loaded for
+     * the active query, unconditionally on both fronts. */
     fun refreshSearchAfterAdd() {
         val query = _uiState.value.searchQuery
         if (query.isBlank()) {
@@ -418,115 +443,33 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    /** Same purpose as refreshSearchAfterAdd, but for actions that only
-     * ever affect ITEM recency - logging/editing an item bumps that
-     * item's own last_logged_at server-side, but has no effect
-     * whatsoever on any recipe's ordering (see items.py/recipes.py:
-     * last_logged_at is tracked independently per type). Skips the
-     * recipe fetch entirely rather than needlessly re-running it for a
-     * result that would come back identical to what's already shown -
-     * this used to go through refreshSearchAfterAdd like everything
-     * else, which re-fetched recipes on every single item log for no
-     * reason, and after the ALL filter's "recent" loading state was
-     * fixed to correctly wait on that recipe fetch too (see
-     * isLoadingRecentRecipes' doc comment), that unnecessary refetch
-     * started actually blocking the UI with a visible spinner instead
-     * of just quietly happening in the background (see design
-     * discussion: "whenever i log an item now, the whole screen
-     * disappears behind the loading animation for a split second"). */
+    /** Items and recipes are ALWAYS fetched together, unfiltered by
+     * type (see loadRecentItems/updateSearchQuery's own doc comments) -
+     * so refreshing after an item-only action (logging/editing an
+     * item) only ever needs to redo the items half; the recipes half
+     * is untouched by definition (last_logged_at is tracked
+     * independently per type - see items.py/recipes.py) and re-running
+     * it would just return what's already showing. */
     fun refreshItemsAfterAdd() {
         val query = _uiState.value.searchQuery
         if (query.isBlank()) {
-            loadRecentItems(includeRecipes = false)
+            fetchRecentItems()
             return
         }
-
-        val filter = _uiState.value.searchFilter
-        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) return // nothing item-related here
-
-        // Re-runs ONLY the items half of the current search, leaving
-        // recipeSearchResults exactly as-is - same reasoning as above,
-        // just for the typed-search case instead of the blank-query
-        // "recent" one.
-        val itemType = when (filter) {
-            SearchFilter.PRODUCT -> "product"
-            SearchFilter.INGREDIENT -> "ingredient"
-            else -> null
-        }
-        searchJob?.cancel()
-        _uiState.value = _uiState.value.copy(isSearching = true)
-        searchJob = viewModelScope.launch {
-            try {
-                val results = ApiClient.service.searchItems(query = query, type = itemType)
-                if (_uiState.value.searchQuery == query) {
-                    _uiState.value = _uiState.value.copy(isSearching = false, searchResults = results)
-                }
-            } catch (e: Exception) {
-                if (_uiState.value.searchQuery == query) {
-                    _uiState.value = _uiState.value.copy(isSearching = false)
-                }
-            }
-        }
+        fetchItemSearchResults(query)
     }
 
     /** Mirror image of refreshItemsAfterAdd - for actions that only
      * ever affect RECIPE (or meal) recency: logging/editing/deleting a
      * recipe, changing its photo, or saving one from the current
-     * meal's items (saveAsMeal). None of these touch any item's
-     * last_logged_at, so this skips the item fetch entirely rather
-     * than needlessly re-running it (see refreshItemsAfterAdd's own
-     * doc comment for the matching item-side reasoning, and design
-     * discussion: "but what if i log a recipe?" - the recipe fetch
-     * itself is NOT skippable here, since recipe ordering genuinely
-     * did change and the list needs to reflect that; only the
-     * unrelated item fetch is). */
+     * meal's items (saveAsMeal). Only re-runs the recipes half. */
     fun refreshRecipesAfterAdd() {
         val query = _uiState.value.searchQuery
         if (query.isBlank()) {
-            loadRecentItems(includeItems = false)
+            fetchRecentRecipes()
             return
         }
-
-        val filter = _uiState.value.searchFilter
-        if (filter == SearchFilter.PRODUCT || filter == SearchFilter.INGREDIENT) return // no recipe list shown under these
-
-        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
-            val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
-            _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
-            searchJob?.cancel()
-            searchJob = viewModelScope.launch {
-                try {
-                    val results = ApiClient.service.searchRecipes(query = query, recipeType = recipeType)
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
-                    }
-                } catch (e: Exception) {
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false)
-                    }
-                }
-            }
-            return
-        }
-
-        // ALL
-        allFilterRecipeSearchJob?.cancel()
-        _uiState.value = _uiState.value.copy(isSearchingRecipes = true, allFilterRecipeError = null)
-        allFilterRecipeSearchJob = viewModelScope.launch {
-            try {
-                val results = ApiClient.service.searchRecipes(query = query, recipeType = null)
-                if (_uiState.value.searchQuery == query) {
-                    _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
-                }
-            } catch (e: Exception) {
-                if (_uiState.value.searchQuery == query) {
-                    _uiState.value = _uiState.value.copy(
-                        isSearchingRecipes = false,
-                        allFilterRecipeError = "Couldn't search recipes: ${e.message ?: e.javaClass.simpleName}"
-                    )
-                }
-            }
-        }
+        fetchRecipeSearchResults(query)
     }
 
     fun load(date: LocalDate, mealType: String) {
@@ -618,98 +561,20 @@ class MealDetailViewModel : ViewModel() {
 
     /** "Recent" here means recently added/updated in the catalog (GET
      * /items with no query is already ordered by updated_at desc
-     * server-side - see design discussion), NOT recently logged. Was
-     * previously /logs/recent-items (recency of LOGGING); switched
-     * because the search tab is about finding an item to log, and what
-     * you just created/edited is more relevant there than what you
-     * happened to eat most recently. */
-    /** "Recent" here means recently added/updated in the catalog (GET
-     * /items with no query is already ordered by updated_at desc
-     * server-side - see design discussion), NOT recently logged. Loads
-     * BOTH items and recipes up front (cheap, both lists are small/
-     * capped) so switching filters doesn't need a fresh network call
-     * just to show the blank-query state. */
-    /** "Recent" here means recently added/updated in the catalog (GET
-     * /items with no query is already ordered by updated_at desc
-     * server-side - see design discussion), NOT recently logged. Now
-     * respects the current filter (type=/recipe_type=) - it used to
-     * always fetch everything regardless of which filter chip was
-     * selected, which is why switching filters while the search box was
-     * blank appeared to do nothing (see design discussion: "if I have a
-     * list with products and ingredients and select ingredient,
-     * everything stays the same" - that's this blank-query "recent"
-     * state specifically, non-blank search already filtered correctly). */
-    /** includeRecipes=false skips the RECIPE/MEAL and ALL branches'
-     * recipe fetch entirely (still fetches items either way, unless
-     * includeItems=false) - used by refreshItemsAfterAdd for actions
-     * that only touch item recency (logging/editing an item), where
-     * nothing about recipe ordering changed. See that function's own
-     * doc comment for why this matters: re-fetching recipes on every
-     * trivial item log otherwise shows a visible loading flash (GET
-     * /recipes is meaningfully slower than GET /items - see
-     * isLoadingRecentRecipes' doc comment) for a fetch whose result
-     * would be identical to what's already shown.
-     *
-     * includeItems=false is the mirror image, used by
-     * refreshRecipesAfterAdd for actions that only touch RECIPE
-     * recency (logging/editing/deleting a recipe/meal) - no item's
-     * last_logged_at ever changes from those, so there's equally no
-     * reason to re-fetch items there either. */
-    private fun loadRecentItems(includeRecipes: Boolean = true, includeItems: Boolean = true) {
-        val filter = _uiState.value.searchFilter
-
-        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
-            if (!includeRecipes) return // nothing recipe-related to refresh under this call
-            val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
-            viewModelScope.launch {
-                try {
-                    val recipes = ApiClient.service.searchRecipes(query = null, recipeType = recipeType)
-                    _uiState.value = _uiState.value.copy(recentRecipes = recipes)
-                } catch (e: Exception) {
-                    // Not core functionality - fails quietly.
-                }
-            }
-            return
-        }
-
-        // ALL also fetches recipes+meals (recipeType = null, so both)
-        // alongside items below, rather than exclusively going through
-        // the items endpoint the way PRODUCT/INGREDIENT do - otherwise
-        // "All" wasn't actually all, recipes/meals only ever showed up
-        // by specifically switching to the Recipe or Meal tab (see
-        // design discussion: "they only show up if we filter for
-        // recipes... not with the rest of the items when it's set to
-        // show all").
-        if (filter == SearchFilter.ALL && includeRecipes) {
-            _uiState.value = _uiState.value.copy(isLoadingRecentRecipes = true)
-            viewModelScope.launch {
-                try {
-                    val recipes = ApiClient.service.searchRecipes(query = null, recipeType = null)
-                    _uiState.value = _uiState.value.copy(
-                        isLoadingRecentRecipes = false,
-                        recentRecipes = recipes,
-                        allFilterRecipeError = null
-                    )
-                } catch (e: Exception) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoadingRecentRecipes = false,
-                        allFilterRecipeError = "Couldn't load recipes: ${e.message ?: e.javaClass.simpleName}"
-                    )
-                }
-            }
-        }
-
-        if (!includeItems) return
-
-        val itemType = when (filter) {
-            SearchFilter.PRODUCT -> "product"
-            SearchFilter.INGREDIENT -> "ingredient"
-            else -> null
-        }
+     * server-side - see design discussion), NOT recently logged.
+     * Always fetches BOTH items and recipes, unfiltered by type
+     * (type=null/recipe_type=null) - see SearchFilter's own doc
+     * comment for why: filter chips only ever slice what's already
+     * fetched, so there's nothing left to conditionally fetch based on
+     * which chip is active. Two independent, unsynchronized coroutines
+     * (see isLoadingRecentItems/isLoadingRecentRecipes - each tracks
+     * its own fetch, since GET /recipes is reliably slower than GET
+     * /items, having eager-loaded ingredients). */
+    private fun fetchRecentItems() {
         _uiState.value = _uiState.value.copy(isLoadingRecentItems = true)
         viewModelScope.launch {
             try {
-                val items = ApiClient.service.searchItems(query = null, type = itemType)
+                val items = ApiClient.service.searchItems(query = null, type = null)
                 _uiState.value = _uiState.value.copy(isLoadingRecentItems = false, recentItems = items)
             } catch (e: Exception) {
                 // Not core functionality - fails quietly to an empty
@@ -719,114 +584,58 @@ class MealDetailViewModel : ViewModel() {
         }
     }
 
-    /** ALL/PRODUCT/INGREDIENT switch which type= filter (or none) gets
-     * passed to the ITEMS search; RECIPE/MEAL switch to searching
-     * RECIPES instead via recipe_type=, a completely different
-     * endpoint/result list (see MealDetailUiState.searchFilter's doc
-     * comment). Re-runs whatever query is currently typed against the
-     * newly-selected filter - or, if the query is blank, refetches
-     * "recent" instead (loadRecentItems is filter-aware now too, see
-     * its own doc comment for why that refetch didn't used to happen
-     * at all). */
+    private fun fetchRecentRecipes() {
+        _uiState.value = _uiState.value.copy(isLoadingRecentRecipes = true)
+        viewModelScope.launch {
+            try {
+                val recipes = ApiClient.service.searchRecipes(query = null, recipeType = null)
+                _uiState.value = _uiState.value.copy(
+                    isLoadingRecentRecipes = false,
+                    recentRecipes = recipes,
+                    recipeFetchError = null
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoadingRecentRecipes = false,
+                    recipeFetchError = "Couldn't load recipes: ${e.message ?: e.javaClass.simpleName}"
+                )
+            }
+        }
+    }
+
+    private fun loadRecentItems() {
+        fetchRecentItems()
+        fetchRecentRecipes()
+    }
+
+    /** Filter chips no longer affect what gets FETCHED at all (see
+     * SearchFilter's own doc comment) - both lists are already loaded
+     * regardless of which chip was previously active, so switching is
+     * just this one line, no network call, no re-fetch, no stale
+     * "recent" view (see design discussion: "if I have a list with
+     * products and ingredients and select ingredient, everything stays
+     * the same" - that whole class of bug is gone now, there's nothing
+     * left to forget to refetch). */
     fun updateSearchFilter(filter: SearchFilter) {
         _uiState.value = _uiState.value.copy(searchFilter = filter)
-        if (_uiState.value.searchQuery.isBlank()) {
-            loadRecentItems()
-        } else {
-            updateSearchQuery(_uiState.value.searchQuery)
-        }
     }
 
     // Cancelled and relaunched on every keystroke - see updateSearchQuery's
     // debounce below.
     private var searchJob: Job? = null
-    // Separate from searchJob - when filter is ALL, item search and
-    // recipe search run in parallel (see updateSearchQuery), each
-    // needing its own debounce/cancel-on-next-keystroke rather than
-    // fighting over one shared job.
-    private var allFilterRecipeSearchJob: Job? = null
+    // Separate from searchJob - items and recipes are always searched
+    // in parallel (see updateSearchQuery), each needing its own
+    // debounce/cancel-on-next-keystroke rather than fighting over one
+    // shared job.
+    private var recipeSearchJob: Job? = null
 
-    /** Debounced now - previously fired a request on EVERY keystroke
-     * (see design discussion: "we send a request every single stroke",
-     * observed hammering USDA search this way too - see
-     * AddItemViewModel.updateUsdaQuery for that side). Cancels any
-     * still-pending search and waits SEARCH_DEBOUNCE_MS of no further
-     * typing before actually querying, same debounce pattern in both
-     * places. The searchQuery== guard in each result handler is now
-     * mostly redundant (cancelling the job already prevents a stale
-     * response from ever landing) but kept as a harmless extra safety
-     * net. */
-    fun updateSearchQuery(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
-        val filter = _uiState.value.searchFilter
-
+    private fun fetchItemSearchResults(query: String) {
         searchJob?.cancel()
-        allFilterRecipeSearchJob?.cancel()
-
-        if (query.isBlank()) {
-            _uiState.value = _uiState.value.copy(
-                searchResults = emptyList(),
-                isSearching = false,
-                recipeSearchResults = emptyList(),
-                isSearchingRecipes = false
-            )
-            return
-        }
-
-        if (filter == SearchFilter.RECIPE || filter == SearchFilter.MEAL) {
-            _uiState.value = _uiState.value.copy(isSearchingRecipes = true)
-            val recipeType = if (filter == SearchFilter.RECIPE) "recipe" else "meal"
-            searchJob = viewModelScope.launch {
-                delay(SEARCH_DEBOUNCE_MS)
-                try {
-                    val results = ApiClient.service.searchRecipes(query = query, recipeType = recipeType)
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
-                    }
-                } catch (e: Exception) {
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false)
-                    }
-                }
-            }
-            return
-        }
-
-        // ALL also searches recipes+meals (recipeType = null) IN
-        // PARALLEL with the items search below, same reasoning as
-        // loadRecentItems's own ALL handling - otherwise typing a
-        // search under "All" would never surface a matching recipe/meal
-        // at all, only items.
-        if (filter == SearchFilter.ALL) {
-            _uiState.value = _uiState.value.copy(isSearchingRecipes = true, allFilterRecipeError = null)
-            allFilterRecipeSearchJob = viewModelScope.launch {
-                delay(SEARCH_DEBOUNCE_MS)
-                try {
-                    val results = ApiClient.service.searchRecipes(query = query, recipeType = null)
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
-                    }
-                } catch (e: Exception) {
-                    if (_uiState.value.searchQuery == query) {
-                        _uiState.value = _uiState.value.copy(
-                            isSearchingRecipes = false,
-                            allFilterRecipeError = "Couldn't search recipes: ${e.message ?: e.javaClass.simpleName}"
-                        )
-                    }
-                }
-            }
-        }
-
-        val itemType = when (filter) {
-            SearchFilter.PRODUCT -> "product"
-            SearchFilter.INGREDIENT -> "ingredient"
-            else -> null
-        }
         _uiState.value = _uiState.value.copy(isSearching = true)
         searchJob = viewModelScope.launch {
             delay(SEARCH_DEBOUNCE_MS)
             try {
-                val results = ApiClient.service.searchItems(query = query, type = itemType)
+                val results = ApiClient.service.searchItems(query = query, type = null)
                 // Guard against a slower earlier search response landing
                 // after a newer one - only apply if the query is still
                 // current.
@@ -839,6 +648,64 @@ class MealDetailViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    private fun fetchRecipeSearchResults(query: String) {
+        recipeSearchJob?.cancel()
+        _uiState.value = _uiState.value.copy(isSearchingRecipes = true, recipeFetchError = null)
+        recipeSearchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            try {
+                val results = ApiClient.service.searchRecipes(query = query, recipeType = null)
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(isSearchingRecipes = false, recipeSearchResults = results)
+                }
+            } catch (e: Exception) {
+                if (_uiState.value.searchQuery == query) {
+                    _uiState.value = _uiState.value.copy(
+                        isSearchingRecipes = false,
+                        recipeFetchError = "Couldn't search recipes: ${e.message ?: e.javaClass.simpleName}"
+                    )
+                }
+            }
+        }
+    }
+
+    /** Debounced now - previously fired a request on EVERY keystroke
+     * (see design discussion: "we send a request every single stroke",
+     * observed hammering USDA search this way too - see
+     * AddItemViewModel.updateUsdaQuery for that side). Cancels any
+     * still-pending search and waits SEARCH_DEBOUNCE_MS of no further
+     * typing before actually querying, same debounce pattern in both
+     * places. The searchQuery== guard in each result handler is now
+     * mostly redundant (cancelling the job already prevents a stale
+     * response from ever landing) but kept as a harmless extra safety
+     * net.
+     *
+     * Always searches BOTH items and recipes in parallel, unfiltered by
+     * type - same reasoning as fetchRecentItems/fetchRecentRecipes, see
+     * SearchFilter's own doc comment. Typing a query under the Items
+     * filter still surfaces a matching recipe the instant you switch to
+     * the Recipe chip, with no additional wait, since it was already
+     * fetched alongside the items search. */
+    fun updateSearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+
+        searchJob?.cancel()
+        recipeSearchJob?.cancel()
+
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                searchResults = emptyList(),
+                isSearching = false,
+                recipeSearchResults = emptyList(),
+                isSearchingRecipes = false
+            )
+            return
+        }
+
+        fetchItemSearchResults(query)
+        fetchRecipeSearchResults(query)
     }
 
     /** Recipes/meals log by recipe_id with a flat 1-serving default -
@@ -1741,7 +1608,7 @@ class MealDetailViewModel : ViewModel() {
             // conversion/reasoning as AddItemViewModel's form.
             editItemSaltG = item.sodiumMg100g?.toDoubleOrNull()
                 ?.let { it / 1000.0 * SALT_TO_SODIUM_RATIO }?.toString() ?: "",
-            editItemCountsAsAddedSugar = item.countsAsAddedSugar,
+            editItemCountsAsAddedSugar = item.countsAsAddedSugar ?: false,
             editItemError = null
         )
     }
@@ -1761,17 +1628,13 @@ class MealDetailViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(editItemSaturatedFat = value)
     }
     fun updateEditItemSalt(value: String) { _uiState.value = _uiState.value.copy(editItemSaltG = value) }
-    /** Cycles null -> true -> false -> null (see
-     * editItemCountsAsAddedSugar's doc comment for what each state
-     * means) -- a plain Boolean toggle can't represent "use the
-     * default heuristic" as a state, only on/off. */
+    /** Plain on/off toggle - no more "Auto" state (see
+     * editItemCountsAsAddedSugar's own doc comment for why the old
+     * origin-based guess was dropped). */
     fun cycleEditItemCountsAsAddedSugar() {
-        val next = when (_uiState.value.editItemCountsAsAddedSugar) {
-            null -> true
-            true -> false
-            false -> null
-        }
-        _uiState.value = _uiState.value.copy(editItemCountsAsAddedSugar = next)
+        _uiState.value = _uiState.value.copy(
+            editItemCountsAsAddedSugar = !_uiState.value.editItemCountsAsAddedSugar
+        )
     }
 
     fun saveItemEdit() {

@@ -81,12 +81,13 @@ class Item(Base):
     # semantics as everywhere else quantity is stored in this app.
     last_logged_quantity = Column(Numeric, nullable=True)
     last_logged_serving_size_id = Column(Integer, ForeignKey("serving_sizes.id"), nullable=True)
-    # Manual override for the origin-based "countable sugar" heuristic
-    # (see design discussion: "my third highest ranking added sugar
-    # source is frozen berry mix... this is silly"). NULL = use the
-    # origin heuristic (raw USDA ingredient = not added sugar); True/
-    # False = force count/exclude regardless of origin. See
-    # compute_item_totals for where this is actually applied.
+    # Whether this item's sugar counts toward "added sugar" tracking -
+    # a plain explicit flag, set per item (previously auto-guessed from
+    # origin; dropped, see design discussion: "product means it has a
+    # barcode, which frozen berries do" - origin/type never reliably
+    # distinguished a whole food from an added-sugar product). NULL and
+    # False behave identically (not counted). See compute_item_totals
+    # for where this is actually applied.
     counts_as_added_sugar = Column(Boolean, nullable=True)
 
     serving_sizes = relationship(

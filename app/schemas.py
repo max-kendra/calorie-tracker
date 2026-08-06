@@ -40,12 +40,16 @@ class ItemBase(BaseModel):
     sugar_100g: Optional[Decimal] = None
     saturated_fat_100g: Optional[Decimal] = None
     sodium_mg_100g: Optional[Decimal] = None
-    # Manual override for the origin-based "countable sugar" heuristic
-    # used in weekly summaries (see design discussion: "my third
-    # highest ranking added sugar source is frozen berry mix... this is
-    # silly"). NULL = use the origin heuristic (raw USDA ingredient =
-    # not added sugar); True/False = force count/exclude regardless of
-    # origin. See compute_item_totals for where this is applied.
+    # Whether this item's sugar counts toward "added sugar" tracking -
+    # a plain explicit flag, set per item at creation (see design
+    # discussion: "my third highest ranking added sugar source is
+    # frozen berry mix... this is silly", and the follow-up: "product
+    # means it has a barcode, which frozen berries do" - there used to
+    # be an origin-based auto-guess here, dropped because neither
+    # origin nor type reliably distinguishes a whole food from an
+    # added-sugar product; a barcode belongs to both equally). NULL and
+    # False behave identically (not counted) - see compute_item_totals
+    # for where this is applied.
     counts_as_added_sugar: Optional[bool] = None
 
     type: ItemType = "product"
