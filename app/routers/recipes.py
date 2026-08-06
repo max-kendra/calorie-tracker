@@ -9,7 +9,7 @@ from app.auth import require_api_key
 from app.database import get_db
 from app.models import Item, Recipe, RecipeIngredient
 from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals, to_display_extended
-from app.search import multi_column_search_filter
+from app.search import multi_column_search_filter, relevance_rank
 from app.schemas import (
     RecipeCreate,
     RecipeIngredientCreate,
@@ -137,7 +137,14 @@ def list_recipes(
     if recipe_type:
         query = query.filter(Recipe.recipe_type == recipe_type)
 
-    recipes = query.order_by(Recipe.last_logged_at.desc().nullslast()).offset(offset).limit(limit).all()
+    if q:
+        # Same relevance-then-recency ordering as list_items - see
+        # relevance_rank's own doc comment.
+        query = query.order_by(relevance_rank(q, Recipe.name), Recipe.last_logged_at.desc().nullslast())
+    else:
+        query = query.order_by(Recipe.last_logged_at.desc().nullslast())
+
+    recipes = query.offset(offset).limit(limit).all()
     return [_build_recipe_out(r) for r in recipes]
 
 

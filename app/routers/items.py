@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_api_key
 from app.barcode import decode_barcode_from_image_bytes
 from app.config import settings
-from app.search import multi_column_search_filter
+from app.search import multi_column_search_filter, relevance_rank
 from app.database import get_db
 from app.models import Item, ServingSize
 from app.ocr import extract_label_from_image
@@ -230,7 +230,20 @@ def list_items(
     if type:
         query = query.filter(Item.type == type)
 
-    return query.order_by(Item.last_logged_at.desc().nullslast()).offset(offset).limit(limit).all()
+    if q:
+        # Relevance first (see relevance_rank's own doc comment - this
+        # is what makes an exact/near-exact name match rank above a
+        # same-recency item that only matched loosely or via brand),
+        # recency as the tiebreaker for actual ties. Blank-query
+        # "recent" browsing has no query to rank against, so it stays
+        # pure recency, same as before.
+        query = query.order_by(
+            relevance_rank(q, Item.name, Item.brand), Item.last_logged_at.desc().nullslast()
+        )
+    else:
+        query = query.order_by(Item.last_logged_at.desc().nullslast())
+
+    return query.offset(offset).limit(limit).all()
 
 
 @router.patch("/{item_id}", response_model=ItemOut)

@@ -433,9 +433,13 @@ fun MealDetailScreen(
                                 onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
                             )
                         } else {
-                            val items = (if (showingRecent) state.recentItems else state.searchResults).let { all ->
-                                if (state.searchFilter == SearchFilter.INGREDIENT) all.filter { it.type == "ingredient" } else all
-                            }
+                            // PRODUCT/INGREDIENT are real, mutually-
+                            // exclusive slices now, not a catch-all vs
+                            // a subset - see SearchFilter's own doc
+                            // comment.
+                            val itemType = if (state.searchFilter == SearchFilter.PRODUCT) "product" else "ingredient"
+                            val items = (if (showingRecent) state.recentItems else state.searchResults)
+                                .filter { it.type == itemType }
                             ItemResultsList(
                                 items = items,
                                 isLoading = if (showingRecent) state.isLoadingRecentItems else state.isSearching,

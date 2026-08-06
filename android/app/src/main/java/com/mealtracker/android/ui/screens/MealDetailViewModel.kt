@@ -109,14 +109,19 @@ fun formatQuantity(value: Double): String =
  * stemmed from that merged view, not from anything inherent to
  * showing items vs recipes).
  *
- * ITEMS is the default and shows every item unfiltered by type
- * (product AND ingredient together) - previously this was ALL's job
- * combined with items; there's no separate PRODUCT filter anymore
- * since "everything, minus ingredients" was never actually a
- * meaningful distinct view - INGREDIENT (a real subset people want in
- * isolation) is kept, PRODUCT (the arbitrary remainder) is not. */
+ * Four genuine peers, each a real mutually-exclusive slice of the
+ * catalog - no catch-all. PRODUCT/INGREDIENT/RECIPE/MEAL together
+ * already cover everything, so there's nothing a broader "show
+ * everything" option would add beyond what these four collectively are
+ * (see design discussion: "'items' has both products and ingredients,
+ * we should probably remove items as a filter and have it be product
+ * instead" - the earlier ITEMS default conflated the two, which is the
+ * exact confusion PRODUCT vs INGREDIENT exists to avoid in the first
+ * place). The underlying fetch already retrieves everything
+ * regardless (see above), so nothing about that changes here - this
+ * only changes which slice of it is shown by default. */
 enum class SearchFilter(val label: String) {
-    ITEMS("Items"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
+    PRODUCT("Product"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
 }
 
 data class LoggedAmount(val quantity: Double, val servingSizeId: Int?)
@@ -210,7 +215,7 @@ data class MealDetailUiState(
     // searchResults/recipeSearchResults (and recentItems/recentRecipes)
     // are always populated regardless of which filter is active, so
     // changing this never triggers a network call.
-    val searchFilter: SearchFilter = SearchFilter.ITEMS,
+    val searchFilter: SearchFilter = SearchFilter.PRODUCT,
     val recentRecipes: List<Recipe> = emptyList(),
     val recipeSearchResults: List<Recipe> = emptyList(),
     val isSearchingRecipes: Boolean = false,
