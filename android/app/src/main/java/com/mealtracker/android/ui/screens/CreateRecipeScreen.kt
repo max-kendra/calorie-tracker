@@ -31,6 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,7 @@ import com.mealtracker.android.network.models.Recipe
 import com.mealtracker.android.ui.components.CreateServingDialog
 import com.mealtracker.android.ui.components.ItemQuantityDialog
 import com.mealtracker.android.ui.components.ItemResultsList
+import com.mealtracker.android.ui.components.MacroColors
 import kotlin.math.roundToInt
 
 /**
@@ -240,6 +244,7 @@ private fun CreateRecipeIngredientsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Text(createRecipeIngredientMacroShortcut(row), style = MaterialTheme.typography.labelSmall)
                         }
                         Text("${row.kcal.roundToInt()} Cal", style = MaterialTheme.typography.bodyMedium)
                     }
@@ -366,6 +371,25 @@ private fun CreateRecipeIngredientsScreen(
  * RecipeTotalsPreview's own doc comment) - previously this information
  * was only available after saving, since the screen had no client-side
  * math of its own and just waited on the created Recipe's own totals. */
+/** "#gP • #gF • #gC • #gFi" for one ingredient in the recipe being
+ * built - same color/format convention as MealDetailScreen's own
+ * ingredientMacroShortcut/JournalScreen's macroShortcut (see design
+ * discussion: "can we also include this information in the ui when
+ * creating/editing recipes"). Always renders (never null) since
+ * CreateRecipeIngredientRow's macro properties are always computed
+ * live from the item's own per-100g data - no frozen-snapshot gap to
+ * worry about here, unlike the equivalent for an already-saved
+ * recipe's ingredients. */
+private fun createRecipeIngredientMacroShortcut(row: CreateRecipeIngredientRow) = buildAnnotatedString {
+    withStyle(SpanStyle(color = MacroColors.Protein)) { append("${row.proteinG.roundToInt()}P") }
+    append(" \u2022 ")
+    withStyle(SpanStyle(color = MacroColors.Fat)) { append("${row.fatG.roundToInt()}F") }
+    append(" \u2022 ")
+    withStyle(SpanStyle(color = MacroColors.Carbs)) { append("${row.carbsG.roundToInt()}C") }
+    append(" \u2022 ")
+    withStyle(SpanStyle(color = MacroColors.Fiber)) { append("${row.fiberG.roundToInt()}Fi") }
+}
+
 @Composable
 private fun RecipeTotalsPreviewCard(total: RecipeTotalsPreview, perServing: RecipeTotalsPreview) {
     Column(

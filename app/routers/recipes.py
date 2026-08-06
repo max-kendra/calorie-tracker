@@ -25,6 +25,40 @@ router = APIRouter(
 )
 
 
+def _ingredient_out_fields(ri: RecipeIngredient) -> dict:
+    """
+    Builds the dict RecipeIngredientOut is constructed from for one
+    recipe ingredient - full macro breakdown, not just kcal (see design
+    discussion: "can we also include this information in the ui when
+    creating/editing recipes"). compute_item_totals already has to
+    compute every macro to produce kcal, so keeping the rest is free -
+    same "already computed, only kcal was ever kept" pattern
+    LoggedRecipeIngredient had before it was widened (see that
+    migration), just here on the live-recipe side, where there's no
+    historical-gap concern at all since this is recomputed fresh every
+    time, never frozen.
+    """
+    totals = compute_item_totals(ri.item, ri.quantity, ri.serving_size)
+    return {
+        "item_id": ri.item_id,
+        "serving_size_id": ri.serving_size_id,
+        "quantity": ri.quantity,
+        "item_name": ri.item.name,
+        "serving_size_name": ri.serving_size.name if ri.serving_size else None,
+        "serving_size_weight_g": ri.serving_size.weight_g if ri.serving_size else None,
+        "image_path": ri.item.image_path,
+        "kcal": ceil_int(totals.kcal),
+        "protein_g": ceil_int(totals.protein_g),
+        "carbs_g": ceil_int(totals.carbs_g),
+        "fat_g": ceil_int(totals.fat_g),
+        "fiber_g": ceil_int(totals.fiber_g),
+        "sugar_g": ceil_int(totals.sugar_g),
+        "countable_sugar_g": ceil_int(totals.countable_sugar_g),
+        "saturated_fat_g": ceil_int(totals.saturated_fat_g),
+        "sodium_mg": ceil_int(totals.sodium_mg),
+    }
+
+
 def _build_recipe_out(recipe: Recipe) -> RecipeOut:
     totals = compute_recipe_totals(recipe)  # RawTotals, precise
     servings = recipe.servings or Decimal("1")
@@ -40,19 +74,7 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
         created_at=recipe.created_at,
         updated_at=recipe.updated_at,
         last_logged_at=recipe.last_logged_at,
-        ingredients=[
-            {
-                "item_id": ri.item_id,
-                "serving_size_id": ri.serving_size_id,
-                "quantity": ri.quantity,
-                "item_name": ri.item.name,
-                "serving_size_name": ri.serving_size.name if ri.serving_size else None,
-                "serving_size_weight_g": ri.serving_size.weight_g if ri.serving_size else None,
-                "image_path": ri.item.image_path,
-                "kcal": ceil_int(compute_item_totals(ri.item, ri.quantity, ri.serving_size).kcal),
-            }
-            for ri in recipe.ingredients
-        ],
+        ingredients=[_ingredient_out_fields(ri) for ri in recipe.ingredients],
         totals=to_display_extended(totals),
         totals_per_serving=to_display_extended(per_serving),
     )

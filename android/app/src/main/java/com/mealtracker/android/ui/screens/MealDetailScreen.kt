@@ -83,6 +83,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -119,6 +122,45 @@ import java.time.LocalDate
 
 private val WhiteCardColors @Composable get() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
 private val SEARCH_BAR_SHAPE = RoundedCornerShape(24.dp)
+
+/** Wraps either an Item or a Recipe so both can live in ONE list
+ * together, sorted by shared last-logged recency - only used for the
+ * ALL filter's rendering (see SearchFilter's own doc comment for why
+ * this is safe to use now, having previously been removed over a bug
+ * that's since been fixed at the source). Product/Ingredient/Recipe/
+ * Meal each only ever show one type, so they don't need this. */
+private sealed class CatalogEntry {
+    abstract val lastLoggedAt: String?
+
+    data class ItemEntry(val item: Item) : CatalogEntry() {
+        override val lastLoggedAt: String? = item.lastLoggedAt
+    }
+
+    data class RecipeEntry(val recipe: Recipe) : CatalogEntry() {
+        override val lastLoggedAt: String? = recipe.lastLoggedAt
+    }
+}
+
+/** Merges items and recipes into ONE list ordered by shared
+ * last_logged_at, descending (most recent first) - both types already
+ * come back individually sorted this way from their own endpoints (see
+ * items.py/recipes.py's own list_ orderings) when there's no active
+ * search query, or by relevance-then-recency when there is (see
+ * app/search.py's relevance_rank) - but ALL deliberately re-sorts
+ * purely by recency here regardless, since a mixed relevance score
+ * across two entirely different result sets (items vs recipes) isn't
+ * directly comparable the way recency is (see design discussion: "we
+ * want it to be sorted by recency, globally"). Entries with no
+ * last_logged_at (never logged) sort last, same "nullslast" convention
+ * the backend already uses. */
+private fun mergeByLastLogged(items: List<Item>, recipes: List<Recipe>): List<CatalogEntry> {
+    val combined: List<CatalogEntry> = items.map { CatalogEntry.ItemEntry(it) } +
+        recipes.map { CatalogEntry.RecipeEntry(it) }
+    return combined.sortedByDescending { entry ->
+        entry.lastLoggedAt?.let { raw -> runCatching { java.time.Instant.parse(raw) }.getOrNull() }
+            ?: java.time.Instant.EPOCH
+    }
+}
 
 /**
  * Opens for ANY meal card tap, even an empty one (per design doc).
@@ -403,53 +445,114 @@ fun MealDetailScreen(
                         val showingRecent = state.searchQuery.isBlank()
                         // Items and recipes are ALWAYS both fetched
                         // (see MealDetailViewModel's SearchFilter doc
-                        // comment) - the filter chip only picks which
-                        // one to show, and for Ingredient/Recipe/Meal,
-                        // slices it down by type client-side. No
-                        // merging/interleaving, no per-filter network
-                        // call, no separate "ALL" case (see design
-                        // discussion: "the all section in the recents
-                        // list just complicates everything... i guess i
-                        // could just filter it instead of having a
-                        // shared view").
-                        if (state.searchFilter == SearchFilter.RECIPE || state.searchFilter == SearchFilter.MEAL) {
-                            val recipeType = if (state.searchFilter == SearchFilter.RECIPE) "recipe" else "meal"
-                            val recipes = (if (showingRecent) state.recentRecipes else state.recipeSearchResults)
-                                .filter { it.recipeType == recipeType }
-                            state.recipeFetchError?.let { error ->
-                                Text(
-                                    error,
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        // comment) - no per-filter network call, and
+                        // filters apply identically whether browsing
+                        // "recent" or actively searching (see design
+                        // discussion: "the filters are still filtering
+                        // when we search for things" - PRODUCT/
+                        // INGREDIENT/RECIPE/MEAL are genuine slices of
+                        // the catalog, not a quirk of the recent view,
+                        // so a filter picked while searching should
+                        // keep narrowing the search too, same as it
+                        // narrows recents).
+                        state.recipeFetchError?.let { error ->
+                            Text(
+                                error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                        }
+                        when (state.searchFilter) {
+                            SearchFilter.ALL -> {
+                                // A genuine merged, recency-sorted list
+                                // - not stacked, not items-then-recipes
+                                // - see mergeByLastLogged's own doc
+                                // comment for why this is safe again.
+                                val allItems = if (showingRecent) state.recentItems else state.searchResults
+                                val allRecipes = if (showingRecent) state.recentRecipes else state.recipeSearchResults
+                                val isLoadingAll = if (showingRecent) {
+                                    state.isLoadingRecentItems || state.isLoadingRecentRecipes
+                                } else {
+                                    state.isSearching || state.isSearchingRecipes
+                                }
+                                when {
+                                    isLoadingAll -> {
+                                        Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                                            CircularProgressIndicator()
+                                        }
+                                    }
+                                    allItems.isEmpty() && allRecipes.isEmpty() -> {
+                                        Text(
+                                            if (showingRecent) "Nothing yet" else "No matches",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 16.dp)
+                                        )
+                                    }
+                                    else -> {
+                                        // scrollable=false on both -- one
+                                        // continuous list under the
+                                        // sheet's own outer scroll, not
+                                        // two/many separately-scrollable
+                                        // nested boxes.
+                                        mergeByLastLogged(allItems, allRecipes).forEach { entry ->
+                                            when (entry) {
+                                                is CatalogEntry.ItemEntry -> ItemResultsList(
+                                                    items = listOf(entry.item),
+                                                    isLoading = false,
+                                                    emptyMessage = "",
+                                                    quickLoggingItemId = state.quickLoggingItemId,
+                                                    lastLoggedAmounts = state.lastLoggedAmounts,
+                                                    onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
+                                                    onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) },
+                                                    scrollable = false
+                                                )
+                                                is CatalogEntry.RecipeEntry -> RecipeResultsList(
+                                                    recipes = listOf(entry.recipe),
+                                                    isLoading = false,
+                                                    emptyMessage = "",
+                                                    quickLoggingRecipeId = state.quickLoggingRecipeId,
+                                                    onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
+                                                    onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) },
+                                                    scrollable = false
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            SearchFilter.RECIPE, SearchFilter.MEAL -> {
+                                val recipeType = if (state.searchFilter == SearchFilter.RECIPE) "recipe" else "meal"
+                                val recipes = (if (showingRecent) state.recentRecipes else state.recipeSearchResults)
+                                    .filter { it.recipeType == recipeType }
+                                RecipeResultsList(
+                                    recipes = recipes,
+                                    isLoading = if (showingRecent) state.isLoadingRecentRecipes else state.isSearchingRecipes,
+                                    emptyMessage = if (showingRecent) "No recipes yet" else "No matches",
+                                    quickLoggingRecipeId = state.quickLoggingRecipeId,
+                                    onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
+                                    onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
                                 )
                             }
-                            RecipeResultsList(
-                                recipes = recipes,
-                                isLoading = if (showingRecent) state.isLoadingRecentRecipes else state.isSearchingRecipes,
-                                emptyMessage = if (showingRecent) "No recipes yet" else "No matches",
-                                quickLoggingRecipeId = state.quickLoggingRecipeId,
-                                onRecipeClick = { recipe -> viewModel.openRecipeDetail(recipe.recipeId) },
-                                onQuickAddClick = { recipe -> viewModel.logRecipeQuickly(recipe) }
-                            )
-                        } else {
-                            // PRODUCT/INGREDIENT are real, mutually-
-                            // exclusive slices now, not a catch-all vs
-                            // a subset - see SearchFilter's own doc
-                            // comment.
-                            val itemType = if (state.searchFilter == SearchFilter.PRODUCT) "product" else "ingredient"
-                            val items = (if (showingRecent) state.recentItems else state.searchResults)
-                                .filter { it.type == itemType }
-                            ItemResultsList(
-                                items = items,
-                                isLoading = if (showingRecent) state.isLoadingRecentItems else state.isSearching,
-                                emptyMessage = if (showingRecent) "No items yet" else "No matches",
-                                quickLoggingItemId = state.quickLoggingItemId,
-                                lastLoggedAmounts = state.lastLoggedAmounts,
-                                onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
-                                onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) },
-                                scrollable = true
-                            )
+                            else -> {
+                                // PRODUCT/INGREDIENT are real, mutually-
+                                // exclusive slices - see SearchFilter's
+                                // own doc comment.
+                                val itemType = if (state.searchFilter == SearchFilter.PRODUCT) "product" else "ingredient"
+                                val items = (if (showingRecent) state.recentItems else state.searchResults)
+                                    .filter { it.type == itemType }
+                                ItemResultsList(
+                                    items = items,
+                                    isLoading = if (showingRecent) state.isLoadingRecentItems else state.isSearching,
+                                    emptyMessage = if (showingRecent) "No items yet" else "No matches",
+                                    quickLoggingItemId = state.quickLoggingItemId,
+                                    lastLoggedAmounts = state.lastLoggedAmounts,
+                                    onItemClick = { item -> viewModel.openItemQuantityPicker(item) },
+                                    onQuickAddClick = { itemId -> viewModel.logItemQuickly(itemId) },
+                                    scrollable = true
+                                )
+                            }
                         }
                         // USDA lookup lives ONLY here now, not in the
                         // barcode flow (see design discussion) -- for
@@ -996,13 +1099,26 @@ private fun RecipeResultsList(
     emptyMessage: String,
     quickLoggingRecipeId: Int?,
     onRecipeClick: (Recipe) -> Unit,
-    onQuickAddClick: (Recipe) -> Unit
+    onQuickAddClick: (Recipe) -> Unit,
+    // false when stacked alongside ItemResultsList during an active
+    // search (see that call site) - two independently height-bounded,
+    // independently-scrollable regions stacked in the same outer
+    // scrollable sheet creates nested scrolling, where this box's OWN
+    // scroll has to be exhausted before the items above/below it can
+    // move at all. Standalone usage (the Recipe/Meal "recent" tabs,
+    // where this is the ONLY content in the sheet) keeps the bounded/
+    // scrollable box as before.
+    scrollable: Boolean = true
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 500.dp)
-            .verticalScroll(rememberScrollState())
+        modifier = if (scrollable) {
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 500.dp)
+                .verticalScroll(rememberScrollState())
+        } else {
+            Modifier.fillMaxWidth()
+        }
     ) {
         when {
             // Same fix as ItemResultsList -- don't blank already-shown
@@ -1012,7 +1128,7 @@ private fun RecipeResultsList(
                     CircularProgressIndicator()
                 }
             }
-            recipes.isEmpty() -> {
+            recipes.isEmpty() && emptyMessage.isNotEmpty() -> {
                 Text(
                     emptyMessage,
                     style = MaterialTheme.typography.bodyMedium,
@@ -1758,6 +1874,17 @@ private fun IngredientRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Null (rather than 0) for ingredients whose frozen
+                // snapshot predates the macro widening - see
+                // RecipeIngredient.proteinG's own doc comment - so this
+                // just doesn't render anything for those rather than
+                // showing a misleadingly-zeroed breakdown. Always
+                // present for live recipe ingredients (see design
+                // discussion: "can we also include this information in
+                // the ui when creating/editing recipes").
+                ingredientMacroShortcut(ingredient, scaleFactor)?.let { shortcut ->
+                    Text(shortcut, style = MaterialTheme.typography.labelSmall)
+                }
             }
             Text("${(ingredient.kcal * scaleFactor).roundToInt()} Cal", style = MaterialTheme.typography.bodyLarge)
         }
@@ -1792,6 +1919,30 @@ private fun IngredientRow(
         }
     ) {
         rowContent()
+    }
+}
+
+/** "#gP • #gF • #gC • #gFi" for a recipe ingredient, scaled the same way
+ * the row's quantity/kcal already are - same color/format convention as
+ * JournalScreen's own macroShortcut(log: Log), just for RecipeIngredient
+ * instead (duplicated rather than shared across files, same as that
+ * one's own scope). Returns null if any macro is missing (legacy
+ * frozen-log rows from before the snapshot was widened - see
+ * RecipeIngredient.proteinG's own doc comment), so the caller can just
+ * skip rendering rather than showing a partial/misleading breakdown. */
+private fun ingredientMacroShortcut(ingredient: RecipeIngredient, scaleFactor: Double): androidx.compose.ui.text.AnnotatedString? {
+    val protein = ingredient.proteinG ?: return null
+    val fat = ingredient.fatG ?: return null
+    val carbs = ingredient.carbsG ?: return null
+    val fiber = ingredient.fiberG ?: return null
+    return buildAnnotatedString {
+        withStyle(SpanStyle(color = MacroColors.Protein)) { append("${(protein * scaleFactor).roundToInt()}P") }
+        append(" \u2022 ")
+        withStyle(SpanStyle(color = MacroColors.Fat)) { append("${(fat * scaleFactor).roundToInt()}F") }
+        append(" \u2022 ")
+        withStyle(SpanStyle(color = MacroColors.Carbs)) { append("${(carbs * scaleFactor).roundToInt()}C") }
+        append(" \u2022 ")
+        withStyle(SpanStyle(color = MacroColors.Fiber)) { append("${(fiber * scaleFactor).roundToInt()}Fi") }
     }
 }
 

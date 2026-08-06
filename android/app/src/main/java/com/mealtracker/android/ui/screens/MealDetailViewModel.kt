@@ -97,31 +97,28 @@ fun formatQuantity(value: Double): String =
  * affects what gets FETCHED at all (see loadRecentItems/
  * updateSearchQuery's own doc comments) - both the items and recipes
  * endpoints are always queried unfiltered (type=null/recipe_type=null)
- * regardless of which chip is active, and each chip just picks/slices
- * whichever of those two already-fetched lists it needs. Switching
- * filters is therefore instant, no network call, and there's nothing
- * left to merge/interleave/sort across types the way the old ALL
- * filter had to (see design discussion: "the all section in the
- * recents list just complicates everything... i guess i could just
- * filter it instead of having a shared view" - this whole class of bug
- * this conversation kept finding - the sort-by-last-logged bug, the
- * loading-flash bug, the "switching filters does nothing" bug - all
- * stemmed from that merged view, not from anything inherent to
- * showing items vs recipes).
+ * regardless of which chip is active. PRODUCT/INGREDIENT/RECIPE/MEAL
+ * each just slice one of those two already-fetched lists to a single
+ * type - no network call, no merging.
  *
- * Four genuine peers, each a real mutually-exclusive slice of the
- * catalog - no catch-all. PRODUCT/INGREDIENT/RECIPE/MEAL together
- * already cover everything, so there's nothing a broader "show
- * everything" option would add beyond what these four collectively are
- * (see design discussion: "'items' has both products and ingredients,
- * we should probably remove items as a filter and have it be product
- * instead" - the earlier ITEMS default conflated the two, which is the
- * exact confusion PRODUCT vs INGREDIENT exists to avoid in the first
- * place). The underlying fetch already retrieves everything
- * regardless (see above), so nothing about that changes here - this
- * only changes which slice of it is shown by default. */
+ * ALL is the one exception: a genuine single list, items and recipes
+ * together, sorted by shared last_logged_at recency (see design
+ * discussion: "let's just reintroduce the all category and actually
+ * fix it once and for all... sorted by recency, globally... not
+ * stacked lists, not items first recipes after, everything together").
+ * This was removed once already over real, now-fixed bugs - see
+ * mergeByLastLogged's own doc comment for exactly what was wrong and
+ * why it's safe to bring back rather than repeating the same mistake:
+ * the merge/sort logic itself was always fine, what was actually
+ * broken was that Recipe.last_logged_at came back NULL from the API
+ * for every recipe (see RecipeOut construction in recipes.py), which
+ * silently sorted every recipe to the very end regardless of when it
+ * was actually logged. That's fixed at the source now, so this can
+ * safely go back to being a real merge instead of staying split into
+ * stacked per-type sections to route around a bug that no longer
+ * exists. */
 enum class SearchFilter(val label: String) {
-    PRODUCT("Product"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
+    ALL("All"), PRODUCT("Product"), INGREDIENT("Ingredient"), RECIPE("Recipe"), MEAL("Meal")
 }
 
 data class LoggedAmount(val quantity: Double, val servingSizeId: Int?)
@@ -163,7 +160,15 @@ fun LoggedRecipeIngredientOut.toRecipeIngredient(): RecipeIngredient = RecipeIng
     servingSizeName = servingSizeName,
     servingSizeWeightG = servingSizeWeightG,
     imagePath = null,
-    kcal = kcal
+    kcal = kcal,
+    proteinG = proteinG,
+    carbsG = carbsG,
+    fatG = fatG,
+    fiberG = fiberG,
+    sugarG = sugarG,
+    countableSugarG = countableSugarG,
+    saturatedFatG = saturatedFatG,
+    sodiumMg = sodiumMg
 )
 
 data class MealDetailUiState(
@@ -215,7 +220,7 @@ data class MealDetailUiState(
     // searchResults/recipeSearchResults (and recentItems/recentRecipes)
     // are always populated regardless of which filter is active, so
     // changing this never triggers a network call.
-    val searchFilter: SearchFilter = SearchFilter.PRODUCT,
+    val searchFilter: SearchFilter = SearchFilter.ALL,
     val recentRecipes: List<Recipe> = emptyList(),
     val recipeSearchResults: List<Recipe> = emptyList(),
     val isSearchingRecipes: Boolean = false,

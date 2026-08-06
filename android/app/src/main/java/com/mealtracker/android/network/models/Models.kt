@@ -172,7 +172,18 @@ data class LoggedRecipeIngredientOut(
     @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null,
     val quantity: String,
     val grams: String,
-    val kcal: Int
+    val kcal: Int,
+    // Null for ingredients logged before this per-ingredient snapshot
+    // was widened past just grams/kcal - see the backend's own
+    // migration note (no historical value to backfill for those).
+    @SerialName("protein_g") val proteinG: Int? = null,
+    @SerialName("carbs_g") val carbsG: Int? = null,
+    @SerialName("fat_g") val fatG: Int? = null,
+    @SerialName("fiber_g") val fiberG: Int? = null,
+    @SerialName("sugar_g") val sugarG: Int? = null,
+    @SerialName("countable_sugar_g") val countableSugarG: Int? = null,
+    @SerialName("saturated_fat_g") val saturatedFatG: Int? = null,
+    @SerialName("sodium_mg") val sodiumMg: Int? = null
 )
 
 /**
@@ -345,7 +356,23 @@ data class RecipeIngredient(
     // alongside a custom serving.
     @SerialName("serving_size_weight_g") val servingSizeWeightG: String? = null,
     @SerialName("image_path") val imagePath: String? = null,
-    val kcal: Int
+    val kcal: Int,
+    // Full per-ingredient macro breakdown. Nullable because
+    // RecipeIngredient doubles as the display type for BOTH live
+    // recipe ingredients (always has this - see toRecipeIngredient()
+    // below is never used for those) AND frozen log ingredients via
+    // LoggedRecipeIngredientOut.toRecipeIngredient(), where legacy rows
+    // from before the snapshot was widened genuinely have no value to
+    // supply (see that migration's own note) - null here should read
+    // as "unknown", never coerced to 0.
+    @SerialName("protein_g") val proteinG: Int? = null,
+    @SerialName("carbs_g") val carbsG: Int? = null,
+    @SerialName("fat_g") val fatG: Int? = null,
+    @SerialName("fiber_g") val fiberG: Int? = null,
+    @SerialName("sugar_g") val sugarG: Int? = null,
+    @SerialName("countable_sugar_g") val countableSugarG: Int? = null,
+    @SerialName("saturated_fat_g") val saturatedFatG: Int? = null,
+    @SerialName("sodium_mg") val sodiumMg: Int? = null
 )
 
 /**

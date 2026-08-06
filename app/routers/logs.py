@@ -143,6 +143,18 @@ def _log_to_out(
             quantity=ing.quantity,
             grams=ing.grams_logged,
             kcal=ceil_int(ing.kcal_logged),
+            protein_g=ceil_int(ing.protein_g_logged) if ing.protein_g_logged is not None else None,
+            carbs_g=ceil_int(ing.carbs_g_logged) if ing.carbs_g_logged is not None else None,
+            fat_g=ceil_int(ing.fat_g_logged) if ing.fat_g_logged is not None else None,
+            fiber_g=ceil_int(ing.fiber_g_logged) if ing.fiber_g_logged is not None else None,
+            sugar_g=ceil_int(ing.sugar_g_logged) if ing.sugar_g_logged is not None else None,
+            countable_sugar_g=(
+                ceil_int(ing.countable_sugar_g_logged) if ing.countable_sugar_g_logged is not None else None
+            ),
+            saturated_fat_g=(
+                ceil_int(ing.saturated_fat_g_logged) if ing.saturated_fat_g_logged is not None else None
+            ),
+            sodium_mg=ceil_int(ing.sodium_mg_logged) if ing.sodium_mg_logged is not None else None,
         )
         for ing in log.ingredients
     ]
@@ -223,6 +235,14 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
                 quantity=ri.quantity,
                 grams_logged=grams,
                 kcal_logged=ing_totals.kcal,
+                protein_g_logged=ing_totals.protein_g,
+                carbs_g_logged=ing_totals.carbs_g,
+                fat_g_logged=ing_totals.fat_g,
+                fiber_g_logged=ing_totals.fiber_g,
+                sugar_g_logged=ing_totals.sugar_g,
+                countable_sugar_g_logged=ing_totals.countable_sugar_g,
+                saturated_fat_g_logged=ing_totals.saturated_fat_g,
+                sodium_mg_logged=ing_totals.sodium_mg,
             )
             for ri, ing_totals, grams in ingredient_snapshot
         ]
@@ -567,6 +587,26 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
             ing.quantity = ing.quantity * factor
             ing.grams_logged = ing.grams_logged * factor
             ing.kcal_logged = ing.kcal_logged * factor
+            # Same proportional rescale for the widened macro fields -
+            # nullable (rows from before they existed), so only scale
+            # what's actually there rather than turning a legitimate
+            # "no historical data" NULL into a wrong 0.
+            if ing.protein_g_logged is not None:
+                ing.protein_g_logged = ing.protein_g_logged * factor
+            if ing.carbs_g_logged is not None:
+                ing.carbs_g_logged = ing.carbs_g_logged * factor
+            if ing.fat_g_logged is not None:
+                ing.fat_g_logged = ing.fat_g_logged * factor
+            if ing.fiber_g_logged is not None:
+                ing.fiber_g_logged = ing.fiber_g_logged * factor
+            if ing.sugar_g_logged is not None:
+                ing.sugar_g_logged = ing.sugar_g_logged * factor
+            if ing.countable_sugar_g_logged is not None:
+                ing.countable_sugar_g_logged = ing.countable_sugar_g_logged * factor
+            if ing.saturated_fat_g_logged is not None:
+                ing.saturated_fat_g_logged = ing.saturated_fat_g_logged * factor
+            if ing.sodium_mg_logged is not None:
+                ing.sodium_mg_logged = ing.sodium_mg_logged * factor
         item_name, recipe_name, image_path = log.item_name_logged, log.recipe_name_logged, log.image_path_logged
         serving_name, serving_weight_g = None, None
     else:

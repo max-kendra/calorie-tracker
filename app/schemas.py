@@ -275,6 +275,23 @@ class RecipeIngredientOut(BaseModel):
     # Journal's log rows do, without the client needing to fetch each
     # item and recompute it itself.
     kcal: int
+    # Same reasoning, the rest of the macro breakdown - compute_item_
+    # totals already computes all of these to get kcal above, so this
+    # is free (see design discussion: "can we also include this
+    # information in the ui when creating/editing recipes" - the same
+    # kcal-only-kept pattern LoggedRecipeIngredient had before it was
+    # widened, just on the live-recipe side instead of the frozen-log
+    # side. No historical-gap concern here since this is always
+    # computed live from the recipe's current ingredients, never
+    # frozen).
+    protein_g: int
+    carbs_g: int
+    fat_g: int
+    fiber_g: int
+    sugar_g: int
+    countable_sugar_g: int
+    saturated_fat_g: int
+    sodium_mg: int
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -424,7 +441,13 @@ class LoggedRecipeIngredientOut(BaseModel):
     traceability; item_name/serving_size_name/grams/kcal are the frozen
     values and are what should actually be displayed. Built explicitly
     in the router (not from_attributes) so kcal gets the same ceil_int
-    rounding as every other *_logged figure in LogOut."""
+    rounding as every other *_logged figure in LogOut.
+
+    protein_g/carbs_g/fat_g/fiber_g/sugar_g/countable_sugar_g/
+    saturated_fat_g/sodium_mg are all Optional - None for rows logged
+    before the per-ingredient snapshot was widened past kcal/grams (see
+    that migration's own note: no historical value to backfill for
+    those). Present and precise for anything logged since."""
 
     item_id: Optional[int] = None
     item_name: str
@@ -434,6 +457,14 @@ class LoggedRecipeIngredientOut(BaseModel):
     quantity: Decimal
     grams: Decimal
     kcal: int
+    protein_g: Optional[int] = None
+    carbs_g: Optional[int] = None
+    fat_g: Optional[int] = None
+    fiber_g: Optional[int] = None
+    sugar_g: Optional[int] = None
+    countable_sugar_g: Optional[int] = None
+    saturated_fat_g: Optional[int] = None
+    sodium_mg: Optional[int] = None
 
 
 class LogOut(LoggableEntryBase):

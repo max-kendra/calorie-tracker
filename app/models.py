@@ -246,6 +246,23 @@ class LoggedRecipeIngredient(Base):
     # changed or been deleted.
     grams_logged = Column(Numeric, nullable=False)
     kcal_logged = Column(Numeric, nullable=False)
+    # Full per-ingredient breakdown, same "frozen at create_log time"
+    # discipline as everything else here - not a new computation,
+    # compute_recipe_ingredient_snapshot already builds a full
+    # RawTotals per ingredient (needed to sum into the recipe log's own
+    # aggregate *_logged columns), this just keeps the rest of it
+    # instead of discarding everything but kcal. Nullable because
+    # existing rows from before this was added have no historical
+    # value to backfill - only kcal_logged/grams_logged survive for
+    # those (see the migration's own note).
+    protein_g_logged = Column(Numeric, nullable=True)
+    carbs_g_logged = Column(Numeric, nullable=True)
+    fat_g_logged = Column(Numeric, nullable=True)
+    fiber_g_logged = Column(Numeric, nullable=True)
+    sugar_g_logged = Column(Numeric, nullable=True)
+    countable_sugar_g_logged = Column(Numeric, nullable=True)
+    saturated_fat_g_logged = Column(Numeric, nullable=True)
+    sodium_mg_logged = Column(Numeric, nullable=True)
 
     item = relationship("Item")
     serving_size = relationship("ServingSize")
