@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Needed to talk to the API on the Pi over Tailscale -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Needed for barcode/label scanning (capturing a photo to upload) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- Health Connect: read-only access to body-weight history for the
+         Profile screen's weight graph (see health/HealthConnectManager.kt).
+         We never request WRITE_WEIGHT - this app is not a source of
+         weight data, only a reader of whatever the user logs elsewhere
+         (a smart scale's app, Health Connect's own UI, etc.). -->
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+
+    <!-- Without this, Health Connect silently caps reads to the last 30
+         days regardless of what time range we query for - see
+         HealthConnectManager.PERMISSIONS' doc comment. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+
+    <!-- Write access for exporting logged meals as NutritionRecord
+         entries (see HealthConnectManager.writeMealNutrition /
+         deleteMealNutrition). Unlike weight, this app IS a source of
+         nutrition data, so a write permission is genuinely needed here,
+         not just read. -->
+    <uses-permission android:name="android.permission.health.WRITE_NUTRITION" />
+
+    <!-- Makes the Health Connect app visible to package-visibility
+         queries (required on Android 11+ to check whether it's
+         installed / launch its permission UI) on Android 9-13, where
+         Health Connect is a separate app rather than a framework
+         module built into the OS (14+). -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Meal Tracker"
+        android:theme="@style/Theme.MealTracker"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.MealTracker">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Required by Health Connect: lets the system link to an
+                 in-app explanation of why we request READ_WEIGHT, shown
+                 from Health Connect's own permission-management UI. We
+                 don't have a dedicated rationale screen yet, so this
+                 currently just opens the app itself (MainActivity) -
+                 fine functionally, but worth replacing with a real
+                 explanation screen before a Play Store release. -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <!-- Alternate rationale intent-filter action name required for
+             Health Connect versions prior to the androidx.health.*
+             action above - both are declared per Health Connect's own
+             integration guidance, since which one is used depends on
+             the Health Connect version installed on the device. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Exposes our private cache-file images (captured photos
+             awaiting crop) as content:// URIs. No longer strictly
+             required for crossing to another app's Activity now that
+             cropping is now a self-contained, in-process Compose dialog
+             (see ui/components/CropDialog.kt) rather than
+             UCrop's separate Activity, but content:// URIs are still the
+             safer/more broadly-compatible way to hand off these images
+             (e.g. to ContentResolver-based readers), so kept as-is. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+
+</manifest>
