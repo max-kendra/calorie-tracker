@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,12 +28,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.mealtracker.android.ui.screens.StreakCalendarMonthState
+import com.mealtracker.android.util.localeStartOffset
+import com.mealtracker.android.util.localeWeekdayHeaders
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
 
-private val WEEKDAY_HEADERS = listOf("S", "M", "T", "W", "T", "F", "S")
 private val StreakRingColor = Color(0xFFE8837A) // matches the flame icon on the streak card
 
 /**
@@ -51,6 +53,7 @@ fun StreakCalendarDialog(
     onDismiss: () -> Unit
 ) {
     val today = LocalDate.now()
+    val weekdayHeaders = remember { localeWeekdayHeaders() }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -75,7 +78,7 @@ fun StreakCalendarDialog(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    WEEKDAY_HEADERS.forEach { label ->
+                    weekdayHeaders.forEach { label ->
                         Text(
                             label,
                             modifier = Modifier.weight(1f),
@@ -88,7 +91,7 @@ fun StreakCalendarDialog(
 
                 val firstOfMonth = displayedMonth.atDay(1)
                 val daysInMonth = displayedMonth.lengthOfMonth()
-                val startOffset = firstOfMonth.dayOfWeek.value % 7
+                val startOffset = localeStartOffset(firstOfMonth)
                 val totalCells = startOffset + daysInMonth
                 val rowCount = (totalCells + 6) / 7
 

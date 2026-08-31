@@ -185,7 +185,7 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
                     serving_size_id=ri.serving_size_id,
                     serving_size_name_logged=ri.serving_size.name if ri.serving_size else None,
                     serving_size_weight_g_logged=ri.serving_size.weight_g if ri.serving_size else None,
-                    quantity=ri.quantity,
+                    quantity=scaled_quantity,
                     grams_logged=grams,
                     kcal_logged=ing_totals.kcal,
                     protein_g_logged=ing_totals.protein_g,
@@ -197,7 +197,7 @@ def commit_meal_plans(payload: CommitRange, db: Session = Depends(get_db)):
                     saturated_fat_g_logged=ing_totals.saturated_fat_g,
                     sodium_mg_logged=ing_totals.sodium_mg,
                 )
-                for ri, ing_totals, grams in ingredient_snapshot
+                for ri, ing_totals, grams, scaled_quantity in ingredient_snapshot
             ]
         db.add(log)
         db.flush()

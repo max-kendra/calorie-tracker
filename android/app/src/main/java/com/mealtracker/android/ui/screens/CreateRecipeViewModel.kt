@@ -161,8 +161,13 @@ class CreateRecipeViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(name = name)
     }
 
+    // Whole numbers only -- unlike a logged quantity of a recipe (which
+    // can be a fractional number of servings, e.g. "1.5 servings"), the
+    // recipe's own yield count is filtered to digits here so it can't
+    // end up as a decimal in the first place, rather than just being
+    // rounded/validated after the fact.
     fun updateServings(servings: String) {
-        _uiState.value = _uiState.value.copy(servings = servings)
+        _uiState.value = _uiState.value.copy(servings = servings.filter { it.isDigit() })
     }
 
     fun proceedToIngredients() {

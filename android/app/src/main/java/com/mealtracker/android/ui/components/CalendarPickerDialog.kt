@@ -21,6 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +30,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.mealtracker.android.ui.screens.CalendarMonthState
+import com.mealtracker.android.util.localeStartOffset
+import com.mealtracker.android.util.localeWeekdayHeaders
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
@@ -49,7 +52,6 @@ private fun colorForCount(count: Int): Color = when {
     else -> TrackedNone
 }
 
-private val WEEKDAY_HEADERS = listOf("S", "M", "T", "W", "T", "F", "S")
 
 /**
  * Month calendar for picking a Journal date. Each day is a colored
@@ -69,6 +71,7 @@ fun CalendarPickerDialog(
     onDateSelected: (LocalDate) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val weekdayHeaders = remember { localeWeekdayHeaders() }
     Dialog(onDismissRequest = onDismiss) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -92,7 +95,7 @@ fun CalendarPickerDialog(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    WEEKDAY_HEADERS.forEach { label ->
+                    weekdayHeaders.forEach { label ->
                         Text(
                             label,
                             modifier = Modifier.weight(1f),
@@ -105,10 +108,7 @@ fun CalendarPickerDialog(
 
                 val firstOfMonth = displayedMonth.atDay(1)
                 val daysInMonth = displayedMonth.lengthOfMonth()
-                // DayOfWeek.value is Monday=1..Sunday=7; %7 remaps to
-                // Sunday=0..Saturday=6 so the grid starts on Sunday,
-                // matching WEEKDAY_HEADERS above.
-                val startOffset = firstOfMonth.dayOfWeek.value % 7
+                val startOffset = localeStartOffset(firstOfMonth)
                 val totalCells = startOffset + daysInMonth
                 val rowCount = (totalCells + 6) / 7
 

@@ -148,7 +148,10 @@ class RecipesViewModel : ViewModel() {
     fun updateEditName(value: String) { _uiState.value = _uiState.value.copy(editName = value) }
     fun updateEditInstructions(value: String) { _uiState.value = _uiState.value.copy(editInstructions = value) }
     fun updateEditSourceUrl(value: String) { _uiState.value = _uiState.value.copy(editSourceUrl = value) }
-    fun updateEditServings(value: String) { _uiState.value = _uiState.value.copy(editServings = value) }
+    // Digits only -- same reasoning as CreateRecipeViewModel.updateServings:
+    // a recipe's own yield count is a whole number, unlike a logged
+    // quantity of servings of it (which can be fractional).
+    fun updateEditServings(value: String) { _uiState.value = _uiState.value.copy(editServings = value.filter { it.isDigit() }) }
 
     fun saveEdits() {
         val state = _uiState.value

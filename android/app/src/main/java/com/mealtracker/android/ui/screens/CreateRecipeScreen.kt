@@ -7,29 +7,38 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -43,6 +52,7 @@ import com.mealtracker.android.ui.components.CreateServingDialog
 import com.mealtracker.android.ui.components.ItemQuantityDialog
 import com.mealtracker.android.ui.components.ItemResultsList
 import com.mealtracker.android.ui.components.MacroColors
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -117,7 +127,7 @@ private fun CreateRecipeDetailsScreen(viewModel: CreateRecipeViewModel, onDone: 
             value = state.servings,
             onValueChange = viewModel::updateServings,
             label = { Text("Servings") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(
                 onDone = { focusManager.clearFocus() }
             ),
@@ -155,6 +165,13 @@ private fun CreateRecipeDetailsScreen(viewModel: CreateRecipeViewModel, onDone: 
  * screen in the first place, so only Search/Barcode make sense as
  * methods underneath it.
  */
+// BottomSheetScaffold's "Expanded" state sizes itself to the sheet
+// content's own height with sparse content that barely clears the
+// peek height (same issue MealDetailScreen's own add-item sheet hit --
+// see that screen's own doc comment on expandedSheetMinHeight), so a
+// forced minimum height is used here too to make the dragged-open
+// search pane predictably cover most of the screen.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateRecipeIngredientsScreen(
     viewModel: CreateRecipeViewModel,
@@ -163,171 +180,230 @@ private fun CreateRecipeIngredientsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = { viewModel.backToDetails() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to recipe details")
-            }
-            Text(state.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = onDone) { Text("Cancel") }
-        }
+    val scaffoldState = rememberBottomSheetScaffoldState()
+    val coroutineScope = rememberCoroutineScope()
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
+    val expandedSheetMinHeight = screenHeightDp * 0.82f
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            IngredientMethodChip(
-                icon = Icons.Filled.Search,
-                label = "Search",
-                selected = state.ingredientMode == CreateRecipeIngredientMode.SEARCH,
-                onClick = { viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH) }
-            )
-            IngredientMethodChip(
-                icon = Icons.Filled.QrCodeScanner,
-                label = "Barcode",
-                selected = state.ingredientMode == CreateRecipeIngredientMode.BARCODE,
-                onClick = { viewModel.selectIngredientMode(CreateRecipeIngredientMode.BARCODE) }
-            )
-        }
+    fun selectIngredientMode(mode: CreateRecipeIngredientMode) {
+        viewModel.selectIngredientMode(mode)
+        coroutineScope.launch { scaffoldState.bottomSheetState.expand() }
+    }
 
-        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-
-        if (state.ingredients.isNotEmpty()) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Text("Added so far", style = MaterialTheme.typography.titleSmall)
-                state.ingredients.forEach { row ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            // Tap the row itself to edit quantity/serving
-                            // (reopens the same ItemQuantityDialog used to
-                            // add it, pre-filled with what's actually
-                            // stored - see CreateRecipeIngredientRow's doc
-                            // comment) instead of the old delete-and-re-add
-                            // dance.
-                            .clickable { viewModel.openQuantityPicker(row.item, lastLoggedAmounts) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        androidx.compose.foundation.layout.Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                                .background(com.mealtracker.android.ui.components.CatalogVisuals.backgroundFor(row.item.type)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (row.item.imagePath != null) {
-                                coil3.compose.AsyncImage(
-                                    model = com.mealtracker.android.BuildConfig.BASE_URL + row.item.imagePath,
-                                    contentDescription = null,
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Icon(
-                                    com.mealtracker.android.ui.components.CatalogVisuals.iconFor(row.item.type),
-                                    contentDescription = null,
-                                    tint = com.mealtracker.android.ui.components.CatalogVisuals.iconTint(),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(row.item.name, style = MaterialTheme.typography.bodyMedium)
-                            val servingSuffix = row.servingSize?.let { " (${formatQuantity(row.grams)}g)" } ?: ""
-                            Text(
-                                "${formatQuantity(row.quantity)}${row.servingSize?.let { " ${it.name}" } ?: "g"}$servingSuffix",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(createRecipeIngredientMacroShortcut(row), style = MaterialTheme.typography.labelSmall)
-                        }
-                        Text("${row.kcal.roundToInt()} Cal", style = MaterialTheme.typography.bodyMedium)
-                    }
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        // A visible shadow (rather than the default flat 1.dp) is what
+        // actually reads as "a card resting on top of the ingredients
+        // list" rather than a panel that's just flush with the rest of
+        // the screen -- same rounded-top shape as MealDetailScreen's
+        // own add-item sheet, but that screen's dark hero header already
+        // gave it enough visual separation without needing this too.
+        sheetShadowElevation = 8.dp,
+        sheetPeekHeight = 110.dp,
+        sheetContent = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = expandedSheetMinHeight)
+                    .padding(top = 4.dp, bottom = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    IngredientMethodChip(
+                        icon = Icons.Filled.Search,
+                        label = "Search",
+                        selected = state.ingredientMode == CreateRecipeIngredientMode.SEARCH,
+                        onClick = { selectIngredientMode(CreateRecipeIngredientMode.SEARCH) }
+                    )
+                    IngredientMethodChip(
+                        icon = Icons.Filled.QrCodeScanner,
+                        label = "Barcode",
+                        selected = state.ingredientMode == CreateRecipeIngredientMode.BARCODE,
+                        onClick = { selectIngredientMode(CreateRecipeIngredientMode.BARCODE) }
+                    )
                 }
 
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
-                RecipeTotalsPreviewCard(state.totalsPreview, state.perServingPreview)
 
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
-                Button(
-                    onClick = { viewModel.save() },
-                    enabled = state.isSaveValid && !state.isSaving,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (state.isSaving) "Saving..." else "Save recipe")
+                when (state.ingredientMode) {
+                    CreateRecipeIngredientMode.SEARCH -> {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                            OutlinedTextField(
+                                value = state.ingredientSearchQuery,
+                                onValueChange = viewModel::updateIngredientSearchQuery,
+                                label = { Text("Search for an ingredient") },
+                                singleLine = true,
+                                trailingIcon = if (state.ingredientSearchQuery.isNotEmpty()) {
+                                    {
+                                        IconButton(onClick = { viewModel.updateIngredientSearchQuery("") }) {
+                                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                                        }
+                                    }
+                                } else null,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                            ItemResultsList(
+                                items = state.ingredientSearchResults,
+                                isLoading = state.isSearchingIngredients,
+                                emptyMessage = if (state.ingredientSearchQuery.isBlank()) {
+                                    "Search for an item to add as an ingredient."
+                                } else {
+                                    "No matches."
+                                },
+                                quickLoggingItemId = null,
+                                lastLoggedAmounts = lastLoggedAmounts,
+                                onItemClick = { viewModel.openQuantityPicker(it, lastLoggedAmounts) },
+                                onQuickAddClick = { itemId ->
+                                    state.ingredientSearchResults.find { it.itemId == itemId }?.let {
+                                        viewModel.openQuantityPicker(it, lastLoggedAmounts)
+                                    }
+                                },
+                                // Sheet content already scrolls as a whole via
+                                // heightIn(min = expandedSheetMinHeight) sizing
+                                // it well past the visible area -- letting
+                                // ItemResultsList ALSO cap/scroll itself would
+                                // just clip results to its own 500.dp max
+                                // partway down the expanded sheet instead of
+                                // filling it.
+                                scrollable = false
+                            )
+                        }
+                    }
+                    CreateRecipeIngredientMode.BARCODE -> {
+                        val addItemViewModel: AddItemViewModel =
+                            viewModel(key = "create_recipe_barcode_${System.identityHashCode(viewModel)}")
+                        AddItemScreen(
+                            viewModel = addItemViewModel,
+                            savedScreenPromptText = "Want to review it before adding to your recipe?",
+                            savedScreenActionLabel = "View Ingredient",
+                            onUseCreatedItem = { item ->
+                                addItemViewModel.resetToScanChoice()
+                                viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+                                viewModel.addIngredientFromBarcodeFlow(item)
+                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                            },
+                            onBack = {
+                                addItemViewModel.resetToScanChoice()
+                                viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+                            },
+                            onDone = {
+                                addItemViewModel.resetToScanChoice()
+                                viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+                                coroutineScope.launch { scaffoldState.bottomSheetState.partialExpand() }
+                            }
+                        )
+                    }
                 }
-                if (state.saveError != null) {
-                    Text(
-                        "Couldn't save: ${state.saveError}",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
             }
         }
-
-        when (state.ingredientMode) {
-            CreateRecipeIngredientMode.SEARCH -> {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    OutlinedTextField(
-                        value = state.ingredientSearchQuery,
-                        onValueChange = viewModel::updateIngredientSearchQuery,
-                        label = { Text("Search for an ingredient") },
-                        singleLine = true,
-                        trailingIcon = if (state.ingredientSearchQuery.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { viewModel.updateIngredientSearchQuery("") }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                                }
-                            }
-                        } else null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { viewModel.backToDetails() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to recipe details")
                 }
-                ItemResultsList(
-                    items = state.ingredientSearchResults,
-                    isLoading = state.isSearchingIngredients,
-                    emptyMessage = if (state.ingredientSearchQuery.isBlank()) {
-                        "Search for an item to add as an ingredient."
-                    } else {
-                        "No matches."
-                    },
-                    quickLoggingItemId = null,
-                    lastLoggedAmounts = lastLoggedAmounts,
-                    onItemClick = { viewModel.openQuantityPicker(it, lastLoggedAmounts) },
-                    onQuickAddClick = { itemId ->
-                        state.ingredientSearchResults.find { it.itemId == itemId }?.let { viewModel.openQuantityPicker(it, lastLoggedAmounts) }
-                    }
+                Text(state.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onDone) { Text("Cancel") }
+            }
+
+            if (state.ingredients.isEmpty()) {
+                Text(
+                    "Drag the search pane up to start adding ingredients.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
-            CreateRecipeIngredientMode.BARCODE -> {
-                val addItemViewModel: AddItemViewModel =
-                    viewModel(key = "create_recipe_barcode_${System.identityHashCode(viewModel)}")
-                AddItemScreen(
-                    viewModel = addItemViewModel,
-                    savedScreenPromptText = "Want to review it before adding to your recipe?",
-                    savedScreenActionLabel = "View Ingredient",
-                    onUseCreatedItem = { item ->
-                        addItemViewModel.resetToScanChoice()
-                        viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
-                        viewModel.addIngredientFromBarcodeFlow(item)
-                    },
-                    onBack = {
-                        addItemViewModel.resetToScanChoice()
-                        viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
-                    },
-                    onDone = {
-                        addItemViewModel.resetToScanChoice()
-                        viewModel.selectIngredientMode(CreateRecipeIngredientMode.SEARCH)
+
+            if (state.ingredients.isNotEmpty()) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Text("Added so far", style = MaterialTheme.typography.titleSmall)
+                    state.ingredients.forEach { row ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // Tap the row itself to edit quantity/serving
+                                // (reopens the same ItemQuantityDialog used to
+                                // add it, pre-filled with what's actually
+                                // stored - see CreateRecipeIngredientRow's doc
+                                // comment) instead of the old delete-and-re-add
+                                // dance.
+                                .clickable { viewModel.openQuantityPicker(row.item, lastLoggedAmounts) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.foundation.layout.Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                                    .background(com.mealtracker.android.ui.components.CatalogVisuals.backgroundFor(row.item.type)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (row.item.imagePath != null) {
+                                    coil3.compose.AsyncImage(
+                                        model = com.mealtracker.android.BuildConfig.BASE_URL + row.item.imagePath,
+                                        contentDescription = null,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        com.mealtracker.android.ui.components.CatalogVisuals.iconFor(row.item.type),
+                                        contentDescription = null,
+                                        tint = com.mealtracker.android.ui.components.CatalogVisuals.iconTint(),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(row.item.name, style = MaterialTheme.typography.bodyMedium)
+                                val servingSuffix = row.servingSize?.let { " (${formatQuantity(row.grams)}g)" } ?: ""
+                                Text(
+                                    "${formatQuantity(row.quantity)}${row.servingSize?.let { " ${it.name}" } ?: "g"}$servingSuffix",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(createRecipeIngredientMacroShortcut(row), style = MaterialTheme.typography.labelSmall)
+                            }
+                            Text("${row.kcal.roundToInt()} Cal", style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
-                )
+
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                    RecipeTotalsPreviewCard(state.totalsPreview, state.perServingPreview)
+
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                    Button(
+                        onClick = { viewModel.save() },
+                        enabled = state.isSaveValid && !state.isSaving,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (state.isSaving) "Saving..." else "Save recipe")
+                    }
+                    if (state.saveError != null) {
+                        Text(
+                            "Couldn't save: ${state.saveError}",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                }
             }
         }
     }
@@ -412,7 +488,7 @@ private fun RecipeTotalsPreviewCard(total: RecipeTotalsPreview, perServing: Reci
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
         Text(
             "Per serving: ${perServing.proteinG.roundToInt()}P \u00b7 ${perServing.fatG.roundToInt()}F \u00b7 " +
-                "${perServing.carbsG.roundToInt()}C \u00b7 ${perServing.fiberG.roundToInt()}Fi",
+                    "${perServing.carbsG.roundToInt()}C \u00b7 ${perServing.fiberG.roundToInt()}Fi",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

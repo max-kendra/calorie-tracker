@@ -77,9 +77,22 @@ private const val SALT_TO_SODIUM_RATIO = 2.5
  * decimals (e.g. "37.5") when the value actually has one - used
  * anywhere a quantity gets shown/pre-filled as text, per design
  * discussion ("only show whole grams, not fractions"). Not private -
- * MealDetailScreen's logged-items row list uses it too. */
-fun formatQuantity(value: Double): String =
-    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+ * MealDetailScreen's logged-items row list uses it too.
+ *
+ * Rounded to 1 decimal place first (values computed from
+ * quantity/serving-size math - e.g. a recipe ingredient's per-serving
+ * grams - can otherwise come out as long repeating decimals like
+ * 33.333333333333336) before the whole-number check, so those still
+ * collapse to a single clean digit ("33.3") instead of dumping the
+ * raw Double. */
+fun formatQuantity(value: Double): String {
+    val rounded = (kotlin.math.round(value * 10) / 10.0)
+    return if (rounded == rounded.toLong().toDouble()) {
+        rounded.toLong().toString()
+    } else {
+        rounded.toString()
+    }
+}
 
 /** Remembers what quantity/serving was last used to log a given item,
  * in-memory only (per app session, not persisted) - backs both the
@@ -1740,6 +1753,20 @@ class MealDetailViewModel : ViewModel() {
             recipeDetailError = null,
             recipeLogQuantityInput = log.quantity.toDoubleOrNull()?.let { formatQuantity(it) } ?: log.quantity,
             recipeLogInstanceId = log.id,
+            // Editing only ever operates on the live, shared recipe
+            // template (see saveRecipeEdit/confirmAddIngredient, both
+            // keyed on recipe.recipeId, not this Log) - never on this
+            // specific logged instance. Leaving a stale isEditingRecipe
+            // on from a previous recipe view would show THIS instance's
+            // frozen/scaled numbers inside an editor that actually
+            // writes to the unscaled template (see design discussion:
+            // "if we're editing the global template but it shows the
+            // quantities per serving, that's kind of messy"). Editing
+            // isn't offered at all from a logged instance any more (see
+            // RecipeInfoScreen's own onEditClick), but this reset
+            // covers re-entering a log's view from an edit that was
+            // left open without saving/canceling.
+            isEditingRecipe = false,
             // Straight from this Log's own frozen columns/rows - see
             // recipeLogFrozenTotals/recipeLogFrozenIngredients' own doc
             // comment. Only set when this particular log actually has a

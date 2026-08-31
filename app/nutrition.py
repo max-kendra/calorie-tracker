@@ -223,17 +223,26 @@ def compute_recipe_totals_for_quantity(recipe: Recipe, quantity: Decimal) -> Raw
 
 def compute_recipe_ingredient_snapshot(
     recipe: Recipe, quantity: Decimal
-) -> list[tuple["RecipeIngredient", RawTotals, Decimal]]:
+) -> list[tuple["RecipeIngredient", RawTotals, Decimal, Decimal]]:
     """
     Per-ingredient breakdown at the given logged quantity (servings
-    consumed) - each ingredient's RawTotals and resolved grams, scaled by
-    the same quantity/servings factor as compute_recipe_totals_for_quantity.
-    Called once, at create_log time, to freeze into LoggedRecipeIngredient
-    rows - NOT re-called on later quantity/serving edits to an existing
-    log, since recipe.ingredients reflects the recipe's CURRENT (possibly
-    since-changed) composition, not what it was when first logged. See
-    LoggedRecipeIngredient's docstring for why this needs to be captured
-    at all rather than resolved live.
+    consumed) - each ingredient's RawTotals, resolved grams, AND its own
+    quantity (the serving-multiplier-or-raw-grams value LoggedRecipeIngredient.
+    quantity stores), all scaled by the same quantity/servings factor as
+    compute_recipe_totals_for_quantity. Called once, at create_log time,
+    to freeze into LoggedRecipeIngredient rows - NOT re-called on later
+    quantity/serving edits to an existing log, since recipe.ingredients
+    reflects the recipe's CURRENT (possibly since-changed) composition,
+    not what it was when first logged. See LoggedRecipeIngredient's
+    docstring for why this needs to be captured at all rather than
+    resolved live.
+
+    The scaled quantity is returned (not just totals/grams) so the
+    ingredient's displayed WEIGHT matches its displayed MACROS - e.g. "1
+    of 3 servings" of a recipe should show each ingredient at a third of
+    its full-recipe amount, the same fraction its frozen kcal/protein/
+    etc already reflect, rather than leaving the full-recipe quantity
+    sitting next to already-scaled-down macros.
     """
     servings = recipe.servings or Decimal("1")
     factor = quantity / servings
@@ -241,5 +250,6 @@ def compute_recipe_ingredient_snapshot(
     for ri in recipe.ingredients:
         totals = compute_item_totals(ri.item, ri.quantity, ri.serving_size) * factor
         grams = resolve_grams(ri.quantity, ri.serving_size) * factor
-        snapshot.append((ri, totals, grams))
+        scaled_quantity = ri.quantity * factor
+        snapshot.append((ri, totals, grams, scaled_quantity))
     return snapshot

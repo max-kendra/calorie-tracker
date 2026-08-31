@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -54,6 +55,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mealtracker.android.network.ApiClient
@@ -341,6 +343,7 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                                     onValueChange = { viewModel.updateEditServings(it) },
                                     label = { Text("Servings") },
                                     singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.padding(top = 8.dp))
@@ -376,11 +379,16 @@ private fun RecipeBrowseDetailScreen(viewModel: RecipesViewModel, recipeId: Int)
                         } else {
                             Text(recipe.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                             Text(
-                                if (recipe.recipeType == "meal") {
-                                    "${recipe.totalsPerServing.kcal} Cal"
-                                } else {
-                                    "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total"
-                                },
+                                // Always the "per serving · N servings total"
+                                // framing, regardless of recipe type/serving
+                                // count, reusing the exact same format
+                                // string rather than special-casing a
+                                // single-serving meal down to a bare "Cal"
+                                // (see design discussion: "we only see the
+                                // kcal totals per serving if the serving
+                                // count is more than 1, but it'd be nice to
+                                // see kcal totals regardless").
+                                "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

@@ -89,6 +89,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -718,6 +719,8 @@ fun MealDetailScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .background(MaterialTheme.colorScheme.surface)
+                // Same zIndex safeguard as RecipeInfoScreen's own wrapping Box -- see that one's doc comment.
+                .zIndex(10f)
         ) {
             CreateRecipeContent(
                 viewModel = createRecipeViewModel,
@@ -757,7 +760,14 @@ fun MealDetailScreen(
             frozenIngredients = state.recipeLogFrozenIngredients,
             frozenServingsYield = state.recipeLogFrozenServingsYield,
             onDeleteInstance = { viewModel.deleteRecipeLogInstance() },
-            isEditing = state.isEditingRecipe,
+            // Defensive, on top of the reset in openLogDetail and the
+            // pencil icon simply not being offered here - see design
+            // discussion: "should we be allowing editing from a log
+            // instance at all?". Never lets edit mode's live-template
+            // ingredient list render alongside a logged instance's
+            // frozen/scaled display, regardless of any stale
+            // isEditingRecipe left over from elsewhere.
+            isEditing = state.isEditingRecipe && state.recipeLogInstanceId == null,
             editName = state.editRecipeName,
             editServings = state.editRecipeServings,
             isSavingEdit = state.isSavingRecipeEdit,
@@ -803,6 +813,8 @@ fun MealDetailScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .background(MaterialTheme.colorScheme.surface)
+                // Same zIndex safeguard as RecipeInfoScreen's own wrapping Box -- see that one's doc comment.
+                .zIndex(10f)
         ) {
             IconButton(onClick = { viewModel.dismissRecipeDetail() }, modifier = Modifier.padding(8.dp)) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = "Close")
@@ -1228,7 +1240,7 @@ private fun RecipeResultsList(
  * always exactly one serving, so showing/editing a servings count for
  * it would be showing a number that's never actually meaningful).
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun RecipeInfoScreen(
     recipe: RecipeDetail,
@@ -1433,8 +1445,33 @@ private fun RecipeInfoScreen(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
+            // BottomSheetScaffold's sheet Surface (drawn earlier as a
+            // sibling in MealDetailScreen's own wrapping Box, before
+            // this composable's own place in that Box - see this
+            // screen's own doc comment on RecipeInfoScreen's mounting
+            // point) carries its own shadowElevation, which - unlike a
+            // plain background color - Compose can composite in front
+            // of a later, but zIndex-less, sibling instead of strictly
+            // honoring declaration order (see design discussion: "the
+            // draggable panel is under the ingredients list" - the
+            // peeked sheet's Search/Barcode/Create row and icon were
+            // bleeding through behind this screen's own hero image).
+            // Explicit zIndex forces this to always draw in front,
+            // regardless of that shadow-compositing behavior.
+            .zIndex(10f)
     ) {
-        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        // "Add ingredient" now lives in a draggable Search/Barcode
+        // sheet -- same BottomSheetScaffold pattern as
+        // CreateRecipeIngredientsScreen's own sheet -- instead of an
+        // inline search field, so it can float on top of a long
+        // ingredient list instead of being pushed below it (see design
+        // discussion: "we just want the ingredient list and then
+        // draggable card with the two buttons under there"). Only
+        // mounted while editing -- viewing (not editing) a recipe has
+        // nothing to add ingredients TO from here.
+        @Composable
+        fun RecipeInfoBody(modifier: Modifier) {
+            Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1547,8 +1584,22 @@ private fun RecipeInfoScreen(
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(recipe.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                        IconButton(onClick = onEditClick) {
-                            Icon(Icons.Filled.Edit, contentDescription = "Edit name and servings")
+                        // Editing always writes to the live, shared
+                        // recipe template (see saveRecipeEdit/
+                        // confirmAddIngredient's own doc comments), never
+                        // to this specific logged instance - offering it
+                        // here would be editing "the recipe, everywhere,
+                        // forever" from a screen that's otherwise showing
+                        // "what I actually ate this one time" (frozen/
+                        // scaled quantities). So it's only offered when
+                        // this recipe was opened on its own terms (search
+                        // / the Recipes list), not from inside a log (see
+                        // design discussion: "should we be allowing
+                        // editing from a log instance at all?").
+                        if (logInstanceId == null) {
+                            IconButton(onClick = onEditClick) {
+                                Icon(Icons.Filled.Edit, contentDescription = "Edit name and servings")
+                            }
                         }
                     }
                     androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
@@ -1568,9 +1619,11 @@ private fun RecipeInfoScreen(
                                 " (${quantityInput} of ${formatQuantity(totalServings.toDoubleOrNull() ?: 1.0)} servings)"
                             } ?: ""
                             "${frozenTotals.kcal} Cal logged$servingsSuffix"
-                        } else if (recipe.recipeType == "meal") {
-                            "${recipe.totalsPerServing.kcal} Cal"
                         } else {
+                            // Same unconditional "per serving · N servings
+                            // total" framing as RecipesScreen's own detail
+                            // view -- see that screen's own doc comment on
+                            // this same change.
                             "${recipe.totalsPerServing.kcal} Cal / serving \u00b7 ${recipe.servings} servings total"
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -1672,48 +1725,21 @@ private fun RecipeInfoScreen(
                 }
 
                 if (isEditing) {
-                    // Genuinely the same search-list behavior as
-                    // everywhere else in the app (see design
-                    // discussion: "can we genuinely copy the way the
-                    // lists we already have behave") -- recent items
-                    // shown blank-query, debounced search once typing
-                    // starts, not a simplified "only show results once
-                    // you type" version.
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
-                    Text("Add ingredient", style = MaterialTheme.typography.titleSmall)
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 4.dp))
-                    OutlinedTextField(
-                        value = ingredientSearchQuery,
-                        onValueChange = onIngredientSearchQueryChange,
-                        label = { Text("Search for an ingredient") },
-                        singleLine = true,
-                        trailingIcon = if (ingredientSearchQuery.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { onIngredientSearchQueryChange("") }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
-                                }
-                            }
-                        } else null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    ItemResultsList(
-                        items = if (ingredientSearchQuery.isBlank()) recentIngredientItems else ingredientSearchResults,
-                        isLoading = if (ingredientSearchQuery.isBlank()) isLoadingRecentIngredientItems else isSearchingIngredients,
-                        emptyMessage = if (ingredientSearchQuery.isBlank()) "No items yet" else "No matches",
-                        quickLoggingItemId = null,
-                        lastLoggedAmounts = emptyMap(),
-                        onItemClick = onOpenIngredientPicker,
-                        onQuickAddClick = { itemId ->
-                            val results = if (ingredientSearchQuery.isBlank()) recentIngredientItems else ingredientSearchResults
-                            results.find { it.itemId == itemId }?.let(onOpenIngredientPicker)
-                        }
-                    )
+                    // "Add ingredient" is now handled by the draggable
+                    // Search/Barcode sheet this screen is wrapped in
+                    // (see RecipeInfoScreen's own BottomSheetScaffold,
+                    // matching CreateRecipeIngredientsScreen's own
+                    // pattern) instead of an inline search field here --
+                    // see design discussion: "why is the add ingredient
+                    // section there at all? we just want the ingredient
+                    // list and then draggable card with the two buttons
+                    // under there".
 
-                    // Small tappable text under the add-ingredient
-                    // section (see design discussion: "under the add
-                    // button, there should be smaller tappable text to
-                    // delete meal/recipe").
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 12.dp))
+                    // Small tappable text under the ingredient list (see
+                    // design discussion: "under the add button, there
+                    // should be smaller tappable text to delete meal/
+                    // recipe").
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 16.dp))
                     TextButton(onClick = onRequestDelete) {
                         Text(
                             "Delete this ${if (recipe.recipeType == "meal") "meal" else "recipe"}",
@@ -1778,6 +1804,121 @@ private fun RecipeInfoScreen(
                 }
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(bottom = 20.dp))
             }
+            }
+        }
+
+        if (isEditing) {
+            val recipeIngredientScaffoldState = rememberBottomSheetScaffoldState()
+            val recipeIngredientCoroutineScope = rememberCoroutineScope()
+            var recipeIngredientMode by remember { mutableStateOf(CreateRecipeIngredientMode.SEARCH) }
+            val recipeSheetScreenHeightDp = LocalConfiguration.current.screenHeightDp.dp
+            val recipeSheetExpandedMinHeight = recipeSheetScreenHeightDp * 0.82f
+
+            fun selectRecipeIngredientMode(mode: CreateRecipeIngredientMode) {
+                recipeIngredientMode = mode
+                recipeIngredientCoroutineScope.launch { recipeIngredientScaffoldState.bottomSheetState.expand() }
+            }
+
+            BottomSheetScaffold(
+                scaffoldState = recipeIngredientScaffoldState,
+                sheetContainerColor = MaterialTheme.colorScheme.surface,
+                sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                sheetShadowElevation = 8.dp,
+                sheetPeekHeight = 110.dp,
+                sheetContent = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = recipeSheetExpandedMinHeight)
+                            .padding(top = 4.dp, bottom = 16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            AddMethodIcon(
+                                Icons.Filled.Search, "Search",
+                                selected = recipeIngredientMode == CreateRecipeIngredientMode.SEARCH,
+                                onClick = { selectRecipeIngredientMode(CreateRecipeIngredientMode.SEARCH) }
+                            )
+                            AddMethodIcon(
+                                Icons.Filled.QrCodeScanner, "Barcode",
+                                selected = recipeIngredientMode == CreateRecipeIngredientMode.BARCODE,
+                                onClick = { selectRecipeIngredientMode(CreateRecipeIngredientMode.BARCODE) }
+                            )
+                        }
+
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+
+                        when (recipeIngredientMode) {
+                            CreateRecipeIngredientMode.SEARCH -> {
+                                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                                    OutlinedTextField(
+                                        value = ingredientSearchQuery,
+                                        onValueChange = onIngredientSearchQueryChange,
+                                        label = { Text("Search for an ingredient") },
+                                        singleLine = true,
+                                        trailingIcon = if (ingredientSearchQuery.isNotEmpty()) {
+                                            {
+                                                IconButton(onClick = { onIngredientSearchQueryChange("") }) {
+                                                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                                                }
+                                            }
+                                        } else null,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(top = 8.dp))
+                                    ItemResultsList(
+                                        items = if (ingredientSearchQuery.isBlank()) recentIngredientItems else ingredientSearchResults,
+                                        isLoading = if (ingredientSearchQuery.isBlank()) isLoadingRecentIngredientItems else isSearchingIngredients,
+                                        emptyMessage = if (ingredientSearchQuery.isBlank()) "No items yet" else "No matches",
+                                        quickLoggingItemId = null,
+                                        lastLoggedAmounts = emptyMap(),
+                                        onItemClick = onOpenIngredientPicker,
+                                        onQuickAddClick = { itemId ->
+                                            val results = if (ingredientSearchQuery.isBlank()) recentIngredientItems else ingredientSearchResults
+                                            results.find { it.itemId == itemId }?.let(onOpenIngredientPicker)
+                                        },
+                                        // Same reasoning as CreateRecipeIngredientsScreen's own
+                                        // sheet -- the sheet's Column already scrolls as a whole
+                                        // via heightIn(min = recipeSheetExpandedMinHeight), so
+                                        // ItemResultsList shouldn't ALSO cap/scroll itself.
+                                        scrollable = false
+                                    )
+                                }
+                            }
+                            CreateRecipeIngredientMode.BARCODE -> {
+                                val addItemViewModel: AddItemViewModel =
+                                    viewModel(key = "recipe_edit_barcode_${recipe.recipeId}")
+                                AddItemScreen(
+                                    viewModel = addItemViewModel,
+                                    savedScreenPromptText = "Want to review it before adding to your recipe?",
+                                    savedScreenActionLabel = "View Ingredient",
+                                    onUseCreatedItem = { item ->
+                                        addItemViewModel.resetToScanChoice()
+                                        recipeIngredientMode = CreateRecipeIngredientMode.SEARCH
+                                        onOpenIngredientPicker(item)
+                                        recipeIngredientCoroutineScope.launch { recipeIngredientScaffoldState.bottomSheetState.partialExpand() }
+                                    },
+                                    onBack = {
+                                        addItemViewModel.resetToScanChoice()
+                                        recipeIngredientMode = CreateRecipeIngredientMode.SEARCH
+                                    },
+                                    onDone = {
+                                        addItemViewModel.resetToScanChoice()
+                                        recipeIngredientMode = CreateRecipeIngredientMode.SEARCH
+                                        recipeIngredientCoroutineScope.launch { recipeIngredientScaffoldState.bottomSheetState.partialExpand() }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            ) { recipeInnerPadding ->
+                RecipeInfoBody(modifier = Modifier.padding(recipeInnerPadding))
+            }
+        } else {
+            RecipeInfoBody(modifier = Modifier)
         }
 
         if (cropSourceBitmap != null) {
@@ -2144,6 +2285,9 @@ private fun ItemLogPageDialog(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
+            // Same zIndex safeguard as RecipeInfoScreen's own wrapping
+            // Box -- see that one's doc comment.
+            .zIndex(10f)
     ) {
         Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             Box(

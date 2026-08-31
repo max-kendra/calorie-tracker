@@ -5,10 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.mealtracker.android.network.ApiClient
 import com.mealtracker.android.network.models.Log
 import com.mealtracker.android.network.models.PhysiologicalGuideline
+import com.mealtracker.android.util.startOfLocaleWeek
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -149,7 +149,7 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val today = LocalDate.now()
-                val weekStart = referenceDate.with(DayOfWeek.MONDAY)
+                val weekStart = referenceDate.startOfLocaleWeek()
                 val weekEnd = weekStart.plusDays(6)
 
                 // Streak lookback -- 60 days is comfortably more than any

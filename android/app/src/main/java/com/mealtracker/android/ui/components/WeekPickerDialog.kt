@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,21 +28,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import java.time.DayOfWeek
+import com.mealtracker.android.util.localeStartOffset
+import com.mealtracker.android.util.localeWeekdayHeaders
+import com.mealtracker.android.util.startOfLocaleWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
 
-private val WEEKDAY_HEADERS = listOf("S", "M", "T", "W", "T", "F", "S")
-
 /**
  * Month calendar for picking a WEEK (not a single day) -- backs the
  * Home screen's week navigator. Unlike CalendarPickerDialog (which
  * selects one Journal date and colors days by how much got tracked),
- * clicking any day here selects the Monday-Sunday week that contains
- * it, and every day belonging to the currently-selected week gets
- * highlighted together, not just the one tapped.
+ * clicking any day here selects the week (starting on
+ * localeFirstDayOfWeek(), see CalendarWeekUtils) that contains it, and
+ * every day belonging to the currently-selected week gets highlighted
+ * together, not just the one tapped.
  */
 @Composable
 fun WeekPickerDialog(
@@ -53,6 +55,7 @@ fun WeekPickerDialog(
 ) {
     val selectedWeekEnd = selectedWeekStart.plusDays(6)
     val today = LocalDate.now()
+    val weekdayHeaders = remember { localeWeekdayHeaders() }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -77,7 +80,7 @@ fun WeekPickerDialog(
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
 
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    WEEKDAY_HEADERS.forEach { label ->
+                    weekdayHeaders.forEach { label ->
                         Text(
                             label,
                             modifier = Modifier.weight(1f),
@@ -90,10 +93,9 @@ fun WeekPickerDialog(
 
                 val firstOfMonth = displayedMonth.atDay(1)
                 val daysInMonth = displayedMonth.lengthOfMonth()
-                // DayOfWeek.value is Monday=1..Sunday=7; %7 remaps to
-                // Sunday=0..Saturday=6 so the grid starts on Sunday,
-                // matching WEEKDAY_HEADERS above.
-                val startOffset = firstOfMonth.dayOfWeek.value % 7
+                // Matches weekdayHeaders' own locale-aware start day
+                // (see CalendarWeekUtils.localeStartOffset).
+                val startOffset = localeStartOffset(firstOfMonth)
                 val totalCells = startOffset + daysInMonth
                 val rowCount = (totalCells + 6) / 7
 
@@ -119,7 +121,7 @@ fun WeekPickerDialog(
                                                 if (isInSelectedWeek) MaterialTheme.colorScheme.primaryContainer
                                                 else androidx.compose.ui.graphics.Color.Transparent
                                             )
-                                            .clickable { onWeekSelected(date.with(DayOfWeek.MONDAY)) },
+                                            .clickable { onWeekSelected(date.startOfLocaleWeek()) },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(

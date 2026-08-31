@@ -50,8 +50,8 @@ import com.mealtracker.android.ui.components.MacroColors
 import com.mealtracker.android.ui.components.StreakCalendarDialog
 import com.mealtracker.android.ui.components.WeekPickerDialog
 import com.mealtracker.android.ui.components.darkenMacroColor
+import com.mealtracker.android.util.startOfLocaleWeek
 import com.mealtracker.android.ui.theme.KcalGreen
-import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
@@ -110,7 +110,7 @@ fun HomeScreen(viewModel: HomeViewModel = viewModel()) {
     // Falls back to the actual current week if data hasn't loaded yet --
     // only used to seed the week picker dialog's initial highlight.
     val currentWeekStart = (uiState as? HomeUiState.Success)?.weekly?.weekStart
-        ?: LocalDate.now().with(DayOfWeek.MONDAY)
+        ?: LocalDate.now().startOfLocaleWeek()
 
     Column(
         modifier = Modifier
