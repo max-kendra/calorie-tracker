@@ -1,8 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 class Settings(BaseSettings):
-    database_url: str
     default_timezone: str = "Europe/Copenhagen"
     api_key: str
     # Get a free key at https://fdc.nal.usda.gov/api-key-signup - DEMO_KEY
@@ -22,7 +20,16 @@ class Settings(BaseSettings):
     # write volume (see docker-compose.yml's ocr_metrics volume mount).
     ocr_metrics_dir: str = "ocr_metrics"
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    postgres_user: str
+    postgres_password: str
+    postgres_db: str
+    postgres_host: str = "postgres"
+    postgres_port: int = 5432
 
+    @property
+    def database_url(self) -> str:
+        return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
