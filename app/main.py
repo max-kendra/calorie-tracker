@@ -33,6 +33,25 @@ app.include_router(guidelines.router)
 app.include_router(user_profile.router)
 app.include_router(usda.router)
 
+# Same routers, mounted a SECOND time under /api - not a redirect, two
+# real sets of routes sharing the same handler functions (FastAPI
+# supports including one APIRouter more than once with different
+# prefixes). The Android app keeps hitting the plain paths above
+# exactly as it always has; the web frontend (web/src/api/client.ts)
+# is written to call everything under /api/... so that in dev, Vite's
+# proxy (web/vite.config.ts) can forward just that one prefix without
+# needing CORS set up here, and in production the built static files
+# and the API end up on the same origin with no environment-specific
+# base URL needed on the frontend at all - see web/README.md for the
+# full reasoning.
+app.include_router(items.router, prefix="/api")
+app.include_router(recipes.router, prefix="/api")
+app.include_router(logs.router, prefix="/api")
+app.include_router(goals.router, prefix="/api")
+app.include_router(guidelines.router, prefix="/api")
+app.include_router(user_profile.router, prefix="/api")
+app.include_router(usda.router, prefix="/api")
+
 # Serves product photos saved by POST /items/scan-product-photo back out
 # at /media/<filename> -- e.g. an Item's image_path of "media/abc123.jpg"
 # (as returned by that endpoint) is reachable at GET /media/abc123.jpg.
@@ -73,3 +92,29 @@ def _warm_up_ocr():
     happened to be) hit the slow path.
     """
     threading.Thread(target=ocr.warm_up, daemon=True).start()
+
+
+# Serves the built web frontend (web/dist, produced by the Dockerfile's
+# web-builder stage - see that file and web/README.md) at the same
+# origin and port as the API itself. MUST be registered last: Starlette
+# resolves routes in registration order, and a mount at "/" is a
+# catch-all that would otherwise shadow /health, /media, and every
+# /api/... route registered above it if it came first.
+#
+# Guarded rather than assumed present: the Docker image always has
+# web/dist (the multi-stage build produces it before this ever runs -
+# see Dockerfile), but running the backend directly via `poetry run
+# uvicorn` for local API-only development won't, unless `npm run
+# build` has been run by hand in web/ first. Skipping the mount in
+# that case means local backend dev still works with a plain log line
+# instead of a crash on startup; the API itself (including the /api/...
+# duplicate routes above) is unaffected either way.
+_web_dist = "web/dist"
+if os.path.isdir(_web_dist):
+    app.mount("/", StaticFiles(directory=_web_dist, html=True), name="web")
+else:
+    logging.getLogger(__name__).info(
+        "%s not found - web frontend not mounted (this is expected for local "
+        "backend-only dev; the Docker image always has it built - see Dockerfile)",
+        _web_dist,
+    )

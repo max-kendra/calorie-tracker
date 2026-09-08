@@ -9,3 +9,5 @@ android/app/build/
 android/.gradle/
 android/build/
 *.dex
+web/node_modules/
+web/dist/

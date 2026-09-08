@@ -1,0 +1,28 @@
+# Never send local node_modules as build context - the Dockerfile's
+# web-builder stage runs its own `npm install` inside the container
+# from web/package*.json, so the host's copy (which can be hundreds of
+# MB, and won't necessarily match the container's architecture/OS
+# anyway) is pure waste to upload on every build.
+web/node_modules/
+web/dist/
+
+# The Android app is a completely separate deploy path (compiled to an
+# APK, installed on-device - never touches Docker at all), and its own
+# build artifacts can be large. No reason for any of it to be part of
+# the backend image's build context.
+android/
+
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Never bake secrets into an image layer - .env is supplied at
+# container-start time via docker-compose's env_file:, not copied in
+# at build time.
+.env
+
+media/
+easyocr_models/
+ocr_metrics/

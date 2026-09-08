@@ -1,3 +1,40 @@
+# ---- Stage 1: build the web frontend ----
+#
+# Kept in the SAME Dockerfile/image as the backend rather than a
+# separate Dockerfile/service (see design discussion: "would it make
+# more sense to have separate docker files for these... but we only
+# usually ever restart docker if we changed the backend anyway"). A
+# second service would mean a second build context, a second deploy
+# step, and - since the whole point of serving the built frontend from
+# FastAPI's own StaticFiles mount was to keep everything on one origin
+# (see web/README.md) - either a reverse proxy or careful port/path
+# coordination to keep that true. None of that buys anything for a
+# single-user app on one Pi with one person deploying it.
+#
+# The caching concern that split would have solved is already solved
+# here by ordinary Docker layer caching: this stage's own COPY (below)
+# only invalidates when web/package.json or web/src actually change,
+# completely independent of the poetry/apt layers in Stage 2 - a
+# backend-only change skips re-running `npm install`/`npm run build`
+# entirely (this stage's layers are reused from cache), and a
+# frontend-only change equally skips re-running poetry install. One
+# `docker compose up -d --build` either way, same as always; Docker
+# just doesn't redo work neither change actually affected.
+FROM node:20-slim AS web-builder
+WORKDIR /web
+
+# Dependency manifests first, same reasoning as the poetry COPY below -
+# `npm install` only reruns when these actually change.
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+
+# Now the actual source, in a separate layer so editing src/ doesn't
+# bust the npm install cache above.
+COPY web/ ./
+RUN npm run build
+# Output lands in /web/dist - copied into the final image below.
+
+# ---- Stage 2: the backend image (also serves the built frontend) ----
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -57,6 +94,15 @@ RUN poetry config virtualenvs.create false \
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+
+# Built frontend from Stage 1 - see web/README.md for the StaticFiles
+# mount (and matching /api route-prefixing) app/main.py needs for this
+# to actually get served. A plain COPY, not a volume mount: this is a
+# build artifact baked into the image, not runtime user data, so it
+# doesn't belong in docker-compose.yml's volumes: alongside media/
+# easyocr_models/ocr_metrics (which ARE user data that needs to
+# survive a rebuild).
+COPY --from=web-builder /web/dist ./web/dist
 
 EXPOSE 8000
 

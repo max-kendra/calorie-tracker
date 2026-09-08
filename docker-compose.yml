@@ -1,5 +1,12 @@
 services:
   api:
+    # Multi-stage build (see Dockerfile) - this single `build: .` now
+    # produces an image that's built the web frontend AND installed the
+    # backend, in two independently-cached stages. Still one service/
+    # one container: the built frontend is baked into this image as a
+    # static directory (app/main.py serves it via StaticFiles), not a
+    # separate process, so there's nothing else to run or coordinate
+    # here.
     build: .
     restart: unless-stopped
     # Host networking -- simplest option for a single-Pi setup where
