@@ -1,66 +1,32 @@
 services:
+  postgres:
+  image: postgres:16
+  container_name: postgres
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    POSTGRES_USER: ${POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    POSTGRES_DB: ${POSTGRES_DB}
+  volumes:
+    - /media/max/Expansion/postgres-data:/var/lib/postgresql/data
+  ports:
+    - "5432:5432"
+
   api:
-    # Multi-stage build (see Dockerfile) - this single `build: .` now
-    # produces an image that's built the web frontend AND installed the
-    # backend, in two independently-cached stages. Still one service/
-    # one container: the built frontend is baked into this image as a
-    # static directory (app/main.py serves it via StaticFiles), not a
-    # separate process, so there's nothing else to run or coordinate
-    # here.
     build: .
     restart: unless-stopped
-    # Host networking -- simplest option for a single-Pi setup where
-    # Postgres is already installed natively (not containerized) and
-    # listening on localhost:5432. This lets the container reach it via
-    # `localhost` exactly like `poetry run uvicorn` did, no bridge
-    # networking or port-mapping juggling needed.
-    network_mode: host
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
     env_file: .env
-    # No `ports:` needed under host networking -- the container shares
-    # the Pi's network stack directly, so port 8000 is already exposed
-    # on the Pi itself once the container is running.
-    # Persists uploaded product photos (see POST /items/scan-product-photo)
-    # on the host, outside the container's filesystem -- otherwise they'd
-    # vanish on every rebuild/recreate. Left-hand side is a path on the
-    # Pi; right-hand side must match Settings.media_dir resolved against
-    # the container's WORKDIR (/app), i.e. media_dir="media" -> /app/media.
-    #
-    # easyocr_models: same reasoning, for EasyOCR's downloaded model
-    # weights (see app/ocr.py's _get_reader -- model_storage_directory
-    # points at /app/easyocr_models specifically so this mount has a
-    # predictable, explicit target). Without this, every rebuild wiped
-    # the container's filesystem and re-triggered EasyOCR's ~20-40s
-    # model download on whichever request happened to be the first to
-    # touch OCR after that rebuild (see design discussion -- this was
-    # part of what caused the OCR timeout bug). With it, the download
-    # only ever happens once per Pi, not once per rebuild.
     volumes:
       - ./media:/app/media
       - ./easyocr_models:/app/easyocr_models
-      # OCR scan metrics (timing, memory) for comparing OCR engines --
-      # see app/ocr_metrics.py. Same persistence reasoning as media/
-      # easyocr_models above. Point this at an external drive instead
-      # of the SD card if you have one mounted and want to spare the SD
-      # card the write volume, e.g.:
-      #   - /mnt/external-hdd/ocr_metrics:/app/ocr_metrics
       - ./ocr_metrics:/app/ocr_metrics
-    # Caps the CONTAINER's own stdout/stderr logs (everything
-    # logging.basicConfig writes, in app/main.py) at 30MB total across 3
-    # rotated files. Docker's default json-file driver has NO size limit
-    # or rotation at all otherwise -- it just grows forever on the SD
-    # card, which is a real, easy-to-miss way to slowly run out of disk
-    # space (the exact problem already hit once with unpruned build
-    # cache, just in a different place). Separate from and much smaller
-    # than the dedicated OCR metrics file above -- that one's meant to
-    # be kept and analyzed; these are just routine app logs, fine to
-    # lose the oldest ones once they roll over.
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-# Note: if you ever containerize Postgres too, you'd switch back to
-# bridge networking with an explicit `ports: ["8000:8000"]` mapping and
-# a `depends_on: [postgres]`, and change DATABASE_URL in .env from
-# `localhost` to the Postgres service's container name.
