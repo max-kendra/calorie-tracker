@@ -5,9 +5,6 @@ __pycache__/
 venv/
 dist/
 *.egg-info/
-android/app/build/
-android/.gradle/
-android/build/
+/android
 *.dex
-web/node_modules/
-web/dist/
+/web
