@@ -47,7 +47,7 @@ services:
       BACKUP_KEEP_WEEKS: 4
       BACKUP_KEEP_MONTHS: 6
     volumes:
-      - /media/max/Expansion/db-backups:/backups
+      - /mnt/data/db-backups:/backups
 
 volumes:
   postgres-data:
