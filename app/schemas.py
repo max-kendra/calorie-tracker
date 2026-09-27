@@ -24,6 +24,93 @@ class ServingSizeOut(ServingSizeBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class GroceryStoreOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryStoreCreate(BaseModel):
+    name: str
+
+
+class GroceryTripOut(BaseModel):
+    id: int
+    date: date
+    label: Optional[str] = None
+    store_id: Optional[int] = None
+    # Denormalized, same reasoning as everywhere else in this file -
+    # avoids a second lookup client-side just to show/validate against
+    # which store a trip belongs to.
+    store: Optional[GroceryStoreOut] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryTripCreate(BaseModel):
+    date: date
+    label: Optional[str] = None
+    store_id: Optional[int] = None
+
+
+class GroceryTripUpdate(BaseModel):
+    date: Optional[date] = None
+    label: Optional[str] = None
+    store_id: Optional[int] = None
+
+
+class GroceryListEntryOut(BaseModel):
+    id: int
+    item_id: Optional[int] = None
+    # Denormalized, same reasoning as RecipeIngredientOut.item_name -
+    # avoids a second lookup client-side just to show what the entry
+    # actually is, or which store(s) it could be filtered by within a
+    # trip (see design discussion: "you should also still be able to
+    # filter the items inside a trip by store"). Always populated -
+    # either the real item's own name, or the placeholder text, so the
+    # client never needs to branch on which one it's looking at just to
+    # display something.
+    item_name: str
+    # True when this entry has no real item behind it yet (see design
+    # discussion - the hot dog buns example) - the client uses this to
+    # show a "still needs info" badge and to know that dragging this
+    # onto a store-specific trip should always be allowed (a
+    # placeholder has no store of its own to conflict with).
+    is_placeholder: bool
+    grocery_stores: list[GroceryStoreOut] = Field(default_factory=list)
+    trip_id: Optional[int] = None
+    quantity: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryListEntryCreate(BaseModel):
+    """Exactly one of item_id/placeholder_name must be set - enforced
+    in the router, not here, since Pydantic doesn't have a clean native
+    way to express "exactly one of these two" as a field constraint."""
+
+    item_id: Optional[int] = None
+    placeholder_name: Optional[str] = None
+    # Defaults to the unassigned pool - most entries start here and get
+    # dragged into a trip later, rather than being assigned upfront.
+    trip_id: Optional[int] = None
+    quantity: Optional[str] = None
+
+
+class GroceryListEntryUpdate(BaseModel):
+    """Everything editable on an existing entry after creation - which
+    trip it's assigned to (or back to the pool, via null - this IS the
+    drag-and-drop action), its quantity text, and/or resolving a
+    placeholder into a real item (setting item_id here - see design
+    discussion - clears placeholder_name automatically, since an entry
+    is never both at once)."""
+
+    trip_id: Optional[int] = None
+    quantity: Optional[str] = None
+    item_id: Optional[int] = None
+
+
 class ItemBase(BaseModel):
     name: str
     barcode: Optional[str] = None
@@ -57,7 +144,10 @@ class ItemBase(BaseModel):
 
 
 class ItemCreate(ItemBase):
-    pass
+    # Which stores carry this item - many-to-many (see GroceryStore in
+    # models.py), so a list, not a single id. Defaults to none set at
+    # creation, same as any other optional item field.
+    grocery_store_ids: List[int] = Field(default_factory=list)
 
 
 class ItemUpdate(BaseModel):
@@ -84,6 +174,14 @@ class ItemUpdate(BaseModel):
     counts_as_added_sugar: Optional[bool] = None
 
     type: Optional[ItemType] = None
+    # None = don't touch the item's stores at all (same "not provided"
+    # convention every other field on this schema already uses). An
+    # actual list - INCLUDING an empty one - REPLACES the full set of
+    # stores wholesale rather than patching it incrementally, matching
+    # how the checkbox-picker UI actually submits it (always the
+    # complete current set of checked boxes) - no separate add/remove-
+    # one-store endpoint to build or reason about.
+    grocery_store_ids: Optional[List[int]] = None
 
 
 class ItemOut(ItemBase):
@@ -109,6 +207,7 @@ class ItemOut(ItemBase):
     # had the filters for"). Exposed now so the client can merge-sort
     # both types by this shared timestamp itself.
     last_logged_at: Optional[datetime] = None
+    grocery_stores: List[GroceryStoreOut] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -340,7 +439,6 @@ class ExtendedNutritionTotals(NutritionTotals):
 class RecipeBase(BaseModel):
     name: str
     recipe_type: RecipeType = "recipe"
-    instructions: Optional[str] = None
     source_url: Optional[str] = None
     image_path: Optional[str] = None
     servings: Decimal = Decimal("1")
@@ -351,15 +449,34 @@ class RecipeCreate(RecipeBase):
 
 
 class RecipeUpdate(BaseModel):
-    """Partial update for recipe metadata. Ingredients are managed via
-    their own endpoints (add/remove/replace-all), not through this."""
+    """Partial update for recipe metadata. Ingredients AND steps are
+    both managed via their own endpoints (add/remove/replace-all), not
+    through this."""
 
     name: Optional[str] = None
     recipe_type: Optional[RecipeType] = None
-    instructions: Optional[str] = None
     source_url: Optional[str] = None
     image_path: Optional[str] = None
     servings: Optional[Decimal] = None
+
+
+class RecipeStepOut(BaseModel):
+    id: int
+    step_number: int
+    text: str
+    timer_seconds: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecipeStepCreate(BaseModel):
+    text: str
+    timer_seconds: Optional[int] = None
+
+
+class RecipeStepUpdate(BaseModel):
+    text: Optional[str] = None
+    timer_seconds: Optional[int] = None
 
 
 class RecipeOut(RecipeBase):
@@ -367,6 +484,7 @@ class RecipeOut(RecipeBase):
     created_at: datetime
     updated_at: datetime
     ingredients: list[RecipeIngredientOut] = Field(default_factory=list)
+    steps: list[RecipeStepOut] = Field(default_factory=list)
     # Extended (not the compact NutritionTotals) so the recipe/meal info
     # screen can show sugar/saturated fat/sodium under the relevant
     # macro, same as the item info screen already does with its own
@@ -579,6 +697,15 @@ class GoalCreate(GoalBase):
 
 
 class GoalUpdate(BaseModel):
+    # None on any of these means "don't touch", same convention every
+    # other *Update schema in this app already uses. Changing either
+    # date is re-validated against every OTHER goal's range the same
+    # way creating a new goal is (see update_goal) - this wasn't
+    # possible via the API at all before (only start_date/end_date at
+    # creation time, or the auto-truncation side effect of creating the
+    # NEXT goal, ever set these).
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     kcal_target: Optional[Decimal] = None
     protein_g_target: Optional[Decimal] = None
     carbs_g_target: Optional[Decimal] = None
@@ -649,6 +776,26 @@ class UserProfileOut(UserProfileBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class WeightHistoryEntryOut(BaseModel):
+    recorded_at: datetime
+    weight_kg: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WeightHistoryEntryIn(BaseModel):
+    recorded_at: datetime
+    weight_kg: Decimal
+
+
+class WeightHistoryReplace(BaseModel):
+    """Body for the bulk-replace PUT - see WeightHistoryEntry's own
+    docstring for why this is always a full replace, never an
+    incremental add."""
+
+    entries: list[WeightHistoryEntryIn]
 
 
 class KcalGoalCalculationResult(BaseModel):

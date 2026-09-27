@@ -12,7 +12,7 @@ from app.barcode import decode_barcode_from_image_bytes
 from app.config import settings
 from app.search import multi_column_search_filter, relevance_rank
 from app.database import get_db
-from app.models import Item, ServingSize
+from app.models import Item, ItemGroceryStore, ServingSize
 from app.ocr import extract_label_from_image
 from app.ocr_metrics import record_ocr_scan
 from app.schemas import (
@@ -45,7 +45,16 @@ def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
                 detail=f"An item with barcode {payload.barcode} already exists (item_id={existing.item_id})",
             )
 
-    item = Item(**payload.model_dump(), last_logged_at=func.now())
+    # grocery_store_ids isn't a real Item column (it's the many-to-many
+    # relationship, resolved separately below) - excluded here so it
+    # doesn't blow up as an unexpected constructor kwarg.
+    item = Item(**payload.model_dump(exclude={"grocery_store_ids"}), last_logged_at=func.now())
+    if payload.grocery_store_ids:
+        # Item.grocery_stores is a read-only property (see models.py) -
+        # assign the actual mapped relationship, grocery_store_links,
+        # as a list of link rows instead (same pattern as assigning
+        # recipe.ingredients elsewhere in this codebase).
+        item.grocery_store_links = [ItemGroceryStore(grocery_store_id=sid) for sid in payload.grocery_store_ids]
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -214,6 +223,7 @@ def get_item_by_barcode(barcode: str, db: Session = Depends(get_db)):
 def list_items(
     q: Optional[str] = Query(None, description="Search by name or brand"),
     type: Optional[ItemType] = Query(None, description="Filter by 'product' or 'ingredient'"),
+    store_id: Optional[int] = Query(None, description="Filter to items carried by this grocery store"),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
     db: Session = Depends(get_db),
@@ -229,6 +239,11 @@ def list_items(
 
     if type:
         query = query.filter(Item.type == type)
+
+    if store_id:
+        query = query.join(ItemGroceryStore, ItemGroceryStore.item_id == Item.item_id).filter(
+            ItemGroceryStore.grocery_store_id == store_id
+        )
 
     if q:
         # Relevance first (see relevance_rank's own doc comment - this
@@ -272,6 +287,29 @@ def update_item(item_id: int, payload: ItemUpdate, db: Session = Depends(get_db)
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Barcode already used by item_id={existing.item_id}",
             )
+
+    # Handled separately from the generic setattr loop below -
+    # grocery_store_ids isn't a real Item attribute (it's the
+    # many-to-many relationship), so a plain setattr would silently do
+    # nothing (no error, no effect) rather than actually updating the
+    # association. Only touched when explicitly provided (see
+    # ItemUpdate's own doc comment: None means "leave stores alone").
+    if "grocery_store_ids" in updates:
+        store_ids = updates.pop("grocery_store_ids")
+        # Popped either way, so the generic setattr loop below never
+        # sees it regardless - but only actually touches the
+        # relationship if a real list was given. An explicit null
+        # (as opposed to the field being omitted entirely) still means
+        # "don't touch", same as omitting it - exclude_unset=True
+        # includes the key either way, so this guards that case too.
+        if store_ids is not None:
+            # Reassigning the WHOLE collection (not appending) - with
+            # cascade="all, delete-orphan" on Item.grocery_store_links,
+            # this correctly deletes any previously-linked stores that
+            # aren't in the new list, same collection-replacement
+            # behavior recipe.ingredients reassignment already relies
+            # on elsewhere in this codebase.
+            item.grocery_store_links = [ItemGroceryStore(grocery_store_id=sid) for sid in store_ids]
 
     for field, value in updates.items():
         setattr(item, field, value)

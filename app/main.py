@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import ocr
 from app.config import settings
-from app.routers import goals, guidelines, items, logs, recipes, usda, user_profile
+from app.routers import goals, grocery_lists, grocery_stores, guidelines, items, logs, recipes, usda, user_profile
 
 # Without this, nothing below INFO level (including the new OCR-result
 # logging added to scan_label -- see app/routers/items.py) ever actually
@@ -26,6 +26,8 @@ app = FastAPI(
 )
 
 app.include_router(items.router)
+app.include_router(grocery_stores.router)
+app.include_router(grocery_lists.router)
 app.include_router(recipes.router)
 app.include_router(logs.router)
 app.include_router(goals.router)
@@ -45,6 +47,8 @@ app.include_router(usda.router)
 # base URL needed on the frontend at all - see web/README.md for the
 # full reasoning.
 app.include_router(items.router, prefix="/api")
+app.include_router(grocery_stores.router, prefix="/api")
+app.include_router(grocery_lists.router, prefix="/api")
 app.include_router(recipes.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
 app.include_router(goals.router, prefix="/api")

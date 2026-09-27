@@ -15,6 +15,7 @@ services:
 
   api:
     build: .
+    image: calorie-tracker:latest
     restart: unless-stopped
     depends_on:
       - postgres
@@ -48,6 +49,20 @@ services:
       BACKUP_KEEP_MONTHS: 6
     volumes:
       - /mnt/data/db-backups:/backups
+
+  media-backup:
+    image: alpine:3.20
+    container_name: media-backup
+    restart: unless-stopped
+    volumes:
+      - ./media:/data/media:ro
+      - /mnt/data/media-backups:/backups
+    command: >
+      sh -c "while true; do
+        tar -czf /backups/media-$$(date +%Y%m%d-%H%M%S).tar.gz -C /data media &&
+        find /backups -name 'media-*.tar.gz' -mtime +30 -delete;
+        sleep 86400;
+      done"
 
 volumes:
   postgres-data:

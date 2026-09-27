@@ -93,6 +93,31 @@ class Item(Base):
     serving_sizes = relationship(
         "ServingSize", back_populates="item", cascade="all, delete-orphan", foreign_keys="ServingSize.item_id"
     )
+    # Many-to-many, not a single store_id FK - the same branded product
+    # can legitimately be stocked at more than one store (see design
+    # discussion: a Salling-brand item sold at both føtex and netto) -
+    # a plain FK would force picking just one, which is exactly the
+    # wrong call here.
+    # Many-to-many via ItemGroceryStore link rows (see that class,
+    # mirroring RecipeIngredient's own pattern) rather than a bare
+    # association Table - not because this pairing needs extra columns
+    # (it doesn't, unlike RecipeIngredient's quantity/serving_size_id),
+    # but for consistency: every many-to-many in this app goes through
+    # an explicit link-row class the same way (see design discussion:
+    # "i'd like it to match what we're already doing everywhere else").
+    grocery_store_links = relationship("ItemGroceryStore", back_populates="item", cascade="all, delete-orphan")
+
+    @property
+    def grocery_stores(self) -> list["GroceryStore"]:
+        """Flat, convenient read accessor for API serialization -
+        ItemOut.grocery_stores reads this directly via from_attributes.
+        The real relationship underneath goes through grocery_store_links
+        (see above); this is a plain Python property, not a mapped
+        SQLAlchemy relationship, so it's read-only - assigning stores
+        happens by setting grocery_store_links to a list of
+        ItemGroceryStore rows instead (see items.py), not by assigning
+        to this property."""
+        return [link.grocery_store for link in self.grocery_store_links]
 
     __table_args__ = (
         CheckConstraint("type IN ('product', 'ingredient')", name="ck_items_type"),
@@ -117,6 +142,102 @@ class ServingSize(Base):
     weight_g = Column(Numeric, nullable=False)
 
     item = relationship("Item", back_populates="serving_sizes", foreign_keys=[item_id])
+
+
+class GroceryStore(Base):
+    """
+    Which physical stores carry a given item - many-to-many via
+    ItemGroceryStore link rows (see that class, defined right below).
+    No columns beyond name; nothing else is tracked about a store
+    itself yet (address, chain, etc) - add if that ever becomes
+    relevant. No reverse `items` collection here, matching Item having
+    no reverse collection back to RecipeIngredient either - navigate
+    from the item's own side (item.grocery_stores) or via
+    ItemGroceryStore directly if you ever need the store's side.
+    """
+
+    __tablename__ = "grocery_stores"
+
+    id = Column(Integer, primary_key=True)
+    # Unique, not just indexed - the "create a new store inline" flow
+    # in the item form should fail loudly on a typo'd duplicate rather
+    # than silently creating a second store with the same name that
+    # items then get split across arbitrarily.
+    name = Column(String, nullable=False, unique=True)
+
+
+class ItemGroceryStore(Base):
+    """
+    Links an item to a store that carries it - same "explicit link-row
+    class, not a bare association Table" pattern as RecipeIngredient
+    (see design discussion: "i'd like it to match what we're already
+    doing everywhere else"). No extra columns here (unlike
+    RecipeIngredient's quantity/serving_size_id) since there's nothing
+    to say about a single item/store PAIRING beyond the fact that it
+    exists - kept as its own class anyway for consistency, rather than
+    reaching for the different Table-based pattern SQLAlchemy also
+    supports just because this particular join happens to have no
+    extra data of its own.
+    """
+
+    __tablename__ = "item_grocery_stores"
+
+    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="CASCADE"), primary_key=True)
+    grocery_store_id = Column(Integer, ForeignKey("grocery_stores.id", ondelete="CASCADE"), primary_key=True)
+
+    item = relationship("Item", back_populates="grocery_store_links")
+    grocery_store = relationship("GroceryStore")
+
+
+class GroceryTrip(Base):
+    """
+    A planned shopping trip - a date, an optional label, and OPTIONALLY
+    one store (see design discussion - revised from an earlier version
+    where a trip could span any number of stores with an in-UI filter;
+    one-store-per-trip is closer to how shopping trips actually work,
+    and avoids the earlier design's real risk: dragging something into
+    a trip with no guardrail telling you it's the wrong store for that
+    trip). store_id NULL means "no particular store" - a valid
+    catch-all a store-agnostic item can always go into, and the only
+    kind of trip a store-agnostic item can go into at all.
+    """
+
+    __tablename__ = "grocery_trips"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    label = Column(String, nullable=True)
+    store_id = Column(Integer, ForeignKey("grocery_stores.id", ondelete="SET NULL"), nullable=True)
+
+    entries = relationship("GroceryListEntry", back_populates="trip")
+    store = relationship("GroceryStore")
+
+
+class GroceryListEntry(Base):
+    """
+    "I want to buy this item at some point" - deliberately separate from
+    Log (no quantity/servings here at all, just a plain checklist entry)
+    and separate from Item (many entries can reference the same item
+    over time, one per time it's actually needed). trip_id NULL means
+    still in the unassigned pool, not yet planned for a specific trip -
+    see design discussion (the Thursday/Sunday banana example: knowing
+    you need bananas doesn't mean you know which trip they belong to
+    yet).
+    """
+
+    __tablename__ = "grocery_list_entries"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="CASCADE"), nullable=False)
+    trip_id = Column(Integer, ForeignKey("grocery_trips.id", ondelete="SET NULL"), nullable=True)
+    # Free text, not a number+serving_size_id pair the way a Log's
+    # quantity works - a grocery entry has no unit/serving concept to
+    # anchor a precise quantity to (see design discussion), so "2
+    # dozen", "a bag", "500g" all need to be expressible as-is.
+    quantity = Column(String, nullable=True)
+
+    item = relationship("Item")
+    trip = relationship("GroceryTrip", back_populates="entries")
 
 
 class RawIngredientReference(Base):
@@ -485,3 +606,26 @@ class UserProfile(Base):
     timezone = Column(String, nullable=False, default="Europe/Copenhagen")
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class WeightHistoryEntry(Base):
+    """
+    A mirror of Health Connect's own weight readings, pushed by Android
+    (see design discussion) - NOT an independent source of truth. Every
+    sync wholesale REPLACES the full contents of this table with
+    whatever Health Connect currently reports, rather than incrementally
+    adding to it - that's what makes an edit or deletion made directly
+    in Health Connect (e.g. in Libra) show up here too, with no
+    reconciliation logic needed: there's no partial state to get out of
+    sync, only "matches as of the last sync" or "hasn't synced yet".
+    Exists purely because Health Connect has no cloud API of its own -
+    a browser can never reach it directly, so this is the only way the
+    web app can show the same weight history the Android app already
+    reads live.
+    """
+
+    __tablename__ = "weight_history_entries"
+
+    id = Column(Integer, primary_key=True)
+    recorded_at = Column(DateTime(timezone=True), nullable=False)
+    weight_kg = Column(Numeric, nullable=False)

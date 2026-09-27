@@ -7,13 +7,16 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import require_api_key
 from app.database import get_db
-from app.models import Item, Recipe, RecipeIngredient
+from app.models import Item, Recipe, RecipeIngredient, RecipeStep
 from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals, to_display_extended
 from app.search import multi_column_search_filter, relevance_rank
 from app.schemas import (
     RecipeCreate,
     RecipeIngredientCreate,
     RecipeOut,
+    RecipeStepCreate,
+    RecipeStepOut,
+    RecipeStepUpdate,
     RecipeType,
     RecipeUpdate,
 )
@@ -68,13 +71,18 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
         recipe_id=recipe.recipe_id,
         name=recipe.name,
         recipe_type=recipe.recipe_type,
-        instructions=recipe.instructions,
+        source_url=recipe.source_url,
         image_path=recipe.image_path,
         servings=recipe.servings,
         created_at=recipe.created_at,
         updated_at=recipe.updated_at,
         last_logged_at=recipe.last_logged_at,
         ingredients=[_ingredient_out_fields(ri) for ri in recipe.ingredients],
+        # No custom mapping function needed here, unlike ingredients
+        # above - RecipeStepOut is a plain passthrough of real columns
+        # (no computed fields like kcal to resolve), so from_attributes
+        # handles the raw ORM objects directly.
+        steps=recipe.steps,
         totals=to_display_extended(totals),
         totals_per_serving=to_display_extended(per_serving),
     )
@@ -253,6 +261,68 @@ def remove_ingredient(recipe_id: int, item_id: int, db: Session = Depends(get_db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingredient not in this recipe")
 
     db.delete(ri)
+    db.commit()
+    recipe = _get_recipe_or_404(recipe_id, db)
+    return _build_recipe_out(recipe)
+
+@router.post("/{recipe_id}/steps", response_model=RecipeOut, status_code=status.HTTP_201_CREATED)
+def add_step(recipe_id: int, payload: RecipeStepCreate, db: Session = Depends(get_db)):
+    """Appends a new step to the end - step_number is assigned
+    automatically (highest existing + 1, or 1 if there are none yet),
+    not something the caller picks directly."""
+    _get_recipe_or_404(recipe_id, db)
+    max_step_number = (
+        db.query(RecipeStep.step_number)
+        .filter(RecipeStep.recipe_id == recipe_id)
+        .order_by(RecipeStep.step_number.desc())
+        .first()
+    )
+    next_step_number = (max_step_number[0] + 1) if max_step_number else 1
+
+    db.add(RecipeStep(recipe_id=recipe_id, step_number=next_step_number, text=payload.text, timer_seconds=payload.timer_seconds))
+    db.commit()
+    recipe = _get_recipe_or_404(recipe_id, db)
+    return _build_recipe_out(recipe)
+
+
+@router.patch("/{recipe_id}/steps/{step_id}", response_model=RecipeOut)
+def update_step(recipe_id: int, step_id: int, payload: RecipeStepUpdate, db: Session = Depends(get_db)):
+    """Edits a step's text/timer only - not its position. Reordering
+    isn't supported yet (not asked for this round); deleting and
+    re-adding is the current workaround if you need to move something."""
+    step = db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe_id, RecipeStep.id == step_id).first()
+    if not step:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found in this recipe")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(step, field, value)
+    db.commit()
+    recipe = _get_recipe_or_404(recipe_id, db)
+    return _build_recipe_out(recipe)
+
+
+@router.delete("/{recipe_id}/steps/{step_id}", response_model=RecipeOut)
+def remove_step(recipe_id: int, step_id: int, db: Session = Depends(get_db)):
+    """Removes a step and renumbers whatever's left to stay contiguous
+    (1, 2, 3...) rather than leaving a gap where it used to be - gaps
+    wouldn't break ordering (ORDER BY still works fine), but would look
+    like a bug to anyone reading "Step 1, Step 2, Step 4"."""
+    step = db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe_id, RecipeStep.id == step_id).first()
+    if not step:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found in this recipe")
+
+    db.delete(step)
+    db.flush()
+
+    remaining = (
+        db.query(RecipeStep)
+        .filter(RecipeStep.recipe_id == recipe_id)
+        .order_by(RecipeStep.step_number)
+        .all()
+    )
+    for i, s in enumerate(remaining, start=1):
+        s.step_number = i
+
     db.commit()
     recipe = _get_recipe_or_404(recipe_id, db)
     return _build_recipe_out(recipe)

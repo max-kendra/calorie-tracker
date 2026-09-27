@@ -88,13 +88,50 @@ def _validate_splits_sum_to_100(splits: list) -> None:
         )
 
 
+def _check_no_overlap(
+    new_start: date_type, new_end: date_type | None, db: Session, exclude_goal_id: int | None = None
+) -> None:
+    """
+    Rejects if [new_start, new_end] overlaps any OTHER goal that already
+    has a deliberately-set end_date. Doesn't consider the currently
+    open-ended goal (end_date IS NULL) here at all - create_goal handles
+    that one separately by auto-truncating it instead of rejecting (see
+    design discussion: auto-truncate the open-ended goal when starting
+    the next phase, but hard-reject a genuine overlap with something
+    that already has a real end date, since silently truncating
+    something set on purpose would be a surprise, not a convenience).
+    update_goal calls this against ALL other goals, open-ended one
+    included, since editing an existing goal's dates has no equivalent
+    "the next phase starts now" story to auto-truncate anything for.
+    """
+    query = db.query(Goal).filter(Goal.end_date.isnot(None))
+    if exclude_goal_id is not None:
+        query = query.filter(Goal.id != exclude_goal_id)
+
+    for existing in query.all():
+        starts_before_existing_ends = new_start <= existing.end_date
+        ends_after_existing_starts = new_end is None or new_end >= existing.start_date
+        if starts_before_existing_ends and ends_after_existing_starts:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Overlaps goal {existing.id} "
+                    f"({existing.start_date} to {existing.end_date})"
+                ),
+            )
+
+
 @router.post("", response_model=GoalOut, status_code=status.HTTP_201_CREATED)
 def create_goal(payload: GoalCreate, db: Session = Depends(get_db)):
     """
     Automatically closes the previously active goal (end_date IS NULL) by
     setting its end_date to the day before this goal's start_date - only
-    one goal is ever active at a time. Defaults to an even 25/25/25/25
-    meal split unless the caller provides their own (which must sum to 100).
+    one goal is ever active at a time. Also rejects outright if this
+    would overlap any OTHER goal that already has a deliberately-set
+    end_date (see _check_no_overlap) - that's a real scheduling conflict,
+    not something to silently resolve. Defaults to an even 25/25/25/25
+    meal split unless the caller provides their own (which must sum to
+    100).
     """
     previous_active = db.query(Goal).filter(Goal.end_date.is_(None)).first()
     if previous_active:
@@ -104,6 +141,8 @@ def create_goal(payload: GoalCreate, db: Session = Depends(get_db)):
                 detail="New goal's start_date must be after the currently active goal's start_date",
             )
         previous_active.end_date = payload.start_date - timedelta(days=1)
+
+    _check_no_overlap(payload.start_date, payload.end_date, db)
 
     if payload.meal_splits:
         _validate_splits_sum_to_100(payload.meal_splits)
@@ -165,12 +204,25 @@ def list_goals(db: Session = Depends(get_db)):
 
 @router.patch("/{goal_id}", response_model=GoalOut)
 def update_goal(goal_id: int, payload: GoalUpdate, db: Session = Depends(get_db)):
-    """Update overall targets. Meal splits (percentages) are unaffected -
-    they automatically apply to whatever the new targets are, since
-    they're stored as percentages, not absolute numbers."""
-    goal = _get_goal_or_404(goal_id, db)
+    """Update targets and/or the date range. Meal splits (percentages)
+    are unaffected by target changes - they automatically apply to
+    whatever the new targets are, since they're stored as percentages,
+    not absolute numbers.
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    If start_date/end_date are being changed, the resulting range is
+    re-validated against every OTHER goal's range (open-ended one
+    included - unlike create_goal, there's no "the next phase starts
+    now" story here to auto-truncate anything for, so any overlap is
+    just rejected outright)."""
+    goal = _get_goal_or_404(goal_id, db)
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "start_date" in updates or "end_date" in updates:
+        effective_start = updates.get("start_date", goal.start_date)
+        effective_end = updates.get("end_date", goal.end_date)
+        _check_no_overlap(effective_start, effective_end, db, exclude_goal_id=goal_id)
+
+    for field, value in updates.items():
         setattr(goal, field, value)
 
     db.commit()

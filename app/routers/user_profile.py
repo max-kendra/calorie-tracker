@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
-from app.models import UserProfile
+from app.models import UserProfile, WeightHistoryEntry
 from app.schemas import (
     KcalGoalCalculationResult,
     UserProfileOut,
     UserProfileUpdate,
+    WeightHistoryEntryOut,
+    WeightHistoryReplace,
 )
 
 router = APIRouter(
@@ -126,10 +128,12 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
     returns a kcal_low/kcal_high range reflecting the formula's own ~10%
     accuracy margin, rather than presenting a single number as if it were
     precise to the calorie - see KcalGoalCalculationResult's docstring.
-    All inputs (height, age, weight, activity_level, goal_type) are read
-    from the stored profile - this endpoint takes no request body, so
-    the profile must be filled in first (see Profile screen's gating
-    behavior in the Android app).
+    All inputs are read from the stored profile, except weight - see
+    below - this endpoint takes no request body, so the profile must be
+    filled in first (see Profile screen's gating behavior in the
+    Android app). Weight specifically prefers the latest synced Health
+    Connect reading (weight_history_entries) over the manually-entered
+    profile.weight_kg field when both exist.
 
     Mifflin-St Jeor (1990), endorsed by the Academy of Nutrition and
     Dietetics, is the most validated BMR formula for the general adult
@@ -154,13 +158,22 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
     This is a general-purpose estimate, not personalized medical advice.
     """
     profile = _get_or_create_profile(db)
+    # Prefers the latest synced Health Connect reading over the manual
+    # profile field, same "Health Connect wins when both exist"
+    # precedent the Android Profile screen's own current-weight display
+    # already uses (see WeightHistoryEntry's docstring) - this is what
+    # the old weight_kg field's "manual stopgap" comment was waiting on.
+    latest_synced_weight = (
+        db.query(WeightHistoryEntry).order_by(WeightHistoryEntry.recorded_at.desc()).first()
+    )
+    effective_weight_kg = latest_synced_weight.weight_kg if latest_synced_weight else profile.weight_kg
 
     missing = []
     if profile.height_cm is None:
         missing.append("height_cm")
     if profile.age is None:
         missing.append("age")
-    if profile.weight_kg is None:
+    if effective_weight_kg is None:
         missing.append("weight_kg")
     if profile.activity_level is None:
         missing.append("activity_level")
@@ -172,7 +185,7 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
             detail=f"Profile is missing required field(s) for this calculation: {', '.join(missing)}",
         )
 
-    weight_kg = profile.weight_kg
+    weight_kg = effective_weight_kg
     height_cm = profile.height_cm
     age = Decimal(profile.age)
 
@@ -213,3 +226,29 @@ def calculate_kcal_goal(db: Session = Depends(get_db)):
         kcal_high=_round_to_nearest(kcal_high, 25),
         floor_applied=floor_applied,
     )
+
+@router.get("/weight-history", response_model=list[WeightHistoryEntryOut])
+def list_weight_history(db: Session = Depends(get_db)):
+    """The web app's read side - a mirror of Health Connect's own
+    readings (see WeightHistoryEntry's own docstring), not an
+    independently maintained history. Oldest first, matching how a
+    chart wants to consume it."""
+    return db.query(WeightHistoryEntry).order_by(WeightHistoryEntry.recorded_at).all()
+
+
+@router.put("/weight-history", response_model=list[WeightHistoryEntryOut])
+def replace_weight_history(payload: WeightHistoryReplace, db: Session = Depends(get_db)):
+    """Wholesale replace, not an incremental add - called by Android
+    with its CURRENT full Health Connect read every sync (see design
+    discussion: this is what makes an edit or deletion made directly in
+    Health Connect show up here too, with no reconciliation logic
+    needed - there's no partial state to get out of sync, only "matches
+    as of the last sync" or "hasn't synced yet"). PUT, not POST,
+    specifically because this replaces the entire resource - same
+    convention this app already uses for goals' meal-splits bulk
+    replace."""
+    db.query(WeightHistoryEntry).delete()
+    entries = [WeightHistoryEntry(recorded_at=e.recorded_at, weight_kg=e.weight_kg) for e in payload.entries]
+    db.add_all(entries)
+    db.commit()
+    return db.query(WeightHistoryEntry).order_by(WeightHistoryEntry.recorded_at).all()
