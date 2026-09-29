@@ -8,3 +8,4 @@ dist/
 /android
 *.dex
 /web
+*.tar

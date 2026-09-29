@@ -223,12 +223,23 @@ class GroceryListEntry(Base):
     see design discussion (the Thursday/Sunday banana example: knowing
     you need bananas doesn't mean you know which trip they belong to
     yet).
+
+    item_id is nullable - see design discussion (the hot dog buns
+    example): sometimes you know you need to buy something before
+    you've found/scanned the actual product, so there's no real Item
+    row to point at yet. In that case placeholder_name holds a plain
+    free-text label instead. Exactly one of item_id/placeholder_name is
+    ever set, never both, never neither (enforced at the router level,
+    not the DB) - "resolving" a placeholder later just means setting
+    item_id and clearing placeholder_name on the SAME row, not creating
+    a new entry.
     """
 
     __tablename__ = "grocery_list_entries"
 
     id = Column(Integer, primary_key=True)
-    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.item_id", ondelete="CASCADE"), nullable=True)
+    placeholder_name = Column(String, nullable=True)
     trip_id = Column(Integer, ForeignKey("grocery_trips.id", ondelete="SET NULL"), nullable=True)
     # Free text, not a number+serving_size_id pair the way a Log's
     # quantity works - a grocery entry has no unit/serving concept to
@@ -274,7 +285,6 @@ class Recipe(Base):
     recipe_id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     recipe_type = Column(String, nullable=False, default="recipe")  # 'recipe' | 'meal'
-    instructions = Column(Text, nullable=True)  # available to both recipe_type values (see design discussion)
     source_url = Column(String, nullable=True)  # optional link to where this recipe/meal originally came from
     image_path = Column(String, nullable=True)
     servings = Column(Numeric, nullable=False, default=1)
@@ -290,6 +300,15 @@ class Recipe(Base):
 
     ingredients = relationship(
         "RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan"
+    )
+    # Ordered list of instruction steps - replaced a single
+    # `instructions` text column (see design discussion: same reasoning
+    # as ingredients being their own table rather than a blob - lets
+    # each step be added/removed/reordered independently, and is what
+    # makes a future cooking-mode view or per-step timer possible
+    # without a rework later).
+    steps = relationship(
+        "RecipeStep", back_populates="recipe", cascade="all, delete-orphan", order_by="RecipeStep.step_number"
     )
 
     __table_args__ = (
@@ -320,6 +339,27 @@ class RecipeIngredient(Base):
     recipe = relationship("Recipe", back_populates="ingredients")
     item = relationship("Item")
     serving_size = relationship("ServingSize")
+
+
+class RecipeStep(Base):
+    """
+    One ordered instruction step - see Recipe.steps' own comment for
+    why this is a separate table rather than a single instructions
+    blob. timer_seconds is a plain, manually-set duration - no
+    auto-detection from the step's own text (that would need real
+    tokenization/pattern-matching for what's ultimately a low-value
+    feature here, see design discussion).
+    """
+
+    __tablename__ = "recipe_steps"
+
+    id = Column(Integer, primary_key=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.recipe_id", ondelete="CASCADE"), nullable=False)
+    step_number = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    timer_seconds = Column(Integer, nullable=True)
+
+    recipe = relationship("Recipe", back_populates="steps")
 
 
 class LoggedRecipeIngredient(Base):

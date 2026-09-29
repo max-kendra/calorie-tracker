@@ -3,6 +3,7 @@ import os
 import threading
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import ocr
@@ -101,21 +102,40 @@ def _warm_up_ocr():
 # Serves the built web frontend (web/dist, produced by the Dockerfile's
 # web-builder stage - see that file and web/README.md) at the same
 # origin and port as the API itself. MUST be registered last: Starlette
-# resolves routes in registration order, and a mount at "/" is a
-# catch-all that would otherwise shadow /health, /media, and every
-# /api/... route registered above it if it came first.
+# resolves routes in registration order, and a catch-all "/" route
+# would otherwise shadow /health, /media, and every /api/... route
+# registered above it if it came first.
+#
+# NOT a plain StaticFiles(html=True) mount (an earlier version of this
+# was) - html=True only serves index.html for the exact root path and
+# directory listings, not for a deep client-side route. Reloading the
+# browser on e.g. /settings sends Starlette a real GET /settings, which
+# html=True has no fallback for at all - a genuine 404, not the React
+# app loading and its own router then reading the URL client-side. The
+# explicit catch-all route below serves a real static file when the
+# path matches one (JS/CSS/images under /assets, or anything else
+# sitting directly in dist/ - a favicon, say), and falls back to
+# index.html for everything else, which is what lets React Router take
+# over and render the right page for any deep-linked or reloaded URL.
 #
 # Guarded rather than assumed present: the Docker image always has
 # web/dist (the multi-stage build produces it before this ever runs -
 # see Dockerfile), but running the backend directly via `poetry run
 # uvicorn` for local API-only development won't, unless `npm run
-# build` has been run by hand in web/ first. Skipping the mount in
-# that case means local backend dev still works with a plain log line
+# build` has been run by hand in web/ first. Skipping this in that
+# case means local backend dev still works with a plain log line
 # instead of a crash on startup; the API itself (including the /api/...
 # duplicate routes above) is unaffected either way.
 _web_dist = "web/dist"
 if os.path.isdir(_web_dist):
-    app.mount("/", StaticFiles(directory=_web_dist, html=True), name="web")
+    app.mount("/assets", StaticFiles(directory=os.path.join(_web_dist, "assets")), name="web-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_web(full_path: str):
+        candidate = os.path.join(_web_dist, full_path)
+        if full_path and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(_web_dist, "index.html"))
 else:
     logging.getLogger(__name__).info(
         "%s not found - web frontend not mounted (this is expected for local "
