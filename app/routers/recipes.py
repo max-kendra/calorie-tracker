@@ -119,7 +119,6 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
     recipe = Recipe(
         name=payload.name,
         recipe_type=payload.recipe_type,
-        instructions=payload.instructions,
         source_url=payload.source_url,
         image_path=payload.image_path,
         servings=payload.servings,
