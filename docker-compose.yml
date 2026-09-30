@@ -14,8 +14,8 @@ services:
       - "5432:5432"
 
   api:
-    build: .
-    image: calorie-tracker:latest
+    image: ghcr.io/max-kendra/calorie-tracker:latest
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       - postgres

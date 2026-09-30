@@ -1,0 +1,57 @@
+name: Build and push image
+
+# Manual trigger only ("Run workflow" in the Actions tab, or `gh
+# workflow run build.yml`) - matches the existing deploy script's own
+# philosophy (see build-and-deploy.ps1: you decide when to deploy,
+# nothing happens automatically on every push).
+"on":
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    # A genuinely native arm64 machine - no QEMU, no --platform flag,
+    # no emulation of any kind. This is the whole point (see design
+    # discussion): repeated QEMU failures on the local Windows +
+    # Docker Desktop build path (cache corruption, a broken binfmt
+    # registration, then a plain "exec format error" on a fresh pull)
+    # aren't three unrelated bugs - they're the same underlying
+    # fragility (QEMU's registration inside the Docker Desktop VM can
+    # silently drop on a VM restart) surfacing three different ways.
+    # Building on real hardware makes the whole category of failure
+    # structurally impossible here, rather than something to keep
+    # patching after each recurrence.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      # Required to push to this repo's own GHCR namespace using the
+      # automatically-provided GITHUB_TOKEN below - no separate
+      # secret to create or rotate for this step.
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # :latest for the Pi to always pull, plus the commit SHA as
+          # a second, immutable tag - lets you point docker-compose.yml
+          # at an exact past build (e.g. to roll back) without
+          # depending on :latest having stayed put, which it won't.
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/calorie-tracker:latest
+            ghcr.io/${{ github.repository_owner }}/calorie-tracker:${{ github.sha }}
+          # Real layer caching across runs, same benefit local
+          # buildx already had via Docker Desktop's own cache - GitHub
+          # Actions' cache backend instead of a local one.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
