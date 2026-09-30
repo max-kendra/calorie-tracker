@@ -31,6 +31,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # web/ is its own separate repo (calorie-tracker-web), not part
+      # of this one - on your own machine both are already cloned
+      # side by side, so the Dockerfile's `COPY web/ ./` step always
+      # had something there. A fresh Actions runner only checks out
+      # THIS repo by default, so web/ genuinely doesn't exist here
+      # unless explicitly checked out too (see design discussion -
+      # "/web: not found" was this, not a build config problem).
+      #
+      # No token needed - calorie-tracker-web is public, so this reads
+      # the same way anyone browsing it on github.com does, with no
+      # auth at all (a token would only be needed for a PRIVATE repo).
+      #
+      # REPLACE <GITHUB_USERNAME> with your actual GitHub username/org
+      # if calorie-tracker-web doesn't live under the same one this
+      # workflow is running in.
+      - name: Checkout web repo
+        uses: actions/checkout@v4
+        with:
+          repository: max-kendra/calorie-tracker-web
+          path: web
+
       # Required for the GHA cache (type=gha) used below - the
       # runner's default "docker" driver can build and push fine but
       # doesn't support that cache backend at all ("Cache export is
