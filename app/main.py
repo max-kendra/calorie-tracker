@@ -26,6 +26,50 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+@app.middleware("http")
+async def serve_spa_for_plain_navigations(request, call_next):
+    """
+    Every router below is deliberately mounted at BOTH a plain path
+    (e.g. /recipes) and an /api-prefixed one (see the comment further
+    down) - Android's base URL has no /api segment at all, so it
+    genuinely depends on the plain ones for every request, which rules
+    out simply removing them (see design discussion).
+
+    The actual problem: a few of those plain paths (/recipes, /items,
+    /goals) happen to collide with the WEB APP'S OWN client-side page
+    routes of the same name. A real browser navigation to one of those
+    URLs - not a fetch() call, an actual address-bar/new-tab load - is
+    a genuine HTTP request that reaches this backend directly, and
+    without this middleware it would match the REAL api route
+    registered at that same plain path before ever reaching the SPA
+    catch-all further down, failing with a raw "X-API-Key missing"
+    error as the entire page (browsers don't attach custom headers to
+    plain navigations).
+
+    Every legitimate API client - this web app's own fetch-based
+    client AND Android's Retrofit client - always sends X-API-Key on
+    every real request; that's the entire reason the header exists.
+    So its absence is already a reliable, meaningful signal on its own:
+    no X-API-Key at all means this can only be a browser navigation,
+    never a real API call, regardless of which exact path it hit. When
+    that's true (and the path isn't already /api/... or a real static
+    asset under web/dist), serve the SPA directly here, before routing
+    ever reaches the colliding plain route - real API calls, which
+    always carry the header, are completely unaffected either way.
+    """
+    path = request.url.path
+    is_api_path = path.startswith("/api/") or path in ("/health",) or path.startswith("/media/") or path.startswith("/assets/")
+    has_api_key = bool(request.headers.get("x-api-key"))
+    web_dist = "web/dist"
+    if not is_api_path and not has_api_key and os.path.isdir(web_dist):
+        candidate = os.path.join(web_dist, path.lstrip("/"))
+        if path != "/" and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(web_dist, "index.html"))
+    return await call_next(request)
+
+
 app.include_router(items.router)
 app.include_router(grocery_stores.router)
 app.include_router(grocery_lists.router)

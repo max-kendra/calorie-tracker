@@ -54,5 +54,8 @@ Write-Host "==> Pulling the new image and restarting on $PiHost..."
 ssh $PiHost "cd $RemoteDir && docker compose pull api && docker compose up -d --force-recreate api"
 Assert-Success "ssh docker compose pull && up -d --force-recreate"
 
+ssh $PiHost "cd $RemoteDir && docker compose up -d --force-recreate api"
+Assert-Success "ssh docker compose up -d --force-recreate"
+
 Write-Host "==> Done. If this deploy included a migration, remember to run it manually:"
 Write-Host "    ssh $PiHost `"cd $RemoteDir && docker compose exec api alembic upgrade head`""
