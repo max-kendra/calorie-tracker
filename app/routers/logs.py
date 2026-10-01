@@ -15,6 +15,7 @@ from app.nutrition import (
     compute_recipe_ingredient_snapshot,
     compute_recipe_totals_for_quantity,
     RawTotals,
+    to_display_extended,
 )
 from app.schemas import (
     DailySummary,
@@ -201,6 +202,13 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     totals, item_name, recipe_name, image_path, serving_name, serving_weight_g, ingredient_snapshot, recipe_servings = (
         _validate_and_compute(payload, db)
     )
+    # Rounded HERE, at write time - not left as full-precision Decimal
+    # arithmetic (kcal-per-100g * quantity/100 can easily produce many
+    # decimal places) and hoped to be re-rounded by whatever happens to
+    # read it later. Reuses the same to_display_extended already used
+    # for API responses, rather than a second rounding rule (see design
+    # discussion: "do we really need 9 decimal places").
+    rounded = to_display_extended(totals)
 
     log = Log(
         date=payload.date,
@@ -214,15 +222,15 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         image_path_logged=image_path,
         recipe_servings_logged=recipe_servings,
         has_ingredient_snapshot=True,
-        kcal_logged=totals.kcal,
-        protein_g_logged=totals.protein_g,
-        carbs_g_logged=totals.carbs_g,
-        fat_g_logged=totals.fat_g,
-        fiber_g_logged=totals.fiber_g,
-        sugar_g_logged=totals.sugar_g,
-        countable_sugar_g_logged=totals.countable_sugar_g,
-        saturated_fat_g_logged=totals.saturated_fat_g,
-        sodium_mg_logged=totals.sodium_mg,
+        kcal_logged=rounded.kcal,
+        protein_g_logged=rounded.protein_g,
+        carbs_g_logged=rounded.carbs_g,
+        fat_g_logged=rounded.fat_g,
+        fiber_g_logged=rounded.fiber_g,
+        sugar_g_logged=rounded.sugar_g,
+        countable_sugar_g_logged=rounded.countable_sugar_g,
+        saturated_fat_g_logged=rounded.saturated_fat_g,
+        sodium_mg_logged=rounded.sodium_mg,
     )
     if ingredient_snapshot is not None:
         log.ingredients = [
@@ -234,15 +242,15 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
                 serving_size_weight_g_logged=ri.serving_size.weight_g if ri.serving_size else None,
                 quantity=scaled_quantity,
                 grams_logged=grams,
-                kcal_logged=ing_totals.kcal,
-                protein_g_logged=ing_totals.protein_g,
-                carbs_g_logged=ing_totals.carbs_g,
-                fat_g_logged=ing_totals.fat_g,
-                fiber_g_logged=ing_totals.fiber_g,
-                sugar_g_logged=ing_totals.sugar_g,
-                countable_sugar_g_logged=ing_totals.countable_sugar_g,
-                saturated_fat_g_logged=ing_totals.saturated_fat_g,
-                sodium_mg_logged=ing_totals.sodium_mg,
+                kcal_logged=(rounded_ing := to_display_extended(ing_totals)).kcal,
+                protein_g_logged=rounded_ing.protein_g,
+                carbs_g_logged=rounded_ing.carbs_g,
+                fat_g_logged=rounded_ing.fat_g,
+                fiber_g_logged=rounded_ing.fiber_g,
+                sugar_g_logged=rounded_ing.sugar_g,
+                countable_sugar_g_logged=rounded_ing.countable_sugar_g,
+                saturated_fat_g_logged=rounded_ing.saturated_fat_g,
+                sodium_mg_logged=rounded_ing.sodium_mg,
             )
             for ri, ing_totals, grams, scaled_quantity in ingredient_snapshot
         ]
@@ -313,6 +321,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             continue
 
         totals = compute_item_totals(item, ingredient.quantity, ingredient.serving_size)
+        rounded = to_display_extended(totals)
         log = Log(
             date=payload.date,
             meal_type=payload.meal_type,
@@ -323,15 +332,15 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             item_name_logged=item.name,
             image_path_logged=item.image_path,
             has_ingredient_snapshot=True,
-            kcal_logged=totals.kcal,
-            protein_g_logged=totals.protein_g,
-            carbs_g_logged=totals.carbs_g,
-            fat_g_logged=totals.fat_g,
-            fiber_g_logged=totals.fiber_g,
-            sugar_g_logged=totals.sugar_g,
-            countable_sugar_g_logged=totals.countable_sugar_g,
-            saturated_fat_g_logged=totals.saturated_fat_g,
-            sodium_mg_logged=totals.sodium_mg,
+            kcal_logged=rounded.kcal,
+            protein_g_logged=rounded.protein_g,
+            carbs_g_logged=rounded.carbs_g,
+            fat_g_logged=rounded.fat_g,
+            fiber_g_logged=rounded.fiber_g,
+            sugar_g_logged=rounded.sugar_g,
+            countable_sugar_g_logged=rounded.countable_sugar_g,
+            saturated_fat_g_logged=rounded.saturated_fat_g,
+            sodium_mg_logged=rounded.sodium_mg,
         )
         db.add(log)
         # Same "recently logged" bump as create_log - this is a
@@ -586,27 +595,35 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
         for ing in log.ingredients:
             ing.quantity = ing.quantity * factor
             ing.grams_logged = ing.grams_logged * factor
-            ing.kcal_logged = ing.kcal_logged * factor
+            # ceil_int, not a bare * factor - multiplying an
+            # already-rounded whole number by a fractional factor
+            # reintroduces exactly the long-decimal problem rounding at
+            # write time is meant to prevent (see design discussion:
+            # "do we really need 9 decimal places"). Same rounding rule
+            # to_display_extended uses elsewhere, applied directly
+            # field-by-field since several of these are nullable and
+            # can't cleanly round-trip through a full RawTotals object.
+            ing.kcal_logged = ceil_int(ing.kcal_logged * factor)
             # Same proportional rescale for the widened macro fields -
             # nullable (rows from before they existed), so only scale
             # what's actually there rather than turning a legitimate
             # "no historical data" NULL into a wrong 0.
             if ing.protein_g_logged is not None:
-                ing.protein_g_logged = ing.protein_g_logged * factor
+                ing.protein_g_logged = ceil_int(ing.protein_g_logged * factor)
             if ing.carbs_g_logged is not None:
-                ing.carbs_g_logged = ing.carbs_g_logged * factor
+                ing.carbs_g_logged = ceil_int(ing.carbs_g_logged * factor)
             if ing.fat_g_logged is not None:
-                ing.fat_g_logged = ing.fat_g_logged * factor
+                ing.fat_g_logged = ceil_int(ing.fat_g_logged * factor)
             if ing.fiber_g_logged is not None:
-                ing.fiber_g_logged = ing.fiber_g_logged * factor
+                ing.fiber_g_logged = ceil_int(ing.fiber_g_logged * factor)
             if ing.sugar_g_logged is not None:
-                ing.sugar_g_logged = ing.sugar_g_logged * factor
+                ing.sugar_g_logged = ceil_int(ing.sugar_g_logged * factor)
             if ing.countable_sugar_g_logged is not None:
-                ing.countable_sugar_g_logged = ing.countable_sugar_g_logged * factor
+                ing.countable_sugar_g_logged = ceil_int(ing.countable_sugar_g_logged * factor)
             if ing.saturated_fat_g_logged is not None:
-                ing.saturated_fat_g_logged = ing.saturated_fat_g_logged * factor
+                ing.saturated_fat_g_logged = ceil_int(ing.saturated_fat_g_logged * factor)
             if ing.sodium_mg_logged is not None:
-                ing.sodium_mg_logged = ing.sodium_mg_logged * factor
+                ing.sodium_mg_logged = ceil_int(ing.sodium_mg_logged * factor)
         item_name, recipe_name, image_path = log.item_name_logged, log.recipe_name_logged, log.image_path_logged
         serving_name, serving_weight_g = None, None
     else:
@@ -622,17 +639,18 @@ def update_log(log_id: int, payload: LogUpdate, db: Session = Depends(get_db)):
         if log.recipe_id is not None:
             log.recipe_servings_logged = recipe_servings
 
+    rounded = to_display_extended(totals)
     log.serving_size_id = merged.serving_size_id
     log.quantity = merged.quantity
-    log.kcal_logged = totals.kcal
-    log.protein_g_logged = totals.protein_g
-    log.carbs_g_logged = totals.carbs_g
-    log.fat_g_logged = totals.fat_g
-    log.fiber_g_logged = totals.fiber_g
-    log.sugar_g_logged = totals.sugar_g
-    log.countable_sugar_g_logged = totals.countable_sugar_g
-    log.saturated_fat_g_logged = totals.saturated_fat_g
-    log.sodium_mg_logged = totals.sodium_mg
+    log.kcal_logged = rounded.kcal
+    log.protein_g_logged = rounded.protein_g
+    log.carbs_g_logged = rounded.carbs_g
+    log.fat_g_logged = rounded.fat_g
+    log.fiber_g_logged = rounded.fiber_g
+    log.sugar_g_logged = rounded.sugar_g
+    log.countable_sugar_g_logged = rounded.countable_sugar_g
+    log.saturated_fat_g_logged = rounded.saturated_fat_g
+    log.sodium_mg_logged = rounded.sodium_mg
     if log.item_id is not None:
         # Same reasoning as create_log's bump - adjusting an existing
         # log's quantity is just as valid a signal of "this is the
