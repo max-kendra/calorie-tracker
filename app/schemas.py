@@ -351,6 +351,27 @@ class RecipeIngredientCreate(BaseModel):
     quantity: Decimal
 
 
+class RecipeComponentCreate(BaseModel):
+    component_recipe_id: int
+    # Number of the component recipe's servings, same meaning as a
+    # recipe log's quantity.
+    quantity: Decimal
+
+
+class RecipeComponentOut(BaseModel):
+    component_recipe_id: int
+    quantity: Decimal
+    recipe_name: str
+    image_path: Optional[str] = None
+    kcal: int
+    protein_g: int
+    carbs_g: int
+    fat_g: int
+    fiber_g: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class RecipeIngredientOut(BaseModel):
     item_id: int
     serving_size_id: Optional[int] = None
@@ -446,6 +467,7 @@ class RecipeBase(BaseModel):
 
 class RecipeCreate(RecipeBase):
     ingredients: list[RecipeIngredientCreate] = Field(default_factory=list)
+    components: list[RecipeComponentCreate] = Field(default_factory=list)
 
 
 class RecipeUpdate(BaseModel):
@@ -484,6 +506,7 @@ class RecipeOut(RecipeBase):
     created_at: datetime
     updated_at: datetime
     ingredients: list[RecipeIngredientOut] = Field(default_factory=list)
+    components: list[RecipeComponentOut] = Field(default_factory=list)
     steps: list[RecipeStepOut] = Field(default_factory=list)
     # Extended (not the compact NutritionTotals) so the recipe/meal info
     # screen can show sugar/saturated fat/sodium under the relevant

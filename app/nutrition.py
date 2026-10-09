@@ -208,6 +208,8 @@ def compute_recipe_totals(recipe: Recipe) -> RawTotals:
     total = ZERO_TOTALS
     for ri in recipe.ingredients:
         total = total + compute_item_totals(ri.item, ri.quantity, ri.serving_size)
+    for rc in recipe.components:
+        total = total + compute_recipe_totals_for_quantity(rc.component, rc.quantity)
     return total
 
 

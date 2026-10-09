@@ -310,6 +310,12 @@ class Recipe(Base):
     steps = relationship(
         "RecipeStep", back_populates="recipe", cascade="all, delete-orphan", order_by="RecipeStep.step_number"
     )
+    components = relationship(
+        "RecipeComponent",
+        back_populates="recipe",
+        foreign_keys="RecipeComponent.recipe_id",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         CheckConstraint("recipe_type IN ('recipe', 'meal')", name="ck_recipes_type"),
@@ -339,6 +345,29 @@ class RecipeIngredient(Base):
     recipe = relationship("Recipe", back_populates="ingredients")
     item = relationship("Item")
     serving_size = relationship("ServingSize")
+
+
+class RecipeComponent(Base):
+    """
+    A whole recipe used as a component of a saved meal. Only meals hold
+    components and only plain recipes can be components (enforced in the
+    router), so nesting can never form a cycle. quantity is a number of
+    the component recipe's servings, same meaning as a recipe log's
+    quantity.
+    """
+
+    __tablename__ = "recipe_components"
+
+    recipe_id = Column(Integer, ForeignKey("recipes.recipe_id", ondelete="CASCADE"), primary_key=True)
+    component_recipe_id = Column(Integer, ForeignKey("recipes.recipe_id"), primary_key=True)
+    quantity = Column(Numeric, nullable=False)
+
+    recipe = relationship("Recipe", back_populates="components", foreign_keys=[recipe_id])
+    component = relationship("Recipe", foreign_keys=[component_recipe_id])
+
+    __table_args__ = (
+        CheckConstraint("recipe_id <> component_recipe_id", name="ck_recipe_components_not_self"),
+    )
 
 
 class RecipeStep(Base):

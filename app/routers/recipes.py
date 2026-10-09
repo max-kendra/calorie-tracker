@@ -7,10 +7,17 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import require_api_key
 from app.database import get_db
-from app.models import Item, Recipe, RecipeIngredient, RecipeStep
-from app.nutrition import ceil_int, compute_item_totals, compute_recipe_totals, to_display_extended
+from app.models import Item, Recipe, RecipeComponent, RecipeIngredient, RecipeStep
+from app.nutrition import (
+    ceil_int,
+    compute_item_totals,
+    compute_recipe_totals,
+    compute_recipe_totals_for_quantity,
+    to_display_extended,
+)
 from app.search import multi_column_search_filter, relevance_rank
 from app.schemas import (
+    RecipeComponentCreate,
     RecipeCreate,
     RecipeIngredientCreate,
     RecipeOut,
@@ -62,6 +69,21 @@ def _ingredient_out_fields(ri: RecipeIngredient) -> dict:
     }
 
 
+def _component_out_fields(rc: RecipeComponent) -> dict:
+    totals = to_display_extended(compute_recipe_totals_for_quantity(rc.component, rc.quantity))
+    return {
+        "component_recipe_id": rc.component_recipe_id,
+        "quantity": rc.quantity,
+        "recipe_name": rc.component.name,
+        "image_path": rc.component.image_path,
+        "kcal": totals.kcal,
+        "protein_g": totals.protein_g,
+        "carbs_g": totals.carbs_g,
+        "fat_g": totals.fat_g,
+        "fiber_g": totals.fiber_g,
+    }
+
+
 def _build_recipe_out(recipe: Recipe) -> RecipeOut:
     totals = compute_recipe_totals(recipe)  # RawTotals, precise
     servings = recipe.servings or Decimal("1")
@@ -78,6 +100,7 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
         updated_at=recipe.updated_at,
         last_logged_at=recipe.last_logged_at,
         ingredients=[_ingredient_out_fields(ri) for ri in recipe.ingredients],
+        components=[_component_out_fields(rc) for rc in recipe.components],
         # No custom mapping function needed here, unlike ingredients
         # above - RecipeStepOut is a plain passthrough of real columns
         # (no computed fields like kcal to resolve), so from_attributes
@@ -91,7 +114,12 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
 def _get_recipe_or_404(recipe_id: int, db: Session) -> Recipe:
     recipe = (
         db.query(Recipe)
-        .options(joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item))
+        .options(
+            joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item),
+            joinedload(Recipe.components).joinedload(RecipeComponent.component).options(
+                joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item)
+            ),
+        )
         .filter(Recipe.recipe_id == recipe_id)
         .first()
     )
@@ -111,10 +139,40 @@ def _validate_items_exist(item_ids: list[int], db: Session):
         )
 
 
+def _validate_components(parent_type: str, component_ids: list[int], db: Session):
+    """Only meals hold components and only plain recipes can be
+    components, which rules out cycles without any graph walking."""
+    if not component_ids:
+        return
+    if parent_type != "meal":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only meals can contain recipes",
+        )
+    found = db.query(Recipe.recipe_id, Recipe.recipe_type).filter(Recipe.recipe_id.in_(component_ids)).all()
+    found_types = {row[0]: row[1] for row in found}
+    missing = set(component_ids) - set(found_types)
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown recipe_id(s): {sorted(missing)}",
+        )
+    not_recipes = [rid for rid, t in found_types.items() if t != "recipe"]
+    if not_recipes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only recipes (not meals) can be added to a meal: {sorted(not_recipes)}",
+        )
+
+
 @router.post("", response_model=RecipeOut, status_code=status.HTTP_201_CREATED)
 def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
     if payload.ingredients:
         _validate_items_exist([i.item_id for i in payload.ingredients], db)
+    component_ids = [c.component_recipe_id for c in payload.components]
+    if len(set(component_ids)) != len(component_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duplicate recipe in components")
+    _validate_components(payload.recipe_type, component_ids, db)
 
     recipe = Recipe(
         name=payload.name,
@@ -133,6 +191,12 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
             item_id=ing.item_id,
             serving_size_id=ing.serving_size_id,
             quantity=ing.quantity,
+        ))
+    for comp in payload.components:
+        db.add(RecipeComponent(
+            recipe_id=recipe.recipe_id,
+            component_recipe_id=comp.component_recipe_id,
+            quantity=comp.quantity,
         ))
 
     db.commit()
@@ -156,7 +220,10 @@ def list_recipes(
 ):
     """Backs the My Foods Recipe/Meal tabs, filtered by recipe_type."""
     query = db.query(Recipe).options(
-        joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item)
+        joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item),
+        joinedload(Recipe.components).joinedload(RecipeComponent.component).options(
+            joinedload(Recipe.ingredients).joinedload(RecipeIngredient.item)
+        ),
     )
 
     if q:
@@ -192,6 +259,12 @@ def update_recipe(recipe_id: int, payload: RecipeUpdate, db: Session = Depends(g
 @router.delete("/{recipe_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
     recipe = _get_recipe_or_404(recipe_id, db)
+    in_meal = db.query(RecipeComponent).filter(RecipeComponent.component_recipe_id == recipe_id).first()
+    if in_meal:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This recipe is used in a saved meal - remove it from the meal first",
+        )
     # FK constraint blocks this if any `logs` row still references this
     # recipe — deliberate, same protection as item deletes.
     db.delete(recipe)
@@ -263,6 +336,52 @@ def remove_ingredient(recipe_id: int, item_id: int, db: Session = Depends(get_db
     db.commit()
     recipe = _get_recipe_or_404(recipe_id, db)
     return _build_recipe_out(recipe)
+
+@router.post("/{recipe_id}/components", response_model=RecipeOut, status_code=status.HTTP_201_CREATED)
+def add_component(recipe_id: int, payload: RecipeComponentCreate, db: Session = Depends(get_db)):
+    recipe = _get_recipe_or_404(recipe_id, db)
+    _validate_components(recipe.recipe_type, [payload.component_recipe_id], db)
+    if any(rc.component_recipe_id == payload.component_recipe_id for rc in recipe.components):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This recipe is already in this meal - use PATCH to change its quantity",
+        )
+    db.add(RecipeComponent(
+        recipe_id=recipe_id,
+        component_recipe_id=payload.component_recipe_id,
+        quantity=payload.quantity,
+    ))
+    db.commit()
+    return _build_recipe_out(_get_recipe_or_404(recipe_id, db))
+
+
+@router.patch("/{recipe_id}/components/{component_recipe_id}", response_model=RecipeOut)
+def update_component_quantity(recipe_id: int, component_recipe_id: int, quantity: Decimal, db: Session = Depends(get_db)):
+    rc = (
+        db.query(RecipeComponent)
+        .filter(RecipeComponent.recipe_id == recipe_id, RecipeComponent.component_recipe_id == component_recipe_id)
+        .first()
+    )
+    if not rc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not in this meal")
+    rc.quantity = quantity
+    db.commit()
+    return _build_recipe_out(_get_recipe_or_404(recipe_id, db))
+
+
+@router.delete("/{recipe_id}/components/{component_recipe_id}", response_model=RecipeOut)
+def remove_component(recipe_id: int, component_recipe_id: int, db: Session = Depends(get_db)):
+    rc = (
+        db.query(RecipeComponent)
+        .filter(RecipeComponent.recipe_id == recipe_id, RecipeComponent.component_recipe_id == component_recipe_id)
+        .first()
+    )
+    if not rc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not in this meal")
+    db.delete(rc)
+    db.commit()
+    return _build_recipe_out(_get_recipe_or_404(recipe_id, db))
+
 
 @router.post("/{recipe_id}/steps", response_model=RecipeOut, status_code=status.HTTP_201_CREATED)
 def add_step(recipe_id: int, payload: RecipeStepCreate, db: Session = Depends(get_db)):

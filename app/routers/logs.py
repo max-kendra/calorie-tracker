@@ -188,9 +188,13 @@ def _log_to_out(
     )
 
 
-@router.post("", response_model=LogOut, status_code=status.HTTP_201_CREATED)
-def create_log(payload: LogCreate, db: Session = Depends(get_db)):
+def _add_log(payload, db: Session):
     """
+    Builds the Log (with frozen name/image/macros and, for recipes, the
+    ingredient snapshot), adds it to the session and bumps the source's
+    "recently logged" fields. Does not commit, so POST /logs/from-meal
+    can reuse it for recipe components inside its own transaction.
+
     Computes and SNAPSHOTS macros at write time. This is deliberate: if the
     source item/recipe is edited later, this log's numbers must not change
     - historical days/weekly summaries reflect what was actually counted
@@ -271,6 +275,12 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
         # Same reasoning, for the unfiltered recipe/meal list (see
         # recipes.py's list_recipes).
         db.query(Recipe).filter(Recipe.recipe_id == payload.recipe_id).update({"last_logged_at": func.now()})
+    return log, item_name, recipe_name, image_path, serving_name, serving_weight_g
+
+
+@router.post("", response_model=LogOut, status_code=status.HTTP_201_CREATED)
+def create_log(payload: LogCreate, db: Session = Depends(get_db)):
+    log, item_name, recipe_name, image_path, serving_name, serving_weight_g = _add_log(payload, db)
     db.commit()
     db.refresh(log)
     return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)
@@ -292,7 +302,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
     """
     recipe = (
         db.query(Recipe)
-        .options(joinedload(Recipe.ingredients))
+        .options(joinedload(Recipe.ingredients), joinedload(Recipe.components))
         .filter(Recipe.recipe_id == payload.recipe_id)
         .first()
     )
@@ -303,7 +313,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This is a recipe, not a meal - log it with POST /logs and recipe_id instead",
         )
-    if not recipe.ingredients:
+    if not recipe.ingredients and not recipe.components:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This meal has no ingredients")
 
     # Look up all the ingredient items in one query rather than one
@@ -311,7 +321,7 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
     item_ids = [ing.item_id for ing in recipe.ingredients]
     items_by_id = {item.item_id: item for item in db.query(Item).filter(Item.item_id.in_(item_ids)).all()}
 
-    created: list[tuple[Log, str, Optional[str]]] = []
+    created: list[tuple[Log, Optional[str], Optional[str], Optional[str]]] = []
     for ingredient in recipe.ingredients:
         item = items_by_id.get(ingredient.item_id)
         if not item:
@@ -349,7 +359,20 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
         item.last_logged_at = func.now()
         item.last_logged_quantity = ingredient.quantity
         item.last_logged_serving_size_id = ingredient.serving_size_id
-        created.append((log, item.name, item.image_path))
+        created.append((log, item.name, item.image_path, None))
+
+    # Recipes inside the meal land as ordinary recipe logs (one atomic
+    # entry each, with the usual ingredient snapshot), same as logging
+    # that recipe directly.
+    for component in recipe.components:
+        component_payload = LogCreate(
+            date=payload.date,
+            meal_type=payload.meal_type,
+            recipe_id=component.component_recipe_id,
+            quantity=component.quantity,
+        )
+        log, item_name, recipe_name, image_path, _, _ = _add_log(component_payload, db)
+        created.append((log, item_name, image_path, recipe_name))
 
     if not created:
         raise HTTPException(
@@ -364,9 +387,9 @@ def create_logs_from_meal(payload: LogFromMealRequest, db: Session = Depends(get
 
     db.commit()
     result = []
-    for log, item_name, image_path in created:
+    for log, item_name, image_path, recipe_name in created:
         db.refresh(log)
-        result.append(_log_to_out(log, item_name, None, image_path))
+        result.append(_log_to_out(log, item_name, recipe_name, image_path))
     return result
 
 
