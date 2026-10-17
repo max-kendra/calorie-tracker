@@ -34,17 +34,17 @@ gh run watch $RunId --exit-status
 Assert-Success "gh run watch (build failed - check the run's logs in the Actions tab)"
 
 Write-Host "==> Build succeeded. Copying docker-compose.yml to $PiHost (in case it changed)..."
-ssh $PiHost "mkdir -p $RemoteDir"
+ssh -n -o BatchMode=yes $PiHost "mkdir -p $RemoteDir"
 Assert-Success "ssh mkdir remote deploy dir"
-scp docker-compose.yml "${PiHost}:${RemoteDir}/docker-compose.yml"
+scp -o BatchMode=yes docker-compose.yml "${PiHost}:${RemoteDir}/docker-compose.yml"
 Assert-Success "scp docker-compose.yml"
 
 Write-Host "==> Starting any services that aren't running yet (backups etc.)..."
-ssh $PiHost "cd $RemoteDir && docker compose up -d"
+ssh -n -o BatchMode=yes $PiHost "cd $RemoteDir && docker compose up -d"
 Assert-Success "ssh docker compose up -d"
 
 Write-Host "==> Pulling the new image and restarting api on $PiHost..."
-ssh $PiHost "cd $RemoteDir && docker compose up -d --force-recreate api"
+ssh -n -o BatchMode=yes $PiHost "cd $RemoteDir && docker compose up -d --force-recreate api"
 Assert-Success "ssh docker compose up -d --force-recreate api"
 
 Write-Host "==> Done. If this deploy included a migration, remember to run it manually:"
