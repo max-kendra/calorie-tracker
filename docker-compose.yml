@@ -29,6 +29,8 @@ services:
       - ./media:/app/media
       - ./easyocr_models:/app/easyocr_models
       - ./ocr_metrics:/app/ocr_metrics
+      - ./backup-status:/app/backup-status:ro
+      - /mnt/data/calorie-tracker/db-backups:/app/db-backups:ro
     logging:
       driver: json-file
       options:
@@ -53,20 +55,6 @@ services:
     volumes:
       - /mnt/data/calorie-tracker/db-backups:/backups
 
-  media-backup:
-    image: alpine:3.20
-    container_name: media-backup
-    restart: unless-stopped
-    volumes:
-      - ./media:/source/media:ro
-      - /mnt/data/calorie-tracker/media-backups:/backups
-    command: >
-      sh -c "while true; do
-        tar -czf /backups/media-$$(date +%Y%m%d-%H%M%S).tar.gz -C /source media &&
-        find /backups -name 'media-*.tar.gz' -mtime +30 -delete;
-        sleep 86400;
-      done"
-
   offsite-backup:
     image: rclone/rclone:latest
     container_name: offsite-backup
@@ -78,13 +66,30 @@ services:
     volumes:
       - /mnt/data/calorie-tracker/rclone-config:/config/rclone
       - /mnt/data/calorie-tracker/db-backups:/rclone/db-backups:ro
-      - /mnt/data/calorie-tracker/media-backups:/rclone/media-backups:ro
-    command: >
-      -c "while true; do
-        rclone copy /rclone/db-backups offsite:calorie-tracker/db-backups &&
-        rclone copy /rclone/media-backups offsite:calorie-tracker/media-backups &&
-        sleep 86400;
-      done"
+      - ./media:/rclone/media:ro
+      - ./backup-status:/status
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command:
+      - -c
+      - |
+        while true; do
+          err=$$(mktemp)
+          if rclone copy /rclone/db-backups offsite:calorie-tracker/db-backups 2>"$$err" &&
+             rclone copy /rclone/media offsite:calorie-tracker/media 2>>"$$err"; then
+            date +%s > /status/offsite-last-success
+            rm -f /status/offsite-error
+            wait=86400
+          else
+            { echo "rclone failed:"; tail -c 300 "$$err"; } > /status/offsite-error
+            wait=3600
+          fi
+          rm -f "$$err"
+          sleep $$wait
+        done
 
 volumes:
   postgres-data:

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     # survive a container rebuild instead of living only in the ephemeral
     # container filesystem).
     media_dir: str = "media"
+    # Read-only views of the backup containers' output, see
+    # app/routers/backup_status.py and docker-compose.yml.
+    backup_status_dir: str = "backup-status"
+    db_backups_dir: str = "db-backups"
     # Where OCR scan metrics (timing, memory) get written - see
     # app/ocr_metrics.py. Same resolution rules as media_dir above;
     # defaults to a local folder but can point anywhere, including a

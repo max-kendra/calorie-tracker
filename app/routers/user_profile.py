@@ -1,13 +1,11 @@
-import uuid
 from decimal import ROUND_HALF_UP, Decimal
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
-from app.config import settings
 from app.database import get_db
+from app.media import save_compressed_jpeg
 from app.models import UserProfile, WeightHistoryEntry
 from app.schemas import (
     KcalGoalCalculationResult,
@@ -106,11 +104,7 @@ async def upload_profile_picture(image: UploadFile = File(...), db: Session = De
     """
     image_bytes = await image.read()
 
-    filename = f"{uuid.uuid4().hex}.jpg"
-    media_dir = Path(settings.media_dir)
-    media_dir.mkdir(parents=True, exist_ok=True)
-    (media_dir / filename).write_bytes(image_bytes)
-    image_path = f"{settings.media_dir}/{filename}"
+    image_path = save_compressed_jpeg(image_bytes)
 
     profile = _get_or_create_profile(db)
     profile.profile_pic_path = image_path

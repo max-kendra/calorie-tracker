@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import ocr
 from app.config import settings
-from app.routers import goals, grocery_lists, grocery_stores, guidelines, items, logs, recipes, usda, user_profile
+from app.routers import backup_status, goals, grocery_lists, grocery_stores, guidelines, items, logs, recipes, usda, user_profile
 
 # Without this, nothing below INFO level (including the new OCR-result
 # logging added to scan_label -- see app/routers/items.py) ever actually
@@ -79,6 +79,7 @@ app.include_router(goals.router)
 app.include_router(guidelines.router)
 app.include_router(user_profile.router)
 app.include_router(usda.router)
+app.include_router(backup_status.router)
 
 # Same routers, mounted a SECOND time under /api - not a redirect, two
 # real sets of routes sharing the same handler functions (FastAPI
@@ -100,6 +101,7 @@ app.include_router(goals.router, prefix="/api")
 app.include_router(guidelines.router, prefix="/api")
 app.include_router(user_profile.router, prefix="/api")
 app.include_router(usda.router, prefix="/api")
+app.include_router(backup_status.router, prefix="/api")
 
 # Serves product photos saved by POST /items/scan-product-photo back out
 # at /media/<filename> -- e.g. an Item's image_path of "media/abc123.jpg"

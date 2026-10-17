@@ -1,6 +1,4 @@
 import logging
-import uuid
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -9,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_api_key
 from app.barcode import decode_barcode_from_image_bytes
-from app.config import settings
+from app.media import save_compressed_jpeg
 from app.search import multi_column_search_filter, relevance_rank
 from app.database import get_db
 from app.models import Item, ItemGroceryStore, ServingSize
@@ -127,20 +125,10 @@ async def scan_product_photo(image: UploadFile = File(...)):
     """
     image_bytes = await image.read()
 
-    # Save first, with a random filename - collisions are practically
-    # impossible with uuid4, and using the original client filename
-    # would risk path-traversal or overwrite issues if we ever pass it
-    # through unsanitized. Always .jpg since the client always sends a
-    # JPEG-compressed crop (see Android AddItemScreen.kt: easycrop's
-    # `.compress(Bitmap.CompressFormat.JPEG, ...)`), regardless of what
-    # format the original photo was in before cropping.
-    filename = f"{uuid.uuid4().hex}.jpg"
-    media_dir = Path(settings.media_dir)
-    media_dir.mkdir(parents=True, exist_ok=True)
-    (media_dir / filename).write_bytes(image_bytes)
-    # Relative path matching how app/main.py mounts StaticFiles at
-    # /media - e.g. "media/<filename>" is reachable at GET /media/<filename>.
-    image_path = f"{settings.media_dir}/{filename}"
+    # Random filename (never the client's) and always .jpg, see
+    # save_compressed_jpeg. Path is relative to the /media static mount
+    # in app/main.py.
+    image_path = save_compressed_jpeg(image_bytes)
 
     return ProductPhotoScanResult(
         image_path=image_path,
