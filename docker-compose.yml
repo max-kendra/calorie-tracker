@@ -49,6 +49,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SCHEDULE: "@hourly"
+      TZ: Europe/Paris
       BACKUP_KEEP_DAYS: 14
       BACKUP_KEEP_WEEKS: 4
       BACKUP_KEEP_MONTHS: 6
@@ -63,6 +64,8 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     entrypoint: /bin/sh
+    environment:
+      TZ: Europe/Paris
     volumes:
       - /mnt/data/calorie-tracker/rclone-config:/config/rclone
       - /mnt/data/calorie-tracker/db-backups:/rclone/db-backups:ro
