@@ -1,0 +1,880 @@
+from datetime import date, datetime
+from decimal import Decimal
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
+ItemType = Literal["product", "ingredient"]
+ItemOrigin = Literal["manual", "usda_import", "ocr_assisted"]
+
+
+class ServingSizeBase(BaseModel):
+    name: str
+    weight_g: Decimal
+
+
+class ServingSizeCreate(ServingSizeBase):
+    pass
+
+
+class ServingSizeOut(ServingSizeBase):
+    id: int
+    item_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryStoreOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryStoreCreate(BaseModel):
+    name: str
+
+
+class GroceryTripOut(BaseModel):
+    id: int
+    date: date
+    label: Optional[str] = None
+    store_id: Optional[int] = None
+    # Denormalized, same reasoning as everywhere else in this file -
+    # avoids a second lookup client-side just to show/validate against
+    # which store a trip belongs to.
+    store: Optional[GroceryStoreOut] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryTripCreate(BaseModel):
+    date: date
+    label: Optional[str] = None
+    store_id: Optional[int] = None
+
+
+class GroceryTripUpdate(BaseModel):
+    date: Optional[date] = None
+    label: Optional[str] = None
+    store_id: Optional[int] = None
+
+
+class GroceryListEntryOut(BaseModel):
+    id: int
+    item_id: Optional[int] = None
+    # Denormalized, same reasoning as RecipeIngredientOut.item_name -
+    # avoids a second lookup client-side just to show what the entry
+    # actually is, or which store(s) it could be filtered by within a
+    # trip (see design discussion: "you should also still be able to
+    # filter the items inside a trip by store"). Always populated -
+    # either the real item's own name, or the placeholder text, so the
+    # client never needs to branch on which one it's looking at just to
+    # display something.
+    item_name: str
+    # True when this entry has no real item behind it yet (see design
+    # discussion - the hot dog buns example) - the client uses this to
+    # show a "still needs info" badge and to know that dragging this
+    # onto a store-specific trip should always be allowed (a
+    # placeholder has no store of its own to conflict with).
+    is_placeholder: bool
+    grocery_stores: list[GroceryStoreOut] = Field(default_factory=list)
+    trip_id: Optional[int] = None
+    quantity: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GroceryListEntryCreate(BaseModel):
+    """Exactly one of item_id/placeholder_name must be set - enforced
+    in the router, not here, since Pydantic doesn't have a clean native
+    way to express "exactly one of these two" as a field constraint."""
+
+    item_id: Optional[int] = None
+    placeholder_name: Optional[str] = None
+    # Defaults to the unassigned pool - most entries start here and get
+    # dragged into a trip later, rather than being assigned upfront.
+    trip_id: Optional[int] = None
+    quantity: Optional[str] = None
+
+
+class GroceryListEntryUpdate(BaseModel):
+    """Everything editable on an existing entry after creation - which
+    trip it's assigned to (or back to the pool, via null - this IS the
+    drag-and-drop action), its quantity text, and/or resolving a
+    placeholder into a real item (setting item_id here - see design
+    discussion - clears placeholder_name automatically, since an entry
+    is never both at once)."""
+
+    trip_id: Optional[int] = None
+    quantity: Optional[str] = None
+    item_id: Optional[int] = None
+
+
+class ItemBase(BaseModel):
+    name: str
+    barcode: Optional[str] = None
+    brand: Optional[str] = None
+    image_path: Optional[str] = None
+
+    kcal_100g: Optional[Decimal] = None
+    protein_100g: Optional[Decimal] = None
+    carbs_100g: Optional[Decimal] = None
+    fat_100g: Optional[Decimal] = None
+    fiber_100g: Optional[Decimal] = None
+    # Tracked for daily/weekly summaries only - not surfaced in the
+    # compact per-item/recipe/log nutrition displays.
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
+    # Whether this item's sugar counts toward "added sugar" tracking -
+    # a plain explicit flag, set per item at creation (see design
+    # discussion: "my third highest ranking added sugar source is
+    # frozen berry mix... this is silly", and the follow-up: "product
+    # means it has a barcode, which frozen berries do" - there used to
+    # be an origin-based auto-guess here, dropped because neither
+    # origin nor type reliably distinguishes a whole food from an
+    # added-sugar product; a barcode belongs to both equally). NULL and
+    # False behave identically (not counted) - see compute_item_totals
+    # for where this is applied.
+    counts_as_added_sugar: Optional[bool] = None
+
+    type: ItemType = "product"
+    origin: ItemOrigin = "manual"
+
+
+class ItemCreate(ItemBase):
+    # Which stores carry this item - many-to-many (see GroceryStore in
+    # models.py), so a list, not a single id. Defaults to none set at
+    # creation, same as any other optional item field.
+    grocery_store_ids: List[int] = Field(default_factory=list)
+
+
+class ItemUpdate(BaseModel):
+    """
+    All fields optional — supports partial updates (e.g. correcting just
+    kcal_100g after noticing a typo, per the "editable macros" requirement
+    from the design doc). Changes here are picked up automatically by any
+    recipe referencing this item, since recipe totals are computed live.
+    """
+
+    name: Optional[str] = None
+    barcode: Optional[str] = None
+    brand: Optional[str] = None
+    image_path: Optional[str] = None
+
+    kcal_100g: Optional[Decimal] = None
+    protein_100g: Optional[Decimal] = None
+    carbs_100g: Optional[Decimal] = None
+    fat_100g: Optional[Decimal] = None
+    fiber_100g: Optional[Decimal] = None
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
+    counts_as_added_sugar: Optional[bool] = None
+
+    type: Optional[ItemType] = None
+    # None = don't touch the item's stores at all (same "not provided"
+    # convention every other field on this schema already uses). An
+    # actual list - INCLUDING an empty one - REPLACES the full set of
+    # stores wholesale rather than patching it incrementally, matching
+    # how the checkbox-picker UI actually submits it (always the
+    # complete current set of checked boxes) - no separate add/remove-
+    # one-store endpoint to build or reason about.
+    grocery_store_ids: Optional[List[int]] = None
+
+
+class ItemOut(ItemBase):
+    item_id: int
+    created_at: datetime
+    updated_at: datetime
+    serving_sizes: list[ServingSizeOut] = Field(default_factory=list)
+    # Lets the quantity/serving picker default to whatever this item was
+    # actually last logged with, persisted here rather than in client
+    # memory scoped to a single screen/session (see design discussion:
+    # "if i logged 12g of something for lunch and then go to log
+    # dinner, it's 100g again" - that in-memory map never survived
+    # crossing a meal boundary, since each meal gets its own fresh
+    # ViewModel instance).
+    last_logged_quantity: Optional[Decimal] = None
+    last_logged_serving_size_id: Optional[int] = None
+    # Was already used server-side for ORDER BY (see items.py's
+    # list_items) but never actually serialized to the client - meaning
+    # the client had no way to compare an item's recency against a
+    # recipe's when trying to show both together in one truly
+    # interleaved list (see design discussion: "the idea was always to
+    # have one list where they're all together... what did you think we
+    # had the filters for"). Exposed now so the client can merge-sort
+    # both types by this shared timestamp itself.
+    last_logged_at: Optional[datetime] = None
+    grocery_stores: List[GroceryStoreOut] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BarcodeScanResult(BaseModel):
+    """
+    Result of scanning an uploaded image for a barcode. If `item` is None,
+    the barcode was decoded successfully but no matching item exists yet
+    in our DB - the client should pre-fill the Add Item form with
+    `barcode` and let the user fill in the rest. If `barcode` itself is
+    None, neither decoder could find anything in the image - the client
+    should fall back to manual barcode entry.
+
+    IMPORTANT: real-world testing found decoders can return a WRONG
+    barcode value that still looks structurally valid. `checksum_valid`
+    being True is NOT proof of correctness (a garbled read can still pass
+    its own checksum) - the client MUST always display `barcode` to the
+    user for visual confirmation against the physical package before
+    using it to match or create an item. Never auto-proceed silently.
+    """
+
+    barcode: Optional[str] = None
+    decoder_used: Optional[str] = None
+    checksum_valid: Optional[bool] = None
+    item: Optional[ItemOut] = None
+
+
+class UsdaMacros(BaseModel):
+    """
+    Best-effort normalized macros from a USDA FoodData Central entry.
+    Fields are omitted (not zero) when FDC didn't report them - the
+    client should treat an absent field as "unknown," pre-filling that
+    part of the Add Item form blank rather than with a misleading 0.
+    """
+
+    kcal_100g: Optional[Decimal] = None
+    protein_100g: Optional[Decimal] = None
+    carbs_100g: Optional[Decimal] = None
+    fat_100g: Optional[Decimal] = None
+    fiber_100g: Optional[Decimal] = None
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
+
+
+class UsdaFoodSummaryOut(BaseModel):
+    fdc_id: int
+    description: str
+    data_type: str
+    brand_owner: Optional[str] = None
+    macros: UsdaMacros
+
+
+class UsdaFoodDetailOut(BaseModel):
+    fdc_id: int
+    description: str
+    data_type: str
+    macros: UsdaMacros
+
+
+class OcrMacros(BaseModel):
+    """Same shape as UsdaMacros - fields absent (not zero) when OCR
+    didn't confidently extract them. Client pre-fills the Add Item form
+    with whatever was found and leaves the rest blank for manual entry."""
+
+    kcal_100g: Optional[Decimal] = None
+    protein_100g: Optional[Decimal] = None
+    carbs_100g: Optional[Decimal] = None
+    fat_100g: Optional[Decimal] = None
+    fiber_100g: Optional[Decimal] = None
+    sugar_100g: Optional[Decimal] = None
+    saturated_fat_100g: Optional[Decimal] = None
+    sodium_mg_100g: Optional[Decimal] = None
+
+
+class OcrScanResult(BaseModel):
+    """
+    Result of OCR-scanning a nutrition label photo. NEVER written to our
+    DB directly - same review-before-save pattern as barcode scanning
+    and USDA import. The client pre-fills the Add Item form with `macros`
+    and lets the user correct anything before it's actually saved via the
+    normal POST /items call.
+
+    `per_100g_confirmed` being False means we couldn't confirm the label
+    values are per-100g (vs. per-serving) - the user should double check
+    this specifically, since we don't currently attempt per-serving-to-
+    per-100g conversion.
+
+    `detected_language` being null means we couldn't confidently identify
+    which language's label format this is - macros will be empty and
+    the user needs to enter everything manually.
+    """
+
+    raw_text: str
+    detected_language: Optional[str] = None
+    per_100g_confirmed: bool = False
+    macros: OcrMacros
+
+
+class ProductPhotoScanResult(BaseModel):
+    """
+    Result of uploading a (cropped) photo of the product itself - the
+    step BEFORE the nutrition-label photo in the Add Item flow. Two
+    separate things happen here:
+
+    1. The image is saved to disk and `image_path` is returned so the
+       client can carry it through and attach it to the item on save
+       (POST /items with `image_path` set) - this is the item's
+       "package photo", same one shown later in My Foods/search results.
+    2. We run OCR over it and take a best-effort guess at the product's
+       name and brand from whatever text we found, since packaging
+       almost always has both printed somewhere on the front.
+
+    IMPORTANT - `guessed_name`/`guessed_brand` are genuinely rough
+    heuristics (longest line of text found = name, another prominent
+    line = brand), NOT a confident structured extraction the way
+    OcrScanResult's `macros` are for nutrition labels. There's no
+    per-language keyword dictionary to anchor on here - a product
+    package's front doesn't have consistent field labels the way a
+    nutrition table does. Client MUST show these as pre-filled but
+    clearly editable text fields, never as an assumed-correct value -
+    same review-before-save principle as everything else OCR-derived in
+    this app.
+    """
+
+    image_path: str
+    raw_text: str
+    guessed_name: Optional[str] = None
+    guessed_brand: Optional[str] = None
+
+
+RecipeType = Literal["recipe", "meal"]
+
+
+class RecipeIngredientCreate(BaseModel):
+    item_id: int
+    # None = quantity is grams directly; set = quantity is a multiplier
+    # of that ServingSize's weight_g -- see RecipeIngredient model's
+    # doc comment for the full reasoning.
+    serving_size_id: Optional[int] = None
+    quantity: Decimal
+
+
+class RecipeComponentCreate(BaseModel):
+    component_recipe_id: int
+    # Number of the component recipe's servings, same meaning as a
+    # recipe log's quantity.
+    quantity: Decimal
+
+
+class RecipeComponentOut(BaseModel):
+    component_recipe_id: int
+    quantity: Decimal
+    recipe_name: str
+    image_path: Optional[str] = None
+    kcal: int
+    protein_g: int
+    carbs_g: int
+    fat_g: int
+    fiber_g: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecipeIngredientOut(BaseModel):
+    item_id: int
+    serving_size_id: Optional[int] = None
+    quantity: Decimal
+    item_name: str  # denormalized for convenience — avoids a second lookup client-side
+    # Same denormalization as LogOut.serving_size_name -- without this,
+    # serving_size_id alone gives the client no way to know what unit
+    # was actually used (e.g. "2 pancakes" vs raw grams), see that
+    # field's doc comment for the exact bug this avoids repeating.
+    serving_size_name: Optional[str] = None
+    # Same denormalization as LogOut.serving_size_weight_g -- lets the
+    # client show the gram equivalent alongside a custom serving.
+    serving_size_weight_g: Optional[Decimal] = None
+    # Denormalized from the item, same reasoning as LogOut.image_path --
+    # lets the ingredient list show a thumbnail without a separate
+    # GET /items/{id} per row.
+    image_path: Optional[str] = None
+    # This ingredient's own computed calories (quantity x the item's
+    # macros, resolving serving_size the same way logs do) -- lets the
+    # ingredient list show a per-row calorie figure the same way
+    # Journal's log rows do, without the client needing to fetch each
+    # item and recompute it itself.
+    kcal: int
+    # Same reasoning, the rest of the macro breakdown - compute_item_
+    # totals already computes all of these to get kcal above, so this
+    # is free (see design discussion: "can we also include this
+    # information in the ui when creating/editing recipes" - the same
+    # kcal-only-kept pattern LoggedRecipeIngredient had before it was
+    # widened, just on the live-recipe side instead of the frozen-log
+    # side. No historical-gap concern here since this is always
+    # computed live from the recipe's current ingredients, never
+    # frozen).
+    protein_g: int
+    carbs_g: int
+    fat_g: int
+    fiber_g: int
+    sugar_g: int
+    countable_sugar_g: int
+    saturated_fat_g: int
+    sodium_mg: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NutritionTotals(BaseModel):
+    """
+    API-facing, always whole numbers rounded UP for display (see
+    app/nutrition.py for the rounding policy — internal math stays in
+    precise Decimal via RawTotals, only converted to this shape right
+    before a response is built).
+
+    Deliberately compact — used on items/recipes/logs/meal_plans. Does
+    NOT include sugar/saturated_fat, to keep those displays uncluttered;
+    see ExtendedNutritionTotals for where those surface instead.
+    """
+
+    kcal: int
+    protein_g: int
+    carbs_g: int
+    fat_g: int
+    fiber_g: int
+
+
+class ExtendedNutritionTotals(NutritionTotals):
+    """
+    Same as NutritionTotals plus sugar_g/saturated_fat_g. Used ONLY by the
+    daily/weekly summary endpoint — deliberately kept out of the compact
+    per-item/recipe/log displays so the main tracker UI doesn't get
+    crowded with numbers most people don't need to see every time they
+    log something, while still being trackable in aggregate.
+    """
+
+    sugar_g: int
+    # Sugar excluding raw USDA-import-origin ingredients (e.g. a
+    # banana) -- what the sugar-tracking threshold card should actually
+    # display, since added-sugar dietary guidance targets added/free
+    # sugars, not sugar naturally occurring in whole foods (see design
+    # discussion: "my highest sugar source is freaking bananas"). A
+    # heuristic based on item origin, not a true added-vs-total-sugar
+    # lookup - see RawTotals.countable_sugar_g's doc comment for why.
+    countable_sugar_g: int
+    saturated_fat_g: int
+    sodium_mg: int
+
+
+class RecipeBase(BaseModel):
+    name: str
+    recipe_type: RecipeType = "recipe"
+    source_url: Optional[str] = None
+    image_path: Optional[str] = None
+    servings: Decimal = Decimal("1")
+    full_ingredients: Optional[str] = None
+
+
+class RecipeCreate(RecipeBase):
+    ingredients: list[RecipeIngredientCreate] = Field(default_factory=list)
+    components: list[RecipeComponentCreate] = Field(default_factory=list)
+
+
+class RecipeUpdate(BaseModel):
+    """Partial update for recipe metadata. Ingredients AND steps are
+    both managed via their own endpoints (add/remove/replace-all), not
+    through this."""
+
+    name: Optional[str] = None
+    recipe_type: Optional[RecipeType] = None
+    source_url: Optional[str] = None
+    image_path: Optional[str] = None
+    servings: Optional[Decimal] = None
+    full_ingredients: Optional[str] = None
+
+
+class RecipeStepOut(BaseModel):
+    id: int
+    step_number: int
+    text: str
+    timer_seconds: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecipeStepCreate(BaseModel):
+    text: str
+    timer_seconds: Optional[int] = None
+
+
+class RecipeStepUpdate(BaseModel):
+    text: Optional[str] = None
+    timer_seconds: Optional[int] = None
+
+
+class RecipeOut(RecipeBase):
+    recipe_id: int
+    created_at: datetime
+    updated_at: datetime
+    ingredients: list[RecipeIngredientOut] = Field(default_factory=list)
+    components: list[RecipeComponentOut] = Field(default_factory=list)
+    steps: list[RecipeStepOut] = Field(default_factory=list)
+    # Extended (not the compact NutritionTotals) so the recipe/meal info
+    # screen can show sugar/saturated fat/sodium under the relevant
+    # macro, same as the item info screen already does with its own
+    # per-100g fields (see design discussion: "could we start showing
+    # sugar, saturated fats and sodium on the item and recipe/meal info
+    # screens").
+    totals: ExtendedNutritionTotals  # for the whole recipe (all servings combined)
+    totals_per_serving: ExtendedNutritionTotals
+    # Same reasoning as ItemOut.last_logged_at -- was already used
+    # server-side for ORDER BY (see recipes.py's list_recipes) but never
+    # serialized to the client until now.
+    last_logged_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+MealType = Literal["breakfast", "lunch", "dinner", "snack"]
+
+
+class LoggableEntryBase(BaseModel):
+    """
+    Shared shape between logs and meal_plans: reference either an item or
+    a recipe (never both/neither — enforced both at the DB CHECK
+    constraint level and here), plus quantity and optional serving size.
+
+    quantity semantics:
+      - item + serving_size_id set: quantity = number of that serving
+        (e.g. 2 slices) — grams = quantity * serving_size.weight_g
+      - item + no serving_size_id: quantity = grams directly
+      - recipe: quantity = number of recipe servings consumed
+    """
+
+    date: date
+    meal_type: MealType
+    item_id: Optional[int] = None
+    recipe_id: Optional[int] = None
+    serving_size_id: Optional[int] = None
+    quantity: Decimal
+
+
+class LogCreate(LoggableEntryBase):
+    pass
+
+
+class LogFromMealRequest(BaseModel):
+    """
+    Backs POST /logs/from-meal - expands a saved "meal" into one log
+    PER INGREDIENT (each individually editable/removable afterward),
+    rather than a single log referencing recipe_id the way an actual
+    recipe logs. See that endpoint's docstring for the full reasoning.
+    """
+
+    recipe_id: int
+    date: date
+    meal_type: MealType
+
+
+class LogCopyRequest(BaseModel):
+    """Backs POST /logs/copy. meal_type=None keeps each log's own meal
+    (whole-day copy); set it to land everything in one meal."""
+
+    log_ids: list[int] = Field(min_length=1)
+    target_date: date
+    meal_type: Optional[MealType] = None
+    move: bool = False
+
+
+class LogUpdate(BaseModel):
+    """Quantity-only edit of an existing log - item_id/recipe_id/date/
+    meal_type are NOT editable this way (that's "delete and re-log as
+    something else", not "edit"). serving_size_id can optionally change
+    too (e.g. switching from grams to "1 slice"), but at least one of
+    quantity/serving_size_id must be provided."""
+
+    quantity: Optional[Decimal] = None
+    serving_size_id: Optional[int] = None
+
+
+class LoggedRecipeIngredientOut(BaseModel):
+    """One frozen ingredient row from LoggedRecipeIngredient - see that
+    model's docstring. item_id/serving_size_id are included only for
+    traceability; item_name/serving_size_name/grams/kcal are the frozen
+    values and are what should actually be displayed. Built explicitly
+    in the router (not from_attributes) so kcal gets the same ceil_int
+    rounding as every other *_logged figure in LogOut.
+
+    protein_g/carbs_g/fat_g/fiber_g/sugar_g/countable_sugar_g/
+    saturated_fat_g/sodium_mg are all Optional - None for rows logged
+    before the per-ingredient snapshot was widened past kcal/grams (see
+    that migration's own note: no historical value to backfill for
+    those). Present and precise for anything logged since."""
+
+    item_id: Optional[int] = None
+    item_name: str
+    serving_size_id: Optional[int] = None
+    serving_size_name: Optional[str] = None
+    serving_size_weight_g: Optional[Decimal] = None
+    quantity: Decimal
+    grams: Decimal
+    kcal: int
+    protein_g: Optional[int] = None
+    carbs_g: Optional[int] = None
+    fat_g: Optional[int] = None
+    fiber_g: Optional[int] = None
+    sugar_g: Optional[int] = None
+    countable_sugar_g: Optional[int] = None
+    saturated_fat_g: Optional[int] = None
+    sodium_mg: Optional[int] = None
+
+
+class LogOut(LoggableEntryBase):
+    id: int
+    logged_at: datetime
+    # Snapshotted as precise Decimal in the DB at write time (see design
+    # doc — frozen from here on, regardless of later edits to the source
+    # item/recipe). Rounded UP to whole numbers here, at the API/display
+    # boundary only — the stored value stays exact for accurate summaries.
+    kcal_logged: int
+    protein_g_logged: int
+    carbs_g_logged: int
+    fat_g_logged: int
+    fiber_g_logged: int
+    # Already computed and stored at write time (same snapshot-at-log-
+    # time integrity as the macros above), but not returned here until
+    # now - weren't needed for the tracker UI itself, only for daily/
+    # weekly summaries internally. Now also exposed so the client can
+    # use them for things like Health Connect nutrition export (see
+    # design discussion), which wants a fuller picture than just the
+    # five main-tracked macros.
+    sugar_g_logged: int
+    # Sugar excluding raw USDA-import-origin ingredients (see design
+    # discussion: "my highest sugar source is freaking bananas") -- what
+    # the Home screen's sugar threshold card and its "top contributors"
+    # list should actually sum/rank by, since that card reads individual
+    # logs directly rather than a daily/weekly aggregate. Same
+    # heuristic as RawTotals.countable_sugar_g -- see that field's doc
+    # comment for why it's origin-based rather than a true added-vs-
+    # total-sugar lookup.
+    countable_sugar_g_logged: int
+    saturated_fat_g_logged: int
+    sodium_mg_logged: int
+    # Denormalized for convenient display, not stored on the row itself.
+    item_name: Optional[str] = None
+    recipe_name: Optional[str] = None
+    # Same denormalization - lets the client show a thumbnail in the
+    # logged-items list without a separate GET /items/{id} per row.
+    image_path: Optional[str] = None
+    # Denormalized the same way - serving_size_id alone gives the client
+    # no way to know what unit was actually logged (e.g. "2 slices" vs
+    # raw grams), since it has no serving-size list of its own to
+    # resolve the id against for a log it isn't currently editing.
+    serving_size_name: Optional[str] = None
+    # The serving's own weight_g (not multiplied by quantity) -- lets
+    # the client show the gram equivalent alongside a custom serving
+    # (e.g. "2 slices (75g)": quantity=2, this=37.5), same reasoning as
+    # serving_size_name above.
+    serving_size_weight_g: Optional[Decimal] = None
+    # Frozen per-ingredient breakdown - see LoggedRecipeIngredient's
+    # docstring. Only ever non-empty for recipe_id-based logs, and only
+    # for those created after this feature shipped (older recipe logs
+    # have no snapshot to recover - see that migration's own note on
+    # why backfill isn't possible here). None/empty for item-based logs.
+    ingredients: List[LoggedRecipeIngredientOut] = []
+    # The recipe's total servings YIELD at the time this was logged
+    # (e.g. 4, for a recipe that made 4 servings) - only set for
+    # recipe_id logs. `quantity` above is how many of those servings
+    # were actually consumed; this is the denominator needed to make
+    # sense of that number once the recipe's own servings count has
+    # since been edited (see that migration's own doc comment).
+    recipe_servings_logged: Optional[Decimal] = None
+    # True for every log created after this feature shipped, item or
+    # recipe alike. Lets the client tell "ingredients is empty because
+    # the recipe genuinely had none" apart from "empty because this log
+    # predates snapshotting and that history is gone" - both otherwise
+    # look like the same empty list.
+    has_ingredient_snapshot: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DailySummary(BaseModel):
+    date: date
+    totals: ExtendedNutritionTotals
+
+
+class MealGoalSplitIn(BaseModel):
+    meal_type: MealType
+    pct_of_kcal: Decimal
+
+
+class MealGoalSplitOut(BaseModel):
+    meal_type: MealType
+    pct_of_kcal: Decimal
+    # Derived, computed live from the parent goal's targets x this
+    # percentage - never stored. Rounded for display per our policy.
+    computed_totals: NutritionTotals
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GoalBase(BaseModel):
+    start_date: date
+    end_date: Optional[date] = None
+    kcal_target: Decimal
+    protein_g_target: Decimal
+    carbs_g_target: Decimal
+    fat_g_target: Decimal
+    fiber_g_target: Decimal
+
+
+class GoalCreate(GoalBase):
+    """
+    Creating a new goal automatically closes the previously active one
+    (sets its end_date to the day before this goal's start_date) -
+    there's only ever one active (end_date IS NULL) goal at a time.
+    Defaults to an even 25/25/25/25 meal split unless overridden.
+    """
+
+    meal_splits: Optional[list[MealGoalSplitIn]] = None
+
+
+class GoalUpdate(BaseModel):
+    # None on any of these means "don't touch", same convention every
+    # other *Update schema in this app already uses. Changing either
+    # date is re-validated against every OTHER goal's range the same
+    # way creating a new goal is (see update_goal) - this wasn't
+    # possible via the API at all before (only start_date/end_date at
+    # creation time, or the auto-truncation side effect of creating the
+    # NEXT goal, ever set these).
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    kcal_target: Optional[Decimal] = None
+    protein_g_target: Optional[Decimal] = None
+    carbs_g_target: Optional[Decimal] = None
+    fat_g_target: Optional[Decimal] = None
+    fiber_g_target: Optional[Decimal] = None
+
+
+class GoalOut(GoalBase):
+    id: int
+    meal_splits: list[MealGoalSplitOut] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MealGoalSplitsUpdate(BaseModel):
+    """
+    Bulk replace all of a goal's meal splits at once - matches the
+    "Meal calorie goal" screen from the design doc, where all meals are
+    edited together on one screen with a hard validation gate: percentages
+    must sum to exactly 100, enforced here as well as in the UI.
+    """
+
+    splits: list[MealGoalSplitIn]
+
+
+PrimaryHormone = Literal["estrogen", "testosterone"]
+
+
+GoalType = Literal["lose", "maintain", "gain"]
+ActivityLevel = Literal["sedentary", "light", "moderate", "active", "very_active"]
+
+
+class UserProfileBase(BaseModel):
+    name: Optional[str] = None
+    profile_pic_path: Optional[str] = None
+    height_cm: Optional[int] = None
+    age: Optional[int] = None
+    # Manual stopgap until Health Connect integration exists on Android -
+    # see UserProfile model docstring.
+    weight_kg: Optional[Decimal] = None
+    # Fixed reference points for the Profile screen's weight-goal summary
+    # - see UserProfile model docstring for why these are NOT superseded
+    # by Health Connect the way weight_kg conceptually is.
+    starting_weight_kg: Optional[Decimal] = None
+    goal_weight_kg: Optional[Decimal] = None
+    primary_hormone: Optional[PrimaryHormone] = None
+    activity_level: Optional[ActivityLevel] = None
+    goal_type: Optional[GoalType] = None
+    timezone: str = "Europe/Copenhagen"
+
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    profile_pic_path: Optional[str] = None
+    height_cm: Optional[int] = None
+    age: Optional[int] = None
+    weight_kg: Optional[Decimal] = None
+    starting_weight_kg: Optional[Decimal] = None
+    goal_weight_kg: Optional[Decimal] = None
+    primary_hormone: Optional[PrimaryHormone] = None
+    activity_level: Optional[ActivityLevel] = None
+    goal_type: Optional[GoalType] = None
+    timezone: Optional[str] = None
+
+
+class UserProfileOut(UserProfileBase):
+    id: int
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WeightHistoryEntryOut(BaseModel):
+    recorded_at: datetime
+    weight_kg: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WeightHistoryEntryIn(BaseModel):
+    recorded_at: datetime
+    weight_kg: Decimal
+
+
+class WeightHistoryReplace(BaseModel):
+    """Body for the bulk-replace PUT - see WeightHistoryEntry's own
+    docstring for why this is always a full replace, never an
+    incremental add."""
+
+    entries: list[WeightHistoryEntryIn]
+
+
+class KcalGoalCalculationResult(BaseModel):
+    """
+    All intermediate values are returned, not just the final number -
+    lets the client show its work (BMR, then TDEE, then the goal
+    adjustment) rather than presenting a single opaque figure.
+
+    All values are whole integers - fractional calories aren't
+    meaningful to a user. recommended_kcal/kcal_low/kcal_high are further
+    rounded to the nearest 25, since a number like "1636" is both false
+    precision (the formula is only accurate to ~10% to begin with, which
+    is a wider margin than a 25-kcal step) and awkward to actually track
+    against day to day - a round number is both more honest and more
+    usable.
+
+    kcal_low/kcal_high express the formula's own accuracy margin (~10%,
+    per Frankenfield et al. 2005 - see calculate_kcal_goal's docstring)
+    as an honest range, rather than presenting recommended_kcal as if it
+    were precise to the calorie.
+    """
+
+    bmr: int
+    tdee: int
+    recommended_kcal: int
+    kcal_low: int
+    kcal_high: int
+    floor_applied: bool  # true if the 1500 kcal/day safety floor kicked in
+
+
+class PhysiologicalGuidelineOut(BaseModel):
+    """
+    Read-only mirror of PhysiologicalGuideline -- these rows are seeded
+    once via migration (824c17bcbba4_seed_physiological_guidelines) and
+    never written to by the app itself, so this is response-only, no
+    matching Create/Update schema. min_value/max_value are nullable
+    since some guidelines are one-sided (e.g. a ceiling with no floor).
+    """
+    id: int
+    name: str
+    min_value: Optional[Decimal] = None
+    recommended_value: Optional[Decimal] = None
+    max_value: Optional[Decimal] = None
+    unit: str
+    basis: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
