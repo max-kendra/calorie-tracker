@@ -59,7 +59,7 @@ async def serve_spa_for_plain_navigations(request, call_next):
     always carry the header, are completely unaffected either way.
     """
     path = request.url.path
-    is_api_path = path.startswith("/api/") or path in ("/health",) or path.startswith("/media/") or path.startswith("/assets/")
+    is_api_path = path.startswith("/api/") or path in ("/health", "/docs", "/openapi.json") or path.startswith("/media/") or path.startswith("/assets/")
     has_api_key = bool(request.headers.get("x-api-key"))
     web_dist = "web/dist"
     if not is_api_path and not has_api_key and os.path.isdir(web_dist):

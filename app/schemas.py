@@ -567,6 +567,16 @@ class LogFromMealRequest(BaseModel):
     meal_type: MealType
 
 
+class LogCopyRequest(BaseModel):
+    """Backs POST /logs/copy. meal_type=None keeps each log's own meal
+    (whole-day copy); set it to land everything in one meal."""
+
+    log_ids: list[int] = Field(min_length=1)
+    target_date: date
+    meal_type: Optional[MealType] = None
+    move: bool = False
+
+
 class LogUpdate(BaseModel):
     """Quantity-only edit of an existing log - item_id/recipe_id/date/
     meal_type are NOT editable this way (that's "delete and re-log as

@@ -21,6 +21,7 @@ from app.schemas import (
     DailySummary,
     ExtendedNutritionTotals,
     ItemOut,
+    LogCopyRequest,
     LogCreate,
     LoggedRecipeIngredientOut,
     LogFromMealRequest,
@@ -284,6 +285,42 @@ def create_log(payload: LogCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(log)
     return _log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g)
+
+
+@router.post("/copy", response_model=list[LogOut], status_code=status.HTTP_201_CREATED)
+def copy_logs(payload: LogCopyRequest, db: Session = Depends(get_db)):
+    """Copies (or moves) existing logs to another date/meal in one
+    transaction. Macros are re-snapshotted from the current item/recipe,
+    same as logging it fresh."""
+    ids = list(dict.fromkeys(payload.log_ids))
+    sources = db.query(Log).filter(Log.id.in_(ids)).order_by(Log.id).all()
+    if len(sources) != len(ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more logs not found")
+
+    created = []
+    for src in sources:
+        created.append(
+            _add_log(
+                LogCreate(
+                    date=payload.target_date,
+                    meal_type=payload.meal_type or src.meal_type,
+                    item_id=src.item_id,
+                    recipe_id=src.recipe_id,
+                    serving_size_id=src.serving_size_id,
+                    quantity=src.quantity,
+                ),
+                db,
+            )
+        )
+    if payload.move:
+        for src in sources:
+            db.delete(src)
+    db.commit()
+    out = []
+    for log, item_name, recipe_name, image_path, serving_name, serving_weight_g in created:
+        db.refresh(log)
+        out.append(_log_to_out(log, item_name, recipe_name, image_path, serving_name, serving_weight_g))
+    return out
 
 
 @router.post("/from-meal", response_model=list[LogOut], status_code=status.HTTP_201_CREATED)
