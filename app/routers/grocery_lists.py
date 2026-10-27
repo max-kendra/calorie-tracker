@@ -102,6 +102,21 @@ def update_trip(trip_id: int, payload: GroceryTripUpdate, db: Session = Depends(
     return trip
 
 
+@router.post("/trips/{trip_id}/complete", status_code=status.HTTP_204_NO_CONTENT)
+def complete_trip(trip_id: int, db: Session = Depends(get_db)):
+    """Marks a trip as done: everything planned for it is considered
+    bought, so its entries AND the trip itself are removed (as opposed to
+    delete_trip, which drops the entries back into the pool)."""
+    trip = db.query(GroceryTrip).filter(GroceryTrip.id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    for entry in list(trip.entries):
+        db.delete(entry)
+    db.delete(trip)
+    db.commit()
+    return None
+
+
 @router.delete("/trips/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_trip(trip_id: int, db: Session = Depends(get_db)):
     """Deleting a trip drops its entries back into the unassigned pool

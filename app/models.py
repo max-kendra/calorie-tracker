@@ -288,6 +288,9 @@ class Recipe(Base):
     source_url = Column(String, nullable=True)  # optional link to where this recipe/meal originally came from
     image_path = Column(String, nullable=True)
     servings = Column(Numeric, nullable=False, default=1)
+    # Free-text, read-only-for-humans copy of the complete ingredient
+    # list (spices etc. that aren't tracked as items). Never feeds macros.
+    full_ingredients = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

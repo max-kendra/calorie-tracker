@@ -96,6 +96,7 @@ def _build_recipe_out(recipe: Recipe) -> RecipeOut:
         source_url=recipe.source_url,
         image_path=recipe.image_path,
         servings=recipe.servings,
+        full_ingredients=recipe.full_ingredients,
         created_at=recipe.created_at,
         updated_at=recipe.updated_at,
         last_logged_at=recipe.last_logged_at,
@@ -180,6 +181,7 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
         source_url=payload.source_url,
         image_path=payload.image_path,
         servings=payload.servings,
+        full_ingredients=payload.full_ingredients,
         last_logged_at=func.now(),
     )
     db.add(recipe)

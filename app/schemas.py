@@ -463,6 +463,7 @@ class RecipeBase(BaseModel):
     source_url: Optional[str] = None
     image_path: Optional[str] = None
     servings: Decimal = Decimal("1")
+    full_ingredients: Optional[str] = None
 
 
 class RecipeCreate(RecipeBase):
@@ -480,6 +481,7 @@ class RecipeUpdate(BaseModel):
     source_url: Optional[str] = None
     image_path: Optional[str] = None
     servings: Optional[Decimal] = None
+    full_ingredients: Optional[str] = None
 
 
 class RecipeStepOut(BaseModel):
