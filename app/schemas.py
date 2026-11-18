@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from datetime import date as DateType
 from decimal import Decimal
 from typing import List, Literal, Optional
 
@@ -55,7 +56,9 @@ class GroceryTripCreate(BaseModel):
 
 
 class GroceryTripUpdate(BaseModel):
-    date: Optional[date] = None
+    # Annotating with the bare name would resolve to the field's own
+    # None default inside the class body.
+    date: Optional[DateType] = None
     label: Optional[str] = None
     store_id: Optional[int] = None
 
