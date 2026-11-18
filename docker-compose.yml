@@ -83,7 +83,9 @@ services:
       - |
         while true; do
           err=$$(mktemp)
-          if rclone sync /rclone/db-backups/daily offsite:calorie-tracker/db-backups/daily --exclude "*-latest.sql.gz" --max-delete 5 2>"$$err" &&
+          if { [ "$$(ls /rclone/db-backups/daily 2>/dev/null | grep -vc latest)" -ge 3 ] ||
+               { echo "refusing to sync: fewer than 3 daily backups found locally (backup mount missing?)" >"$$err"; false; }; } &&
+             rclone sync /rclone/db-backups/daily offsite:calorie-tracker/db-backups/daily --exclude "*-latest.sql.gz" --max-delete 5 2>>"$$err" &&
              rclone sync /rclone/db-backups/monthly offsite:calorie-tracker/db-backups/monthly --exclude "*-latest.sql.gz" --max-delete 5 2>>"$$err" &&
              rclone copy /rclone/media offsite:calorie-tracker/media 2>>"$$err"; then
             date +%s > /status/offsite-last-success
