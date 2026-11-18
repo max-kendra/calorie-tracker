@@ -51,9 +51,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SCHEDULE: "@hourly"
       TZ: Europe/Paris
-      BACKUP_KEEP_DAYS: 14
+      BACKUP_KEEP_MINS: 2880
+      BACKUP_KEEP_DAYS: 7
       BACKUP_KEEP_WEEKS: 4
-      BACKUP_KEEP_MONTHS: 6
+      BACKUP_KEEP_MONTHS: 12
     volumes:
       - /mnt/data/calorie-tracker/db-backups:/backups
 
@@ -82,7 +83,8 @@ services:
       - |
         while true; do
           err=$$(mktemp)
-          if rclone copy /rclone/db-backups offsite:calorie-tracker/db-backups 2>"$$err" &&
+          if rclone sync /rclone/db-backups/daily offsite:calorie-tracker/db-backups/daily --exclude "*-latest.sql.gz" --max-delete 5 2>"$$err" &&
+             rclone sync /rclone/db-backups/monthly offsite:calorie-tracker/db-backups/monthly --exclude "*-latest.sql.gz" --max-delete 5 2>>"$$err" &&
              rclone copy /rclone/media offsite:calorie-tracker/media 2>>"$$err"; then
             date +%s > /status/offsite-last-success
             rm -f /status/offsite-error
